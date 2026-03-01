@@ -261,6 +261,20 @@ function findChildEvents(allEvents: SessionEvent[], toolUseId: string): SessionE
   return allEvents.filter((ev) => ev.parent_tool_use_id === toolUseId);
 }
 
+function formatToolError(text: string): string | null {
+  if (text.includes('<tool_use_error>Sibling tool call errored</tool_use_error>')) {
+    return 'Cancelled: a sibling tool call in this batch failed';
+  }
+  if (text.includes('Tool permission request failed')) {
+    const zodMatch = text.match(/ZodError/);
+    if (zodMatch) return 'Permission request failed: invalid response format';
+    return 'Tool permission denied';
+  }
+  if (text.includes('User denied')) return 'Denied by user';
+  if (text.includes('timed out')) return 'Tool call timed out';
+  return null;
+}
+
 function ToolCallBlock({ block, allEvents }: { block: any; allEvents?: SessionEvent[] }) {
   const name = block.name || 'Tool';
   const input = block.input || {};
@@ -268,6 +282,15 @@ function ToolCallBlock({ block, allEvents }: { block: any; allEvents?: SessionEv
   const prompt = input.prompt || '';
 
   const result = allEvents ? findToolResult(allEvents, block.id) : null;
+  const isError = result?.is_error === true;
+  const rawResultText = result
+    ? Array.isArray(result.content)
+      ? result.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
+      : typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
+    : '';
+
+  // Friendly error messages for known patterns
+  const friendlyError = isError ? formatToolError(rawResultText) : null;
   const resultTexts = result
     ? Array.isArray(result.content)
       ? result.content.filter((c: any) => c.type === 'text').map((c: any) => c.text)
@@ -299,10 +322,20 @@ function ToolCallBlock({ block, allEvents }: { block: any; allEvents?: SessionEv
           </div>
         </details>
       )}
-      {result && (
+      {result && isError && friendlyError && (
+        <div style={styles.toolErrorInline}>
+          <span style={styles.toolErrorIcon}>&#10005;</span>
+          <span style={styles.toolErrorText}>{friendlyError}</span>
+          <details style={styles.rawJson}>
+            <summary style={styles.rawJsonToggle}>raw</summary>
+            <pre style={styles.rawJsonContent}>{rawResultText}</pre>
+          </details>
+        </div>
+      )}
+      {result && (!isError || !friendlyError) && (
         <details style={styles.toolResultInline}>
           <summary style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
-            <span className="result-label">Result</span>
+            <span className="result-label">{isError ? 'Error' : 'Result'}</span>
           </summary>
           <div style={styles.toolResultInner}>
             {resultTexts.map((text: string, j: number) => (
@@ -563,6 +596,25 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
+  },
+  toolErrorInline: {
+    marginTop: 6,
+    padding: '5px 8px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    background: 'rgba(248, 81, 73, 0.08)',
+    borderRadius: 4,
+    border: '1px solid rgba(248, 81, 73, 0.2)',
+  },
+  toolErrorIcon: {
+    color: '#f85149',
+    fontSize: 11,
+    flexShrink: 0,
+  },
+  toolErrorText: {
+    fontSize: 12,
+    color: '#f85149',
   },
   toolResultInline: {
     marginTop: 6,

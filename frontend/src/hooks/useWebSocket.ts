@@ -79,7 +79,7 @@ export function useSessionWebSocket(sessionId: string | null) {
             subtype: 'success',
             request_id: requestId,
             response: approved
-              ? { behavior: 'allow', ...(updatedInput ? { updatedInput } : {}) }
+              ? { behavior: 'allow', updatedInput: updatedInput ?? {} }
               : { behavior: 'deny', message: 'User denied' },
           },
         })
