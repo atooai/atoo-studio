@@ -1,0 +1,8 @@
+export const PROXY_PORT = 8080;
+export const INTERNAL_PORT = 0; // random port for internal Express app
+export const WEB_PORT = 3001;
+export const ANTHROPIC_HOST = 'api.anthropic.com';
+export const ANTHROPIC_ORIGIN = `https://${ANTHROPIC_HOST}`;
+export const CERTS_DIR = new URL('../certs/', import.meta.url).pathname;
+export const CA_CERT_PATH = `${CERTS_DIR}ca.pem`;
+export const CA_KEY_PATH = `${CERTS_DIR}ca-key.pem`;

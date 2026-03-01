@@ -1,0 +1,297 @@
+import express from 'express';
+import { WebSocketServer, WebSocket } from 'ws';
+import http from 'http';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
+import { fileURLToPath } from 'url';
+import { store } from '../state/store.js';
+import { v4 as uuidv4 } from 'uuid';
+import { spawnCliProcess } from '../spawner.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export function createWebServer(): http.Server {
+  const app = express();
+  app.use(express.json());
+
+  // API routes for the React frontend
+
+  // List environments
+  app.get('/api/environments', (_req, res) => {
+    const envs = Array.from(store.environments.values()).map((e) => ({
+      id: e.id,
+      machine_name: e.machineName,
+      directory: e.directory,
+      branch: e.branch,
+      registered_at: e.registeredAt.toISOString(),
+    }));
+    res.json(envs);
+  });
+
+  // List sessions
+  app.get('/api/sessions', (_req, res) => {
+    const sessions = Array.from(store.sessions.values()).map((s) => {
+      const env = store.environments.get(s.environmentId);
+      return {
+        id: s.id,
+        title: s.title,
+        status: s.status,
+        environment_id: s.environmentId,
+        directory: env?.directory || null,
+        agent_status: store.getAgentStatus(s.id),
+        created_at: s.createdAt.toISOString(),
+        event_count: s.events.length,
+      };
+    });
+    res.json(sessions);
+  });
+
+  // Get session details
+  app.get('/api/sessions/:id', (req, res) => {
+    const session = store.sessions.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Not found' });
+    res.json({
+      id: session.id,
+      title: session.title,
+      status: session.status,
+      environment_id: session.environmentId,
+      created_at: session.createdAt.toISOString(),
+      events: session.events,
+    });
+  });
+
+  // Create session from frontend — spawns a headless CLI process
+  // The CLI itself creates the session via /remote-control, so we just
+  // spawn it, wait for the CLI's session to appear, and send the message there.
+  app.post('/api/sessions', async (req, res) => {
+    const { message, skip_permissions, cwd } = req.body;
+
+    try {
+      // Track existing sessions so we can detect the new one from the CLI
+      const existingSessionIds = new Set(store.sessions.keys());
+
+      // Spawn a new headless claude /remote-control process
+      console.log(`[web] Spawning headless CLI (skip_permissions=${!!skip_permissions}, cwd=${cwd || '~'})...`);
+      const envId = await spawnCliProcess({ skipPermissions: !!skip_permissions, cwd: cwd || undefined });
+      console.log(`[web] CLI registered as ${envId}`);
+
+      // Wait for the CLI to create its own session (polls every 500ms, up to 15s)
+      const sessionId = await new Promise<string>((resolve, reject) => {
+        let elapsed = 0;
+        const timer = setInterval(() => {
+          elapsed += 500;
+          for (const id of Array.from(store.sessions.keys())) {
+            if (!existingSessionIds.has(id)) {
+              const session = store.sessions.get(id);
+              if (session && session.environmentId === envId) {
+                clearInterval(timer);
+                resolve(id);
+                return;
+              }
+            }
+          }
+          if (elapsed >= 15000) {
+            clearInterval(timer);
+            reject(new Error('Timeout waiting for CLI to create session'));
+          }
+        }, 500);
+      });
+
+      console.log(`[web] CLI created session ${sessionId}`);
+
+      // Wait for the CLI's ingress WebSocket to connect before sending the message
+      if (message) {
+        await new Promise<void>((resolve, reject) => {
+          let elapsed = 0;
+          const check = setInterval(() => {
+            elapsed += 200;
+            const ws = store.ingressClients.get(sessionId);
+            if (ws && ws.readyState === 1) {
+              clearInterval(check);
+              resolve();
+              return;
+            }
+            if (elapsed >= 15000) {
+              clearInterval(check);
+              reject(new Error('Timeout waiting for CLI ingress WebSocket'));
+            }
+          }, 200);
+        });
+
+        console.log(`[web] Ingress WS ready, sending initial message to ${sessionId}`);
+        const event = {
+          uuid: uuidv4(),
+          session_id: sessionId,
+          type: 'user',
+          parent_tool_use_id: null,
+          message: { role: 'user', content: message },
+        };
+        store.addEvent(sessionId, event);
+        store.forwardToIngress(sessionId, event);
+        store.broadcastToSubscribers(sessionId, event);
+        store.setAgentStatus(sessionId, 'active');
+      }
+
+      const session = store.sessions.get(sessionId)!;
+      res.json({
+        id: session.id,
+        title: session.title || message?.substring(0, 50) || 'New Session',
+        status: session.status,
+      });
+    } catch (err: any) {
+      console.error(`[web] Failed to create session:`, err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Send message to existing session
+  app.post('/api/sessions/:id/message', (req, res) => {
+    const session = store.sessions.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Not found' });
+
+    const event = {
+      uuid: uuidv4(),
+      session_id: session.id,
+      type: 'user',
+      parent_tool_use_id: null,
+      message: { role: 'user', content: req.body.message },
+    };
+
+    store.addEvent(session.id, event);
+    store.forwardToIngress(session.id, event);
+    store.broadcastToSubscribers(session.id, event);
+    store.setAgentStatus(session.id, 'active');
+
+    res.json({ success: true });
+  });
+
+  // Send control response (tool approval)
+  app.post('/api/sessions/:id/control-response', (req, res) => {
+    const session = store.sessions.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Not found' });
+
+    const controlResponse = {
+      type: 'control_response',
+      response: req.body,
+      session_id: session.id,
+    };
+
+    store.forwardToIngress(session.id, controlResponse);
+    res.json({ success: true });
+  });
+
+  // Browse directories for folder picker
+  app.get('/api/browse', (req, res) => {
+    const dir = (req.query.path as string) || os.homedir();
+    try {
+      const resolved = path.resolve(dir);
+      const entries = fs.readdirSync(resolved, { withFileTypes: true });
+      const dirs = entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+        .map((e) => ({
+          name: e.name,
+          path: path.join(resolved, e.name),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.json({ current: resolved, parent: path.dirname(resolved), dirs });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Proxy status
+  app.get('/api/status', (_req, res) => {
+    res.json({
+      environments: store.environments.size,
+      sessions: store.sessions.size,
+      active_ingress: store.ingressClients.size,
+      active_subscribers: Array.from(store.subscribeClients.values()).reduce(
+        (sum, set) => sum + set.size,
+        0
+      ),
+    });
+  });
+
+  // Serve frontend static files (production)
+  const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/ws/')) return next();
+    res.sendFile(path.join(frontendDist, 'index.html'), (err) => {
+      if (err) {
+        res.status(200).send(`
+          <html>
+            <body style="font-family:monospace;padding:2em;background:#1a1a2e;color:#e0e0e0">
+              <h1>CCProxy</h1>
+              <p>Frontend not built yet. Run <code>cd frontend && npm run build</code></p>
+              <p>Or use the API directly:</p>
+              <ul>
+                <li>GET <a href="/api/status">/api/status</a></li>
+                <li>GET <a href="/api/environments">/api/environments</a></li>
+                <li>GET <a href="/api/sessions">/api/sessions</a></li>
+              </ul>
+            </body>
+          </html>
+        `);
+      }
+    });
+  });
+
+  const server = http.createServer(app);
+
+  // WebSocket for frontend live updates
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (req, socket, head) => {
+    const url = req.url || '';
+
+    // /ws/sessions/:id — live event stream for frontend
+    const match = url.match(/^\/ws\/sessions\/([^/?]+)/);
+    if (match) {
+      const sessionId = match[1];
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        // Register as a subscriber
+        if (!store.subscribeClients.has(sessionId)) {
+          store.subscribeClients.set(sessionId, new Set());
+        }
+        store.subscribeClients.get(sessionId)!.add(ws);
+
+        // Replay existing events
+        const session = store.sessions.get(sessionId);
+        if (session) {
+          for (const event of session.events) {
+            ws.send(JSON.stringify(event));
+          }
+        }
+
+        ws.on('message', (data) => {
+          try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === 'control_response') {
+              store.forwardToIngress(sessionId, msg);
+            }
+          } catch {}
+        });
+
+        ws.on('close', () => {
+          store.subscribeClients.get(sessionId)?.delete(ws);
+        });
+      });
+    } else if (url.startsWith('/ws/status')) {
+      // Global agent status stream for sidebar
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        store.statusClients.add(ws);
+        // Send current statuses
+        for (const [sid, status] of store.agentStatuses.entries()) {
+          ws.send(JSON.stringify({ type: 'agent_status', status, session_id: sid }));
+        }
+        ws.on('close', () => store.statusClients.delete(ws));
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+
+  return server;
+}
