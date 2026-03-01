@@ -53,6 +53,19 @@ export async function sendMessage(sessionId: string, message: string) {
   return res.json();
 }
 
+export async function forkSession(sessionId: string, afterEventUuid: string, message?: string) {
+  const res = await fetch(`${BASE}/api/sessions/${sessionId}/fork`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ afterEventUuid, message: message || undefined }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to fork session');
+  }
+  return res.json();
+}
+
 export async function sendControlResponse(
   sessionId: string,
   requestId: string,

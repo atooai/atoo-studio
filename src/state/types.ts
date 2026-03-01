@@ -19,6 +19,8 @@ export interface Session {
   createdAt: Date;
   source: string;
   permissionMode?: string;
+  parentSessionId?: string;
+  forkAfterEventUuid?: string;
 }
 
 export interface SessionEvent {

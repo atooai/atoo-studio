@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
-import { sendMessage } from '../api/client.js';
+import { sendMessage, forkSession } from '../api/client.js';
 import { useSessionWebSocket } from '../hooks/useWebSocket.js';
 import ToolApproval from './ToolApproval.js';
 import UserQuestion from './UserQuestion.js';
@@ -9,12 +9,19 @@ import '../markdown.css';
 
 interface Props {
   sessionId: string;
+  onSelectSession?: (id: string) => void;
+  parentSessionId?: string | null;
+  parentTitle?: string | null;
+  forkAfterEventUuid?: string | null;
 }
 
-export default function ChatView({ sessionId }: Props) {
+export default function ChatView({ sessionId, onSelectSession, parentSessionId, parentTitle, forkAfterEventUuid }: Props) {
   const { events, connected, agentStatus, sendControlResponse } = useSessionWebSocket(sessionId);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [forkingAtUuid, setForkingAtUuid] = useState<string | null>(null);
+  const [forkMessage, setForkMessage] = useState('');
+  const [forking, setForking] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,6 +39,20 @@ export default function ChatView({ sessionId }: Props) {
     }
   };
 
+  const handleFork = async (afterEventUuid: string) => {
+    setForking(true);
+    try {
+      const result = await forkSession(sessionId, afterEventUuid, forkMessage.trim() || undefined);
+      setForkingAtUuid(null);
+      setForkMessage('');
+      if (onSelectSession) onSelectSession(result.id);
+    } catch (err: any) {
+      alert(`Fork failed: ${err.message}`);
+    } finally {
+      setForking(false);
+    }
+  };
+
   // Check if a control_request has been responded to
   const respondedRequests = new Set(
     events
@@ -39,6 +60,20 @@ export default function ChatView({ sessionId }: Props) {
       .map((e) => e.response?.request_id)
       .filter(Boolean)
   );
+
+  // Filter to visible events (ones that render something) for fork dividers
+  const visibleEvents = events.filter((e) => {
+    if (e.type === 'system' || e.type === 'keep_alive' || e.type === 'control_response') return false;
+    if (e.type === 'control_request' && e.request?.subtype !== 'can_use_tool') return false;
+    if (e.type === 'user') {
+      const content = e.message?.content;
+      if (Array.isArray(content) && content.every((item: any) => item.type === 'tool_result')) return false;
+      if (e.parent_tool_use_id) return false;
+    }
+    if (e.type === 'assistant' && e.parent_tool_use_id) return false;
+    if (e.type === 'result' && e.parent_tool_use_id) return false;
+    return true;
+  });
 
   return (
     <div style={styles.container}>
@@ -50,17 +85,61 @@ export default function ChatView({ sessionId }: Props) {
       </div>
 
       <div style={styles.messages}>
-        {events.map((event, i) => (
-          <EventMessage
-            key={i}
-            event={event}
-            allEvents={events}
-            respondedRequests={respondedRequests}
-            onControlRespond={sendControlResponse}
-          />
-        ))}
+        {/* Fork point indicator for forked sessions */}
+        {parentSessionId && (
+          <div style={styles.forkIndicator}>
+            <span style={styles.forkIndicatorLine} />
+            <span
+              style={styles.forkIndicatorText}
+              onClick={() => onSelectSession?.(parentSessionId)}
+            >
+              Forked from {parentTitle || parentSessionId} &#8599;
+            </span>
+            <span style={styles.forkIndicatorLine} />
+          </div>
+        )}
 
-{/* questions and approvals are now rendered inline via EventMessage */}
+        {events.map((event, i) => {
+          const rendered = (
+            <EventMessage
+              key={i}
+              event={event}
+              allEvents={events}
+              respondedRequests={respondedRequests}
+              onControlRespond={sendControlResponse}
+            />
+          );
+
+          // Add fork divider after visible events
+          const isVisible = visibleEvents.includes(event);
+          const eventUuid = event.uuid;
+
+          if (!isVisible || !eventUuid) return rendered;
+
+          return (
+            <React.Fragment key={i}>
+              {rendered}
+              <ForkDivider
+                eventUuid={eventUuid}
+                isOpen={forkingAtUuid === eventUuid}
+                forkMessage={forkingAtUuid === eventUuid ? forkMessage : ''}
+                forking={forking}
+                onToggle={() => {
+                  if (forkingAtUuid === eventUuid) {
+                    setForkingAtUuid(null);
+                    setForkMessage('');
+                  } else {
+                    setForkingAtUuid(eventUuid);
+                    setForkMessage('');
+                  }
+                }}
+                onMessageChange={setForkMessage}
+                onFork={() => handleFork(eventUuid)}
+                onCancel={() => { setForkingAtUuid(null); setForkMessage(''); }}
+              />
+            </React.Fragment>
+          );
+        })}
 
         {agentStatus === 'active' && (
           <div style={styles.typingIndicator}>
@@ -99,6 +178,60 @@ export default function ChatView({ sessionId }: Props) {
           Send
         </button>
       </div>
+    </div>
+  );
+}
+
+function ForkDivider({ eventUuid, isOpen, forkMessage, forking, onToggle, onMessageChange, onFork, onCancel }: {
+  eventUuid: string;
+  isOpen: boolean;
+  forkMessage: string;
+  forking: boolean;
+  onToggle: () => void;
+  onMessageChange: (msg: string) => void;
+  onFork: () => void;
+  onCancel: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div
+      style={styles.forkDividerContainer}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div style={styles.forkDividerLine}>
+        {(hovered || isOpen) && (
+          <button
+            style={{
+              ...styles.forkBtn,
+              opacity: isOpen ? 1 : 0.7,
+            }}
+            onClick={onToggle}
+            title="Fork conversation here"
+          >
+            &#9986; Fork
+          </button>
+        )}
+      </div>
+      {isOpen && (
+        <div style={styles.forkDialog}>
+          <textarea
+            style={styles.forkDialogTextarea}
+            placeholder="Optional: message to send in forked session..."
+            value={forkMessage}
+            onChange={(e) => onMessageChange(e.target.value)}
+            rows={2}
+            disabled={forking}
+          />
+          <div style={styles.forkDialogActions}>
+            <button style={styles.forkDialogCancel} onClick={onCancel} disabled={forking}>Cancel</button>
+            <button style={styles.forkDialogConfirm} onClick={onFork} disabled={forking}>
+              {forking ? 'Forking...' : 'Fork'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -161,7 +294,7 @@ function ToolCallBlock({ block, allEvents }: { block: any; allEvents?: SessionEv
           </summary>
           <div style={styles.toolResultInner}>
             {childEvents.map((child, j) => (
-              <EventMessage key={`child-${j}`} event={child} allEvents={allEvents} nested />
+              <EventMessage key={`child-${j}`} event={child} allEvents={allEvents || []} nested />
             ))}
           </div>
         </details>
@@ -515,5 +648,105 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontSize: 14,
     alignSelf: 'flex-end',
+  },
+  forkDividerContainer: {
+    position: 'relative' as const,
+    height: 16,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: '0 -16px',
+    padding: '0 16px',
+  },
+  forkDividerLine: {
+    width: '100%',
+    height: 1,
+    background: 'transparent',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative' as const,
+  },
+  forkBtn: {
+    position: 'absolute' as const,
+    background: '#21262d',
+    color: '#8b949e',
+    border: '1px solid #30363d',
+    borderRadius: 12,
+    padding: '1px 10px',
+    fontSize: 11,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap' as const,
+    zIndex: 1,
+    transition: 'opacity 0.15s ease',
+  },
+  forkDialog: {
+    position: 'absolute' as const,
+    top: 20,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    background: '#161b22',
+    border: '1px solid #30363d',
+    borderRadius: 8,
+    padding: 10,
+    zIndex: 10,
+    width: 320,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+  },
+  forkDialogTextarea: {
+    width: '100%',
+    background: '#0d1117',
+    color: '#e6edf3',
+    border: '1px solid #30363d',
+    borderRadius: 4,
+    padding: 6,
+    fontSize: 12,
+    resize: 'none' as const,
+    fontFamily: 'inherit',
+  },
+  forkDialogActions: {
+    display: 'flex',
+    gap: 6,
+    justifyContent: 'flex-end',
+    marginTop: 6,
+  },
+  forkDialogCancel: {
+    background: 'transparent',
+    color: '#8b949e',
+    border: '1px solid #30363d',
+    borderRadius: 4,
+    padding: '3px 10px',
+    fontSize: 11,
+    cursor: 'pointer',
+  },
+  forkDialogConfirm: {
+    background: '#238636',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 4,
+    padding: '3px 10px',
+    fontSize: 11,
+    cursor: 'pointer',
+  },
+  forkIndicator: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    margin: '8px 0 16px',
+  },
+  forkIndicatorLine: {
+    flex: 1,
+    height: 1,
+    background: '#30363d',
+  },
+  forkIndicatorText: {
+    fontSize: 12,
+    color: '#58a6ff',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap' as const,
+    padding: '2px 8px',
+    background: '#161b22',
+    border: '1px solid #30363d',
+    borderRadius: 12,
   },
 };

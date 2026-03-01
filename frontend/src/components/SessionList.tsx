@@ -237,33 +237,47 @@ export default function SessionList({ selectedId, onSelect }: Props) {
           <div style={styles.empty}>No sessions yet</div>
         )}
         {(() => {
+          // Group by directory
           const groups = new Map<string, SessionSummary[]>();
           for (const s of sessions) {
             const dir = s.directory || 'Unknown';
             if (!groups.has(dir)) groups.set(dir, []);
             groups.get(dir)!.push(s);
           }
-          return Array.from(groups.entries()).map(([dir, items]) => (
-            <div key={dir}>
-              <div style={styles.groupHeader}>
-                <span style={styles.groupIcon}>&#128193;</span>
-                <span style={styles.groupPath}>{dir.replace(/^\/home\/[^/]+/, '~')}</span>
-                <span style={styles.groupCount}>{items.length}</span>
-              </div>
-              {items.map((s) => (
+
+          // Build tree within each group
+          const buildTree = (items: SessionSummary[]) => {
+            const byId = new Map(items.map((s) => [s.id, s]));
+            const children = new Map<string | null, SessionSummary[]>();
+            for (const s of items) {
+              const parentKey = s.parent_session_id && byId.has(s.parent_session_id) ? s.parent_session_id : null;
+              if (!children.has(parentKey)) children.set(parentKey, []);
+              children.get(parentKey)!.push(s);
+            }
+            return children;
+          };
+
+          const renderSessionItem = (s: SessionSummary, depth: number, childrenMap: Map<string | null, SessionSummary[]>) => {
+            const kids = childrenMap.get(s.id) || [];
+            return (
+              <React.Fragment key={s.id}>
                 <div
-                  key={s.id}
                   style={{
                     ...styles.item,
                     ...(s.id === selectedId ? styles.itemSelected : {}),
+                    paddingLeft: 24 + depth * 16,
                   }}
                   onClick={() => onSelect(s.id)}
                 >
                   <div style={styles.itemRow}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={styles.itemTitle}>{s.title}</div>
+                      <div style={styles.itemTitle}>
+                        {depth > 0 && <span style={styles.treeConnector}>{'\u2514\u2500 '}</span>}
+                        {s.title}
+                      </div>
                       <div style={styles.itemMeta}>
                         {s.event_count} events &middot; {s.status}
+                        {s.parent_session_id && <span style={styles.forkedLabel}> &middot; forked</span>}
                       </div>
                     </div>
                     {(agentStatuses[s.id] || s.agent_status) === 'active' && (
@@ -278,9 +292,25 @@ export default function SessionList({ selectedId, onSelect }: Props) {
                     )}
                   </div>
                 </div>
-              ))}
-            </div>
-          ));
+                {kids.map((child) => renderSessionItem(child, depth + 1, childrenMap))}
+              </React.Fragment>
+            );
+          };
+
+          return Array.from(groups.entries()).map(([dir, items]) => {
+            const childrenMap = buildTree(items);
+            const roots = childrenMap.get(null) || [];
+            return (
+              <div key={dir}>
+                <div style={styles.groupHeader}>
+                  <span style={styles.groupIcon}>&#128193;</span>
+                  <span style={styles.groupPath}>{dir.replace(/^\/home\/[^/]+/, '~')}</span>
+                  <span style={styles.groupCount}>{items.length}</span>
+                </div>
+                {roots.map((s) => renderSessionItem(s, 0, childrenMap))}
+              </div>
+            );
+          });
         })()}
       </div>
     </div>
@@ -513,4 +543,14 @@ const styles: Record<string, React.CSSProperties> = {
   itemTitle: { fontSize: 14, fontWeight: 500, marginBottom: 4 },
   itemMeta: { fontSize: 12, color: '#8b949e' },
   empty: { padding: 16, color: '#8b949e', textAlign: 'center', fontSize: 13 },
+  treeConnector: {
+    color: '#484f58',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    marginRight: 2,
+  },
+  forkedLabel: {
+    color: '#8957e5',
+    fontSize: 11,
+  },
 };

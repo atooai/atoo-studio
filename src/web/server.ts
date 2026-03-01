@@ -7,7 +7,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
-import { spawnCliProcess } from '../spawner.js';
+import { spawnCliProcess, spawnForkedCliProcess, buildContextSummary } from '../spawner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +42,8 @@ export function createWebServer(): http.Server {
         agent_status: store.getAgentStatus(s.id),
         created_at: s.createdAt.toISOString(),
         event_count: s.events.length,
+        parent_session_id: s.parentSessionId || null,
+        fork_after_event_uuid: s.forkAfterEventUuid || null,
       };
     });
     res.json(sessions);
@@ -58,6 +60,8 @@ export function createWebServer(): http.Server {
       environment_id: session.environmentId,
       created_at: session.createdAt.toISOString(),
       events: session.events,
+      parent_session_id: session.parentSessionId || null,
+      fork_after_event_uuid: session.forkAfterEventUuid || null,
     });
   });
 
@@ -179,6 +183,110 @@ export function createWebServer(): http.Server {
 
     store.forwardToIngress(session.id, controlResponse);
     res.json({ success: true });
+  });
+
+  // Fork a session at a given event
+  app.post('/api/sessions/:id/fork', async (req, res) => {
+    const { afterEventUuid, message } = req.body;
+    if (!afterEventUuid) {
+      return res.status(400).json({ error: 'afterEventUuid is required' });
+    }
+
+    const parentSession = store.sessions.get(req.params.id);
+    if (!parentSession) return res.status(404).json({ error: 'Session not found' });
+
+    try {
+      // 1. Create forked session in store (copies events, generates linked ID)
+      const forkedSession = store.forkSession(req.params.id, afterEventUuid);
+
+      // Determine directory from parent's environment
+      const parentEnv = store.environments.get(parentSession.environmentId);
+      const directory = parentEnv?.directory || process.env.HOME || os.homedir();
+
+      // 2. Track existing sessions/envs so we can detect the new CLI's session
+      const existingSessionIds = new Set(store.sessions.keys());
+
+      // 3. Spawn CLI process (fork mode)
+      console.log(`[web] Spawning forked CLI for ${forkedSession.id}...`);
+      const envId = await spawnForkedCliProcess({
+        session: forkedSession,
+        directory,
+        skipPermissions: parentSession.permissionMode === 'dangerously-skip-permissions',
+      });
+      console.log(`[web] Forked CLI registered as ${envId}`);
+
+      // 4. Wait for CLI to create its own session
+      const cliSessionId = await new Promise<string>((resolve, reject) => {
+        let elapsed = 0;
+        const timer = setInterval(() => {
+          elapsed += 500;
+          for (const id of Array.from(store.sessions.keys())) {
+            if (!existingSessionIds.has(id) && id !== forkedSession.id) {
+              const sess = store.sessions.get(id);
+              if (sess && sess.environmentId === envId) {
+                clearInterval(timer);
+                resolve(id);
+                return;
+              }
+            }
+          }
+          if (elapsed >= 15000) {
+            clearInterval(timer);
+            reject(new Error('Timeout waiting for forked CLI to create session'));
+          }
+        }, 500);
+      });
+
+      console.log(`[web] Forked CLI created session ${cliSessionId}`);
+
+      // 5. Link: update our forked session's environmentId
+      forkedSession.environmentId = envId;
+
+      // 6. Wait for ingress WS and optionally send initial message
+      if (message) {
+        await new Promise<void>((resolve, reject) => {
+          let elapsed = 0;
+          const check = setInterval(() => {
+            elapsed += 200;
+            const ws = store.ingressClients.get(cliSessionId);
+            if (ws && ws.readyState === 1) {
+              clearInterval(check);
+              resolve();
+              return;
+            }
+            if (elapsed >= 15000) {
+              clearInterval(check);
+              reject(new Error('Timeout waiting for forked CLI ingress WebSocket'));
+            }
+          }, 200);
+        });
+
+        console.log(`[web] Forked ingress WS ready, sending message to ${cliSessionId}`);
+        const event = {
+          uuid: uuidv4(),
+          session_id: cliSessionId,
+          type: 'user',
+          parent_tool_use_id: null,
+          message: { role: 'user', content: message },
+        };
+        store.addEvent(cliSessionId, event);
+        store.forwardToIngress(cliSessionId, event);
+        store.broadcastToSubscribers(cliSessionId, event);
+        store.setAgentStatus(cliSessionId, 'active');
+      }
+
+      res.json({
+        id: forkedSession.id,
+        title: forkedSession.title,
+        status: forkedSession.status,
+        parent_session_id: forkedSession.parentSessionId,
+        fork_after_event_uuid: forkedSession.forkAfterEventUuid,
+        cli_session_id: cliSessionId,
+      });
+    } catch (err: any) {
+      console.error(`[web] Failed to fork session:`, err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Browse directories for folder picker

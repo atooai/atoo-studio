@@ -15,6 +15,8 @@ export interface SessionSummary {
   agent_status: 'idle' | 'active' | 'waiting';
   created_at: string;
   event_count: number;
+  parent_session_id: string | null;
+  fork_after_event_uuid: string | null;
 }
 
 export interface SessionEvent {

@@ -169,6 +169,90 @@ class Store {
     }
   }
 
+  /**
+   * Fork a session at a given event UUID.
+   * Copies events up to (inclusive) the specified event, handling tool_use boundary integrity.
+   * Generates a forked session ID that encodes parent lineage.
+   */
+  forkSession(parentId: string, afterEventUuid: string): Session {
+    const parent = this.sessions.get(parentId);
+    if (!parent) throw new Error(`Parent session not found: ${parentId}`);
+
+    // Find the fork-point event index
+    const forkIdx = parent.events.findIndex((e) => e.uuid === afterEventUuid);
+    if (forkIdx === -1) throw new Error(`Event UUID not found: ${afterEventUuid}`);
+
+    // Copy events up to fork point (inclusive)
+    let events = parent.events.slice(0, forkIdx + 1);
+
+    // Event boundary integrity: if the last event is an assistant message with tool_use blocks,
+    // include the corresponding tool_result user events and any child events
+    const lastEvent = events[events.length - 1];
+    if (lastEvent?.type === 'assistant' && Array.isArray(lastEvent.message?.content)) {
+      const toolUseIds = lastEvent.message.content
+        .filter((b: any) => b.type === 'tool_use')
+        .map((b: any) => b.id);
+
+      if (toolUseIds.length > 0) {
+        // Scan remaining parent events for tool_results and child events
+        for (let i = forkIdx + 1; i < parent.events.length; i++) {
+          const ev = parent.events[i];
+          // Include child events (sub-agent)
+          if (ev.parent_tool_use_id && toolUseIds.includes(ev.parent_tool_use_id)) {
+            events.push(ev);
+            continue;
+          }
+          // Include user events containing tool_result for our tool_use ids
+          if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
+            const hasMatchingResult = ev.message.content.some(
+              (item: any) => item.type === 'tool_result' && toolUseIds.includes(item.tool_use_id)
+            );
+            if (hasMatchingResult) {
+              events.push(ev);
+              continue;
+            }
+          }
+        }
+      }
+    }
+
+    // Generate forked session ID using parent-ID-linking scheme
+    // Extract last 16 hex chars from parent UUID portion
+    const parentUuidPart = parentId.replace('sess_', '');
+    const parentHex = parentUuidPart.replace(/-/g, '');
+    const last16 = parentHex.slice(-16);
+
+    // Build new UUID: first 16 hex = parent's last 16, rest is random
+    const randomPart = crypto.randomBytes(16).toString('hex');
+    const newHex = last16 + randomPart.slice(16);
+    // Format as UUID: 8-4-4-4-12
+    const newUuid = [
+      newHex.slice(0, 8),
+      newHex.slice(8, 12),
+      newHex.slice(12, 16),
+      newHex.slice(16, 20),
+      newHex.slice(20, 32),
+    ].join('-');
+    const forkedId = `sess_${newUuid}`;
+
+    const session: Session = {
+      id: forkedId,
+      title: `Fork of ${parent.title}`,
+      environmentId: parent.environmentId,
+      status: 'active',
+      events: events.map((e) => ({ ...e })), // shallow copy each event
+      createdAt: new Date(),
+      source: 'fork',
+      permissionMode: parent.permissionMode,
+      parentSessionId: parentId,
+      forkAfterEventUuid: afterEventUuid,
+    };
+
+    this.sessions.set(forkedId, session);
+    console.log(`[store] Forked session ${forkedId} from ${parentId} at event ${afterEventUuid}`);
+    return session;
+  }
+
   private generateIngressToken(sessionId: string): string {
     const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
     const payload = Buffer.from(

@@ -1,18 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import SessionList from './components/SessionList.js';
 import ChatView from './components/ChatView.js';
-import { fetchStatus } from './api/client.js';
-import type { ProxyStatus } from './types/index.js';
+import { fetchStatus, fetchSessions } from './api/client.js';
+import type { ProxyStatus, SessionSummary } from './types/index.js';
 
 export default function App() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<ProxyStatus | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
 
   useEffect(() => {
     fetchStatus().then(setStatus);
-    const interval = setInterval(() => fetchStatus().then(setStatus), 5000);
+    fetchSessions().then(setSessions);
+    const interval = setInterval(() => {
+      fetchStatus().then(setStatus);
+      fetchSessions().then(setSessions);
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  const selectedSession = sessions.find((s) => s.id === selectedSessionId);
+  const parentSession = selectedSession?.parent_session_id
+    ? sessions.find((s) => s.id === selectedSession.parent_session_id)
+    : null;
 
   return (
     <div style={styles.app}>
@@ -22,7 +32,13 @@ export default function App() {
       />
       <div style={styles.main}>
         {selectedSessionId ? (
-          <ChatView sessionId={selectedSessionId} />
+          <ChatView
+            sessionId={selectedSessionId}
+            onSelectSession={setSelectedSessionId}
+            parentSessionId={selectedSession?.parent_session_id}
+            parentTitle={parentSession?.title}
+            forkAfterEventUuid={selectedSession?.fork_after_event_uuid}
+          />
         ) : (
           <div style={styles.empty}>
             <h2 style={styles.emptyTitle}>CCProxy</h2>
