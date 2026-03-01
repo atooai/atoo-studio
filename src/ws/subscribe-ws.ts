@@ -42,13 +42,15 @@ export function handleSubscribeUpgrade(
       }
     }
 
-    // Handle messages from browser (control responses — tool approvals)
+    // Handle messages from browser (control responses + control requests)
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'control_response') {
           console.log(`[subscribe-ws] Control response from browser for session ${sessionId}`);
-          // Forward to CLI via ingress WS
+          store.forwardToIngress(sessionId, msg);
+        } else if (msg.type === 'control_request') {
+          console.log(`[subscribe-ws] Control request from browser: ${msg.request?.subtype} for session ${sessionId}`);
           store.forwardToIngress(sessionId, msg);
         } else {
           console.log(`[subscribe-ws] Message from browser: ${msg.type}`);

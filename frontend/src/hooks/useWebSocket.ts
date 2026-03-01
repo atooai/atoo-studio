@@ -3,10 +3,17 @@ import type { SessionEvent } from '../types/index.js';
 
 export type AgentStatus = 'idle' | 'active' | 'waiting';
 
+export interface SessionMeta {
+  permissionMode: string | null;
+  model: string | null;
+  models: Array<{ value: string; displayName: string; description: string }>;
+}
+
 export function useSessionWebSocket(sessionId: string | null) {
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
+  const [meta, setMeta] = useState<SessionMeta>({ permissionMode: null, model: null, models: [] });
   const wsRef = useRef<WebSocket | null>(null);
   const lastStatusRef = useRef<AgentStatus>('idle');
 
@@ -15,6 +22,7 @@ export function useSessionWebSocket(sessionId: string | null) {
 
     setEvents([]);
     setAgentStatus('idle');
+    setMeta({ permissionMode: null, model: null, models: [] });
     lastStatusRef.current = 'idle';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/sessions/${sessionId}`);
@@ -32,6 +40,27 @@ export function useSessionWebSocket(sessionId: string | null) {
           lastStatusRef.current = msg.status;
           setAgentStatus(msg.status);
           return;
+        }
+
+        // Extract mode/model from system init event
+        if (msg.type === 'system' && msg.subtype === 'init') {
+          setMeta((prev) => ({
+            ...prev,
+            permissionMode: msg.permissionMode ?? prev.permissionMode,
+            model: msg.model ?? prev.model,
+          }));
+        }
+
+        // Extract models list + mode from initialize control_response
+        if (msg.type === 'control_response' && msg.response?.subtype === 'success') {
+          const resp = msg.response.response;
+          if (resp?.models && Array.isArray(resp.models)) {
+            setMeta((prev) => ({ ...prev, models: resp.models }));
+          }
+          // set_permission_mode success → update mode
+          if (resp?.mode && typeof resp.mode === 'string') {
+            setMeta((prev) => ({ ...prev, permissionMode: resp.mode }));
+          }
         }
 
         // Derive status from replayed/live events
@@ -88,5 +117,23 @@ export function useSessionWebSocket(sessionId: string | null) {
     []
   );
 
-  return { events, connected, agentStatus, sendControlResponse };
+  const sendControlRequest = useCallback(
+    (subtype: string, params: Record<string, any>) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+      const requestId = crypto.randomUUID();
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'control_request',
+          request: {
+            subtype,
+            request_id: requestId,
+            ...params,
+          },
+        })
+      );
+    },
+    []
+  );
+
+  return { events, connected, agentStatus, meta, sendControlResponse, sendControlRequest };
 }

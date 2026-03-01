@@ -16,7 +16,7 @@ interface Props {
 }
 
 export default function ChatView({ sessionId, onSelectSession, parentSessionId, parentTitle, forkAfterEventUuid }: Props) {
-  const { events, connected, agentStatus, sendControlResponse } = useSessionWebSocket(sessionId);
+  const { events, connected, agentStatus, meta, sendControlResponse, sendControlRequest } = useSessionWebSocket(sessionId);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [forkingAtUuid, setForkingAtUuid] = useState<string | null>(null);
@@ -161,22 +161,70 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
       </div>
 
       <div style={styles.inputArea}>
-        <textarea
-          style={styles.textarea}
-          placeholder="Send a message..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          rows={3}
-        />
-        <button style={styles.sendBtn} onClick={handleSend} disabled={sending}>
-          Send
-        </button>
+        <div style={styles.inputRow}>
+          <textarea
+            style={styles.textarea}
+            placeholder="Send a message..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            rows={3}
+          />
+          <button style={styles.sendBtn} onClick={handleSend} disabled={sending}>
+            Send
+          </button>
+        </div>
+        <div style={styles.controlsRow}>
+          <label style={styles.controlLabel}>
+            <span style={styles.controlLabelText}>Mode</span>
+            <select
+              style={styles.controlSelect}
+              value={meta.permissionMode || 'default'}
+              onChange={(e) => sendControlRequest('set_permission_mode', { mode: e.target.value })}
+            >
+              <option value="default">Always Ask</option>
+              <option value="acceptEdits">Accept Edits</option>
+              <option value="plan">Plan Mode</option>
+              <option value="dontAsk">Don't Ask</option>
+              <option value="bypassPermissions">Bypass Permissions</option>
+            </select>
+          </label>
+          <label style={styles.controlLabel}>
+            <span style={styles.controlLabelText}>Model</span>
+            {meta.models.length > 0 ? (
+              <select
+                style={styles.controlSelect}
+                value={meta.model || ''}
+                onChange={(e) => sendControlRequest('set_model', { model: e.target.value })}
+              >
+                {meta.models.map((m) => (
+                  <option key={m.value} value={m.value}>{m.displayName}</option>
+                ))}
+              </select>
+            ) : (
+              <select
+                style={styles.controlSelect}
+                value={meta.model || ''}
+                onChange={(e) => sendControlRequest('set_model', { model: e.target.value })}
+              >
+                {meta.model ? (
+                  <option value={meta.model}>{meta.model}</option>
+                ) : (
+                  <option value="">--</option>
+                )}
+                <option value="claude-opus-4-6">Opus 4.6</option>
+                <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+                <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                <option value="default">Default</option>
+              </select>
+            )}
+          </label>
+        </div>
       </div>
     </div>
   );
@@ -664,6 +712,11 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 12,
     borderTop: '1px solid #30363d',
     display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  inputRow: {
+    display: 'flex',
     gap: 8,
   },
   textarea: {
@@ -676,6 +729,33 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     resize: 'none',
     fontFamily: 'inherit',
+  },
+  controlsRow: {
+    display: 'flex',
+    gap: 12,
+  },
+  controlLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  controlLabelText: {
+    fontSize: 11,
+    color: '#8b949e',
+    textTransform: 'uppercase' as const,
+    fontWeight: 600,
+    letterSpacing: '0.5px',
+  },
+  controlSelect: {
+    background: '#161b22',
+    color: '#e6edf3',
+    border: '1px solid #30363d',
+    borderRadius: 4,
+    padding: '3px 8px',
+    fontSize: 12,
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+    outline: 'none',
   },
   typingIndicator: {
     margin: '12px 0',
