@@ -66,6 +66,7 @@ class Store {
     environment_id: string;
     source?: string;
     permission_mode?: string;
+    fs_uuid?: string;
   }): Session {
     const id = `sess_${uuidv4()}`;
     const session: Session = {
@@ -77,6 +78,7 @@ class Store {
       createdAt: new Date(),
       source: body.source || 'remote-control',
       permissionMode: body.permission_mode,
+      fsUuid: body.fs_uuid,
     };
     this.sessions.set(id, session);
     console.log(`[store] Session created: ${id} for env ${body.environment_id}`);

@@ -18,6 +18,18 @@ export interface SessionSummary {
   parent_session_id: string | null;
   fork_after_event_uuid: string | null;
   change_count?: number;
+  fs_uuid?: string | null;
+}
+
+export interface FsSessionMeta {
+  uuid: string;
+  dirHash: string;
+  directory: string;
+  title: string;
+  lastModified: string;
+  fileSize: number;
+  eventCount: number;
+  jsonlPath: string;
 }
 
 export type ChangeOperation = 'create' | 'modify' | 'delete' | 'rename';

@@ -5,6 +5,7 @@ import { useSessionWebSocket } from '../hooks/useWebSocket.js';
 import ToolApproval from './ToolApproval.js';
 import UserQuestion from './UserQuestion.js';
 import TurnChanges from './TurnChanges.js';
+import TerminalView from './TerminalView.js';
 import type { SessionEvent } from '../types/index.js';
 import '../markdown.css';
 
@@ -23,6 +24,7 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
   const [forkingAtUuid, setForkingAtUuid] = useState<string | null>(null);
   const [forkMessage, setForkMessage] = useState('');
   const [forking, setForking] = useState(false);
+  const [viewMode, setViewMode] = useState<'chat' | 'terminal'>('chat');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -72,6 +74,9 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
       if (e.type === 'user' && !e.parent_tool_use_id) {
         const content = e.message?.content;
         if (Array.isArray(content) && content.every((item: any) => item.type === 'tool_result')) continue;
+        // Skip synthetic/command messages from turn boundary detection
+        const text = typeof content === 'string' ? content : '';
+        if (text.includes('<local-command-caveat>') || text.includes('<command-name>') || text.includes('<local-command-stdout>')) continue;
         userEventIndices.push(i);
       }
     }
@@ -104,6 +109,9 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
       const content = e.message?.content;
       if (Array.isArray(content) && content.every((item: any) => item.type === 'tool_result')) return false;
       if (e.parent_tool_use_id) return false;
+      // Hide caveat messages from fork divider tracking
+      const text = typeof content === 'string' ? content : '';
+      if (text.includes('<local-command-caveat>')) return false;
     }
     if (e.type === 'assistant' && e.parent_tool_use_id) return false;
     if (e.type === 'result' && e.parent_tool_use_id) return false;
@@ -113,13 +121,39 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <span style={styles.sessionId}>{sessionId}</span>
+        <div style={styles.headerLeft}>
+          <div style={styles.viewTabs}>
+            <button
+              style={{
+                ...styles.viewTab,
+                ...(viewMode === 'chat' ? styles.viewTabActive : {}),
+              }}
+              onClick={() => setViewMode('chat')}
+            >
+              Chat
+            </button>
+            <button
+              style={{
+                ...styles.viewTab,
+                ...(viewMode === 'terminal' ? styles.viewTabActive : {}),
+              }}
+              onClick={() => setViewMode('terminal')}
+            >
+              Terminal
+            </button>
+          </div>
+          <span style={styles.sessionId}>{sessionId}</span>
+        </div>
         <span style={{ ...styles.status, color: connected ? '#3fb950' : '#8b949e' }}>
           {connected ? 'Connected' : 'Disconnected'}
         </span>
       </div>
 
-      <div style={styles.messages}>
+      <div style={{ flex: 1, overflow: 'hidden', display: viewMode === 'terminal' ? 'flex' : 'none' }}>
+        <TerminalView sessionId={sessionId} />
+      </div>
+
+      <div style={{ ...styles.messages, display: viewMode === 'chat' ? 'block' : 'none' }}>
         {/* Fork point indicator for forked sessions */}
         {parentSessionId && (
           <div style={styles.forkIndicator}>
@@ -218,7 +252,7 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
         <div ref={bottomRef} />
       </div>
 
-      <div style={styles.inputArea}>
+      <div style={{ ...styles.inputArea, display: viewMode === 'chat' ? 'block' : 'none' }}>
         <div style={styles.inputRow}>
           <textarea
             style={styles.textarea}
@@ -340,6 +374,35 @@ function ForkDivider({ eventUuid, isOpen, forkMessage, forking, onToggle, onMess
       )}
     </div>
   );
+}
+
+// Strip ANSI escape codes from terminal output
+function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\[\?[0-9;]*[a-zA-Z]/g, '');
+}
+
+// Parse special user message formats (slash commands, command output, caveats)
+type ParsedUserContent =
+  | { type: 'caveat' }
+  | { type: 'command'; name: string; args: string }
+  | { type: 'command-output'; text: string }
+  | { type: 'normal'; text: string };
+
+function parseUserContent(text: string): ParsedUserContent {
+  if (text.includes('<local-command-caveat>')) {
+    return { type: 'caveat' };
+  }
+  const cmdMatch = text.match(/<command-name>(.*?)<\/command-name>/);
+  if (cmdMatch) {
+    const argsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
+    return { type: 'command', name: cmdMatch[1], args: argsMatch?.[1]?.trim() || '' };
+  }
+  const stdoutMatch = text.match(/<local-command-stdout>([\s\S]*)<\/local-command-stdout>/);
+  if (stdoutMatch) {
+    return { type: 'command-output', text: stripAnsi(stdoutMatch[1]).trim() };
+  }
+  return { type: 'normal', text };
 }
 
 function RawJson({ data }: { data: any }) {
@@ -520,6 +583,33 @@ function EventMessage({ event, allEvents, nested, respondedRequests, onControlRe
       );
     }
 
+    // Parse special user message formats
+    const parsed = parseUserContent(text);
+
+    if (parsed.type === 'caveat') {
+      // Hide synthetic caveat messages — they're instructions for the AI, not user content
+      return null;
+    }
+
+    if (parsed.type === 'command') {
+      return (
+        <div style={styles.commandMsg}>
+          <span style={styles.commandBadge}>{parsed.name}</span>
+          {parsed.args && <span style={styles.commandArgs}>{parsed.args}</span>}
+          <RawJson data={event} />
+        </div>
+      );
+    }
+
+    if (parsed.type === 'command-output') {
+      return (
+        <div style={styles.commandOutputMsg}>
+          <pre style={styles.commandOutputPre}>{parsed.text}</pre>
+          <RawJson data={event} />
+        </div>
+      );
+    }
+
     return (
       <div style={styles.userMsg}>
         <div style={styles.role}>You <RawJson data={event} /></div>
@@ -664,6 +754,32 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+  },
+  viewTabs: {
+    display: 'flex',
+    background: '#161b22',
+    borderRadius: 6,
+    border: '1px solid #30363d',
+    overflow: 'hidden',
+  },
+  viewTab: {
+    padding: '4px 12px',
+    fontSize: 12,
+    fontWeight: 500,
+    color: '#8b949e',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  viewTabActive: {
+    background: '#30363d',
+    color: '#e6edf3',
   },
   sessionId: { fontSize: 13, fontFamily: 'monospace', color: '#8b949e' },
   status: { fontSize: 12 },
@@ -917,6 +1033,50 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '3px 10px',
     fontSize: 11,
     cursor: 'pointer',
+  },
+  commandMsg: {
+    margin: '6px 0',
+    padding: '6px 12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 6,
+    background: 'rgba(22, 27, 34, 0.4)',
+  },
+  commandBadge: {
+    display: 'inline-block',
+    padding: '2px 10px',
+    background: '#1f2937',
+    color: '#bc8cff',
+    borderRadius: 12,
+    fontSize: 12,
+    fontFamily: 'monospace',
+    fontWeight: 600,
+    border: '1px solid rgba(188, 140, 255, 0.2)',
+  },
+  commandArgs: {
+    fontSize: 12,
+    color: '#8b949e',
+    fontFamily: 'monospace',
+  },
+  commandOutputMsg: {
+    margin: '2px 0 12px',
+    borderRadius: 6,
+    background: '#0d1117',
+    border: '1px solid #21262d',
+    overflow: 'hidden',
+  },
+  commandOutputPre: {
+    margin: 0,
+    padding: '10px 12px',
+    fontSize: 12,
+    fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, monospace",
+    color: '#8b949e',
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
+    lineHeight: 1.5,
+    maxHeight: 300,
+    overflow: 'auto',
   },
   forkIndicator: {
     display: 'flex',

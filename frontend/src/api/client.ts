@@ -100,6 +100,24 @@ export function objectUrl(hash: string): string {
   return `${BASE}/api/objects/${encodeURIComponent(hash)}`;
 }
 
+export async function fetchFsSessions() {
+  const res = await fetch(`${BASE}/api/fs-sessions`);
+  return res.json();
+}
+
+export async function resumeFsSession(uuid: string, options?: { skipPermissions?: boolean }) {
+  const res = await fetch(`${BASE}/api/fs-sessions/${uuid}/resume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skip_permissions: options?.skipPermissions }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to resume session');
+  }
+  return res.json();
+}
+
 export async function sendControlResponse(
   sessionId: string,
   requestId: string,

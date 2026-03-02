@@ -56,10 +56,12 @@ export function spawnCliProcess(options: {
   cwd?: string;
 }): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args: string[] = ['remote-control'];
+    // Pass /remote-control as a prompt arg — Claude interprets it as a slash command
+    const args: string[] = [];
     if (options.skipPermissions) {
-      args.unshift('--dangerously-skip-permissions');
+      args.push('--dangerously-skip-permissions');
     }
+    args.push('/remote-control');
 
     const cwd = options.cwd || process.env.HOME || os.homedir();
 
@@ -114,7 +116,7 @@ export function spawnCliProcess(options: {
     });
 
     // Poll for new environment registration
-    const maxWait = 30000;
+    const maxWait = 60000;
     const pollInterval = 500;
     let elapsed = 0;
 
@@ -182,10 +184,10 @@ export function spawnForkedCliProcess(options: {
       env.UV_USE_IO_URING = '0'; // Force libc open() so LD_PRELOAD can intercept
     }
 
-    // Try --resume first
+    // Try --resume first, pass /remote-control as prompt arg
     const args: string[] = [];
     if (skipPermissions) args.push('--dangerously-skip-permissions');
-    args.push('--resume', sessionUuid, 'remote-control');
+    args.push('--resume', sessionUuid, '/remote-control');
 
     const term = pty.spawn('claude', args, {
       name: 'xterm-256color',
@@ -259,7 +261,7 @@ export function spawnForkedCliProcess(options: {
 }
 
 /**
- * Fallback: spawn a fresh `claude remote-control` and inject conversation context
+ * Fallback: spawn a fresh `claude` and inject conversation context
  * as the first user message after session creation.
  */
 function spawnFreshFallback(
@@ -269,8 +271,10 @@ function spawnFreshFallback(
   forkedSession: Session
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const args: string[] = ['remote-control'];
-    if (skipPermissions) args.unshift('--dangerously-skip-permissions');
+    // Pass /remote-control as prompt arg
+    const args: string[] = [];
+    if (skipPermissions) args.push('--dangerously-skip-permissions');
+    args.push('/remote-control');
 
     // Generate a tracking UUID for preload session mapping
     const preloadSessionId = uuidv4();
@@ -347,6 +351,100 @@ function spawnFreshFallback(
 }
 
 /**
+ * Spawn a CLI process to resume an existing session from its filesystem UUID.
+ * The JSONL file already exists on disk — no need to write it.
+ */
+export function spawnResumeCliProcess(options: {
+  uuid: string;          // Session UUID (JSONL filename)
+  directory: string;     // cwd for the CLI process
+  skipPermissions?: boolean;
+}): Promise<string> {
+  const { uuid, directory, skipPermissions } = options;
+
+  return new Promise((resolve, reject) => {
+    const cwd = directory || process.env.HOME || os.homedir();
+    ensureWorkspaceTrust(cwd);
+
+    const existingEnvIds = new Set(store.environments.keys());
+
+    const preloadSessionId = uuidv4();
+
+    const env = { ...process.env };
+    env.HTTPS_PROXY = `http://localhost:${PROXY_PORT}`;
+    env.NODE_EXTRA_CA_CERTS = CA_CERT_PATH;
+    delete env.CLAUDECODE;
+
+    if (fs.existsSync(PRELOAD_SO_PATH)) {
+      env.LD_PRELOAD = PRELOAD_SO_PATH;
+      env.CCPROXY_SESSION_ID = preloadSessionId;
+      env.CCPROXY_SOCKET_PATH = PRELOAD_SOCKET_PATH;
+      env.UV_USE_IO_URING = '0';
+    }
+
+    // Pass /remote-control as prompt arg after --resume
+    const args: string[] = [];
+    if (skipPermissions) args.push('--dangerously-skip-permissions');
+    args.push('--resume', uuid, '/remote-control');
+
+    const term = pty.spawn('claude', args, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      cwd,
+      env,
+    });
+
+    const pid = term.pid;
+    console.log(`[spawner] Started resume claude (pid=${pid}): claude ${args.join(' ')}`);
+
+    let resolved = false;
+
+    term.onData((data: string) => {
+      const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
+      if (stripped) console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
+    });
+
+    term.onExit(({ exitCode }) => {
+      console.log(`[spawner] resume claude (pid=${pid}) exited with code ${exitCode}`);
+      for (const [envId, proc] of Array.from(spawnedProcesses.entries())) {
+        if (proc.pty === term) {
+          spawnedProcesses.delete(envId);
+          break;
+        }
+      }
+    });
+
+    const maxWait = 30000;
+    const pollInterval = 500;
+    let elapsed = 0;
+
+    const timer = setInterval(() => {
+      elapsed += pollInterval;
+
+      for (const id of Array.from(store.environments.keys())) {
+        if (!existingEnvIds.has(id)) {
+          clearInterval(timer);
+          resolved = true;
+          spawnedProcesses.set(id, { pty: term, envId: id, pid, preloadSessionId });
+          console.log(`[spawner] Resume CLI registered as environment ${id}`);
+          resolve(id);
+          return;
+        }
+      }
+
+      if (elapsed >= maxWait) {
+        clearInterval(timer);
+        if (!resolved) {
+          console.error(`[spawner] Timeout waiting for resume CLI to register`);
+          term.kill();
+          reject(new Error('Timeout waiting for resume CLI to register'));
+        }
+      }
+    }, pollInterval);
+  });
+}
+
+/**
  * Build a context summary from forked session events for injection into a fresh CLI.
  */
 export function buildContextSummary(session: Session): string {
@@ -397,4 +495,18 @@ export function killAllCliProcesses(): void {
     proc.pty.kill();
   }
   spawnedProcesses.clear();
+}
+
+export function getPty(envId: string): pty.IPty | undefined {
+  return spawnedProcesses.get(envId)?.pty;
+}
+
+export function getEnvIdForSession(sessionId: string): string | undefined {
+  const session = store.sessions.get(sessionId);
+  if (!session) return undefined;
+  // Verify the environment still has a spawned process
+  if (spawnedProcesses.has(session.environmentId)) {
+    return session.environmentId;
+  }
+  return undefined;
 }

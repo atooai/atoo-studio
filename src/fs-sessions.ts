@@ -1,0 +1,210 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import readline from 'readline';
+
+export interface FsSessionMeta {
+  uuid: string;           // Filename UUID (the --resume target)
+  dirHash: string;        // e.g., "-home-furti-ccproxy"
+  directory: string;      // Resolved from cwd field in JSONL
+  title: string;          // First user message text, truncated
+  lastModified: string;   // File mtime (ISO)
+  fileSize: number;
+  eventCount: number;     // Approximate line count
+  jsonlPath: string;      // Full path to the .jsonl file
+}
+
+const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+const CACHE_TTL = 30_000; // 30s
+
+class FsSessionScanner {
+  private cache = new Map<string, FsSessionMeta>();
+  private lastScanTime = 0;
+
+  async scan(): Promise<FsSessionMeta[]> {
+    const now = Date.now();
+    if (now - this.lastScanTime < CACHE_TTL && this.cache.size > 0) {
+      return Array.from(this.cache.values());
+    }
+
+    const results: FsSessionMeta[] = [];
+    try {
+      const projectDirs = fs.readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true });
+      for (const dirEntry of projectDirs) {
+        if (!dirEntry.isDirectory()) continue;
+        const dirHash = dirEntry.name;
+        const dirPath = path.join(CLAUDE_PROJECTS_DIR, dirHash);
+        try {
+          const files = fs.readdirSync(dirPath);
+          for (const file of files) {
+            if (!file.endsWith('.jsonl')) continue;
+            const uuid = file.replace('.jsonl', '');
+            // Skip non-UUID filenames
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuid)) continue;
+            const jsonlPath = path.join(dirPath, file);
+            try {
+              const meta = await this.parseSessionMeta(jsonlPath, dirHash, uuid);
+              if (meta) results.push(meta);
+            } catch {
+              // Skip unparseable files
+            }
+          }
+        } catch {
+          // Skip unreadable directories
+        }
+      }
+    } catch {
+      // ~/.claude/projects doesn't exist
+    }
+
+    this.cache.clear();
+    for (const meta of results) {
+      this.cache.set(meta.uuid, meta);
+    }
+    this.lastScanTime = now;
+    return results;
+  }
+
+  private async parseSessionMeta(jsonlPath: string, dirHash: string, uuid: string): Promise<FsSessionMeta | null> {
+    const stat = fs.statSync(jsonlPath);
+    if (stat.size === 0) return null;
+
+    let title = '';
+    let directory = '';
+    let lineCount = 0;
+    let bytesRead = 0;
+    const MAX_LINES = 30;
+    const MAX_BYTES = 64 * 1024; // 64KB max for metadata extraction
+
+    return new Promise((resolve) => {
+      const stream = fs.createReadStream(jsonlPath, {
+        encoding: 'utf-8',
+        start: 0,
+        end: Math.min(stat.size, MAX_BYTES) - 1,
+      });
+      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+      rl.on('line', (line) => {
+        lineCount++;
+        bytesRead += line.length + 1;
+
+        try {
+          const event = JSON.parse(line);
+
+          // Extract cwd from first event that has it
+          if (!directory && event.cwd) {
+            directory = event.cwd;
+          }
+
+          // Extract title from first user message with text content
+          if (!title && event.type === 'user' && event.message?.content) {
+            const content = event.message.content;
+            if (typeof content === 'string') {
+              title = content.trim();
+            } else if (Array.isArray(content)) {
+              const textBlock = content.find((b: any) => b.type === 'text');
+              if (textBlock?.text) {
+                title = textBlock.text.trim();
+              }
+            }
+            if (title) {
+              title = title.substring(0, 100);
+            }
+          }
+        } catch {
+          // Skip unparseable lines
+        }
+
+        if (lineCount >= MAX_LINES && title && directory) {
+          rl.close();
+          stream.destroy();
+        }
+      });
+
+      rl.on('close', () => {
+        // Extrapolate event count from partial read
+        let eventCount = lineCount;
+        if (bytesRead > 0 && bytesRead < stat.size) {
+          eventCount = Math.round((stat.size / bytesRead) * lineCount);
+        }
+
+        // Fallback directory from dir hash
+        if (!directory) {
+          directory = dirHashToPath(dirHash);
+        }
+
+        resolve({
+          uuid,
+          dirHash,
+          directory,
+          title: title || 'Untitled',
+          lastModified: stat.mtime.toISOString(),
+          fileSize: stat.size,
+          eventCount,
+          jsonlPath,
+        });
+      });
+
+      rl.on('error', () => resolve(null));
+    });
+  }
+
+  async readEvents(uuid: string): Promise<any[]> {
+    const meta = this.cache.get(uuid);
+    if (!meta) return [];
+
+    const content = fs.readFileSync(meta.jsonlPath, 'utf-8');
+    const events: any[] = [];
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        // Skip file-history-snapshot events
+        if (event.type === 'file-history-snapshot') continue;
+
+        // Map JSONL fields to SessionEvent format
+        const mapped: any = {
+          uuid: event.uuid,
+          session_id: event.sessionId || event.session_id,
+          type: event.type,
+          message: event.message,
+          timestamp: event.timestamp,
+        };
+
+        // Map parentUuid + isSidechain to parent_tool_use_id
+        if (event.isSidechain && event.parentUuid) {
+          mapped.parent_tool_use_id = event.parentUuid;
+        } else {
+          mapped.parent_tool_use_id = event.parent_tool_use_id || null;
+        }
+
+        events.push(mapped);
+      } catch {
+        // Skip unparseable lines
+      }
+    }
+    return events;
+  }
+
+  getByUuid(uuid: string): FsSessionMeta | undefined {
+    return this.cache.get(uuid);
+  }
+
+  invalidate(): void {
+    this.cache.clear();
+    this.lastScanTime = 0;
+  }
+}
+
+/**
+ * Convert dir hash back to path: "-home-furti-ccproxy" → "/home/furti/ccproxy"
+ * Validates with fs.existsSync().
+ */
+function dirHashToPath(dirHash: string): string {
+  // Replace leading dash, then remaining dashes with /
+  const candidate = '/' + dirHash.replace(/^-/, '').replace(/-/g, '/');
+  if (fs.existsSync(candidate)) return candidate;
+  return dirHash; // fallback: return as-is
+}
+
+export const fsSessionScanner = new FsSessionScanner();

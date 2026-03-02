@@ -7,9 +7,10 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
-import { spawnCliProcess, spawnForkedCliProcess, buildContextSummary, getProcessPid, getPreloadSessionId } from '../spawner.js';
+import { spawnCliProcess, spawnForkedCliProcess, spawnResumeCliProcess, buildContextSummary, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession } from '../spawner.js';
 import { fsMonitor } from '../fs-monitor.js';
 import { changesRouter } from '../handlers/changes.js';
+import { fsSessionScanner } from '../fs-sessions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +48,7 @@ export function createWebServer(): http.Server {
         parent_session_id: s.parentSessionId || null,
         fork_after_event_uuid: s.forkAfterEventUuid || null,
         change_count: fsMonitor.getChangeCount(s.id),
+        fs_uuid: s.fsUuid || null,
       };
     });
     res.json(sessions);
@@ -316,6 +318,92 @@ export function createWebServer(): http.Server {
     }
   });
 
+  // Filesystem sessions — scan ~/.claude/projects for JSONL session files
+  app.get('/api/fs-sessions', async (_req, res) => {
+    try {
+      const sessions = await fsSessionScanner.scan();
+      res.json(sessions);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Resume a filesystem session — spawn CLI with --resume, wait for it to connect
+  app.post('/api/fs-sessions/:uuid/resume', async (req, res) => {
+    const { uuid } = req.params;
+    const { skip_permissions } = req.body || {};
+
+    // Check if already running as an active session
+    for (const s of store.sessions.values()) {
+      if (s.fsUuid === uuid) {
+        return res.json({ id: s.id, fs_uuid: uuid });
+      }
+    }
+
+    try {
+      let sessionMeta = fsSessionScanner.getByUuid(uuid);
+      if (!sessionMeta) {
+        await fsSessionScanner.scan();
+        sessionMeta = fsSessionScanner.getByUuid(uuid);
+        if (!sessionMeta) {
+          return res.status(404).json({ error: 'Session not found in filesystem' });
+        }
+      }
+
+      // Track existing sessions to detect the CLI's new one
+      const existingSessionIds = new Set(store.sessions.keys());
+
+      // Spawn CLI with --resume
+      console.log(`[web] Resuming fs session ${uuid} from ${sessionMeta.directory}...`);
+      const envId = await spawnResumeCliProcess({
+        uuid,
+        directory: sessionMeta.directory,
+        skipPermissions: !!skip_permissions,
+      });
+      console.log(`[web] Resume CLI registered as ${envId}`);
+
+      // Wait for CLI to create its own session
+      const cliSessionId = await new Promise<string>((resolve, reject) => {
+        let elapsed = 0;
+        const timer = setInterval(() => {
+          elapsed += 500;
+          for (const id of Array.from(store.sessions.keys())) {
+            if (!existingSessionIds.has(id)) {
+              const sess = store.sessions.get(id);
+              if (sess && sess.environmentId === envId) {
+                clearInterval(timer);
+                resolve(id);
+                return;
+              }
+            }
+          }
+          if (elapsed >= 15000) {
+            clearInterval(timer);
+            reject(new Error('Timeout waiting for resume CLI to create session'));
+          }
+        }, 500);
+      });
+
+      console.log(`[web] Resume CLI created session ${cliSessionId}`);
+
+      // Tag session with fs UUID and title
+      const cliSession = store.sessions.get(cliSessionId)!;
+      cliSession.title = sessionMeta.title;
+      cliSession.fsUuid = uuid;
+
+      // Set up lightweight filesystem monitoring via LD_PRELOAD session mapping
+      const preloadSid = getPreloadSessionId(envId);
+      if (preloadSid) {
+        fsMonitor.registerSessionMapping(preloadSid, cliSessionId);
+      }
+
+      res.json({ id: cliSessionId, fs_uuid: uuid });
+    } catch (err: any) {
+      console.error(`[web] Failed to resume fs session:`, err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Browse directories for folder picker
   app.get('/api/browse', (req, res) => {
     const dir = (req.query.path as string) || os.homedir();
@@ -352,7 +440,7 @@ export function createWebServer(): http.Server {
   });
 
   // Serve frontend static files (production)
-  const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
+  const frontendDist = path.join(__dirname, '..', '..', '..', 'frontend', 'dist');
   app.use(express.static(frontendDist));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/ws/')) return next();
@@ -448,7 +536,53 @@ export function createWebServer(): http.Server {
         ws.on('close', () => store.statusClients.delete(ws));
       });
     } else {
-      socket.destroy();
+      // /ws/terminal/:sessionId — pty I/O for browser terminal
+      const termMatch = url.match(/^\/ws\/terminal\/([^/?]+)/);
+      if (termMatch) {
+        const sessionId = termMatch[1];
+        const envId = getEnvIdForSession(sessionId);
+        if (!envId) {
+          socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        const ptyProcess = getPty(envId);
+        if (!ptyProcess) {
+          socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          console.log(`[ws:terminal] Browser connected for session ${sessionId}`);
+
+          // Send pty output to browser
+          const dataHandler = ptyProcess.onData((data: string) => {
+            if (ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'output', data }));
+            }
+          });
+
+          // Receive input/resize from browser
+          ws.on('message', (raw) => {
+            try {
+              const msg = JSON.parse(raw.toString());
+              if (msg.type === 'input' && typeof msg.data === 'string') {
+                ptyProcess.write(msg.data);
+              } else if (msg.type === 'resize' && msg.cols && msg.rows) {
+                ptyProcess.resize(msg.cols, msg.rows);
+              }
+            } catch {}
+          });
+
+          ws.on('close', () => {
+            console.log(`[ws:terminal] Browser disconnected for session ${sessionId}`);
+            dataHandler.dispose();
+          });
+        });
+      } else {
+        socket.destroy();
+      }
     }
   });
 

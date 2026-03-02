@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { fetchSessions, fetchEnvironments, createSession, browseDirs } from '../api/client.js';
-import type { SessionSummary, Environment } from '../types/index.js';
+import { fetchSessions, fetchEnvironments, createSession, browseDirs, fetchFsSessions, resumeFsSession } from '../api/client.js';
+import type { SessionSummary, Environment, FsSessionMeta } from '../types/index.js';
 
 interface Props {
   selectedId: string | null;
@@ -121,6 +121,7 @@ function FolderPicker({ value, onChange, disabled }: {
 
 export default function SessionList({ selectedId, onSelect }: Props) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [fsSessions, setFsSessions] = useState<FsSessionMeta[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [cwd, setCwd] = useState('');
@@ -128,10 +129,17 @@ export default function SessionList({ selectedId, onSelect }: Props) {
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [error, setError] = useState('');
   const [agentStatuses, setAgentStatuses] = useState<Record<string, string>>({});
+  const [resumingUuid, setResumingUuid] = useState<string | null>(null);
+
+  const resumingRef = useRef(false);
 
   const refresh = () => {
+    // Skip polling while a resume or create is in progress to avoid
+    // exhausting the browser's per-origin HTTP connection limit
+    if (resumingRef.current) return;
     fetchSessions().then(setSessions);
     fetchEnvironments().then(setEnvironments);
+    fetchFsSessions().then(setFsSessions).catch(() => {});
   };
 
   useEffect(() => {
@@ -233,11 +241,13 @@ export default function SessionList({ selectedId, onSelect }: Props) {
       </div>
 
       <div style={styles.list}>
+        {/* ── Active Sessions ── */}
+        <div style={styles.sectionHeader}>Active Sessions</div>
         {sessions.length === 0 && (
-          <div style={styles.empty}>No sessions yet</div>
+          <div style={styles.empty}>No active sessions</div>
         )}
         {(() => {
-          // Group by directory
+          // Group active sessions by directory
           const groups = new Map<string, SessionSummary[]>();
           for (const s of sessions) {
             const dir = s.directory || 'Unknown';
@@ -245,7 +255,7 @@ export default function SessionList({ selectedId, onSelect }: Props) {
             groups.get(dir)!.push(s);
           }
 
-          // Build tree within each group
+          // Build tree for sessions within a group
           const buildTree = (items: SessionSummary[]) => {
             const byId = new Map(items.map((s) => [s.id, s]));
             const children = new Map<string | null, SessionSummary[]>();
@@ -302,7 +312,7 @@ export default function SessionList({ selectedId, onSelect }: Props) {
             const childrenMap = buildTree(items);
             const roots = childrenMap.get(null) || [];
             return (
-              <div key={dir}>
+              <div key={`active-${dir}`}>
                 <div style={styles.groupHeader}>
                   <span style={styles.groupIcon}>&#128193;</span>
                   <span style={styles.groupPath}>{dir.replace(/^\/home\/[^/]+/, '~')}</span>
@@ -312,6 +322,93 @@ export default function SessionList({ selectedId, onSelect }: Props) {
               </div>
             );
           });
+        })()}
+
+        {/* ── Session History ── */}
+        <div style={styles.sectionHeader}>Session History</div>
+        {fsSessions.length === 0 && (
+          <div style={styles.empty}>No session history</div>
+        )}
+        {(() => {
+          // Group fs sessions by directory
+          const groups = new Map<string, FsSessionMeta[]>();
+          for (const fs of fsSessions) {
+            const dir = fs.directory || 'Unknown';
+            if (!groups.has(dir)) groups.set(dir, []);
+            groups.get(dir)!.push(fs);
+          }
+
+          const handleFsClick = async (meta: FsSessionMeta) => {
+            // If this session is already active, navigate to it
+            const existing = sessions.find((s) => s.fs_uuid === meta.uuid);
+            if (existing) {
+              onSelect(existing.id);
+              return;
+            }
+            if (resumingUuid) return;
+            setResumingUuid(meta.uuid);
+            resumingRef.current = true;
+            try {
+              const result = await resumeFsSession(meta.uuid, { skipPermissions });
+              resumingRef.current = false;
+              refresh();
+              onSelect(result.id);
+            } catch (err: any) {
+              setError(err.message || 'Failed to resume session');
+            } finally {
+              setResumingUuid(null);
+              resumingRef.current = false;
+            }
+          };
+
+          return Array.from(groups.entries())
+            .sort(([, a], [, b]) => {
+              const latestA = Math.max(...a.map((m) => new Date(m.lastModified).getTime()));
+              const latestB = Math.max(...b.map((m) => new Date(m.lastModified).getTime()));
+              return latestB - latestA;
+            })
+            .map(([dir, items]) => {
+              items.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+              return (
+                <div key={`history-${dir}`}>
+                  <div style={styles.groupHeader}>
+                    <span style={styles.groupIcon}>&#128193;</span>
+                    <span style={styles.groupPath}>{dir.replace(/^\/home\/[^/]+/, '~')}</span>
+                    <span style={styles.groupCount}>{items.length}</span>
+                  </div>
+                  {items.map((meta) => {
+                    const isResuming = resumingUuid === meta.uuid;
+                    const isActive = sessions.some((s) => s.fs_uuid === meta.uuid);
+                    return (
+                      <div
+                        key={`fs-${meta.uuid}`}
+                        style={{
+                          ...styles.item,
+                          ...styles.fsItem,
+                          ...(isResuming ? styles.fsItemResuming : {}),
+                          ...(isActive ? styles.fsItemActive : {}),
+                          cursor: isResuming ? 'wait' : 'pointer',
+                        }}
+                        onClick={() => handleFsClick(meta)}
+                      >
+                        <div style={styles.itemRow}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ ...styles.itemTitle, ...styles.fsItemTitle }}>
+                              {meta.title}
+                            </div>
+                            <div style={styles.itemMeta}>
+                              ~{meta.eventCount} events &middot; {new Date(meta.lastModified).toLocaleDateString()}
+                              {isResuming && <span style={styles.resumingLabel}> &middot; Resuming...</span>}
+                              {isActive && <span style={styles.activeLabel}> &middot; running</span>}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            });
         })()}
       </div>
     </div>
@@ -544,6 +641,43 @@ const styles: Record<string, React.CSSProperties> = {
   itemTitle: { fontSize: 14, fontWeight: 500, marginBottom: 4 },
   itemMeta: { fontSize: 12, color: '#8b949e' },
   empty: { padding: 16, color: '#8b949e', textAlign: 'center', fontSize: 13 },
+  sectionHeader: {
+    padding: '10px 12px 6px',
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#8b949e',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    borderBottom: '1px solid #21262d',
+    background: '#0d1117',
+    position: 'sticky' as const,
+    top: 0,
+    zIndex: 2,
+  },
+  fsItem: {
+    opacity: 0.6,
+  },
+  fsItemResuming: {
+    opacity: 0.8,
+    background: '#161b22',
+  },
+  fsItemActive: {
+    opacity: 0.8,
+    borderLeft: '2px solid #238636',
+  },
+  fsItemTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  resumingLabel: {
+    color: '#58a6ff',
+    fontSize: 11,
+  },
+  activeLabel: {
+    color: '#238636',
+    fontSize: 11,
+  },
   treeConnector: {
     color: '#484f58',
     fontFamily: 'monospace',
