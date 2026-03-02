@@ -73,6 +73,7 @@ class FsSessionScanner {
     let directory = '';
     let lineCount = 0;
     let bytesRead = 0;
+    let hasConversationEvent = false;
     const MAX_LINES = 30;
     const MAX_BYTES = 64 * 1024; // 64KB max for metadata extraction
 
@@ -90,6 +91,11 @@ class FsSessionScanner {
 
         try {
           const event = JSON.parse(line);
+
+          // Track whether file has real conversation events (not just snapshots)
+          if (event.type && event.type !== 'file-history-snapshot') {
+            hasConversationEvent = true;
+          }
 
           // Extract cwd from first event that has it
           if (!directory && event.cwd) {
@@ -122,6 +128,13 @@ class FsSessionScanner {
       });
 
       rl.on('close', () => {
+        // Skip files that only contain file-history-snapshot events (ghost files
+        // created by Claude CLI on --resume without any actual conversation)
+        if (!hasConversationEvent) {
+          resolve(null);
+          return;
+        }
+
         // Extrapolate event count from partial read
         let eventCount = lineCount;
         if (bytesRead > 0 && bytesRead < stat.size) {

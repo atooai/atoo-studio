@@ -82,7 +82,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#0d1117',
     color: '#e6edf3',
   },
-  main: { flex: 1, display: 'flex' },
+  main: { flex: 1, display: 'flex', minWidth: 0, overflow: 'hidden' },
   empty: {
     flex: 1,
     display: 'flex',

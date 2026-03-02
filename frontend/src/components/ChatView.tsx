@@ -826,6 +826,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     height: '100vh',
+    minWidth: 0,
+    overflow: 'hidden',
   },
   header: {
     padding: '12px 16px',
@@ -866,6 +868,8 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     overflow: 'auto',
     padding: 16,
+    minWidth: 0,
+    maxWidth: '100%',
   },
   userMsg: {
     margin: '12px 0',
@@ -873,6 +877,10 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#161b22',
     borderRadius: 8,
     borderLeft: '3px solid #58a6ff',
+    minWidth: 0,
+    maxHeight: '33vh',
+    overflowY: 'auto' as const,
+    overflowX: 'hidden' as const,
   },
   assistantMsg: {
     margin: '12px 0',
@@ -880,6 +888,10 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#161b22',
     borderRadius: 8,
     borderLeft: '3px solid #3fb950',
+    minWidth: 0,
+    maxHeight: '33vh',
+    overflowY: 'auto' as const,
+    overflowX: 'hidden' as const,
   },
   role: { fontSize: 11, fontWeight: 600, color: '#8b949e', marginBottom: 4, textTransform: 'uppercase' as const },
   mdToggle: {

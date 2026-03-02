@@ -3,6 +3,9 @@
   font-size: 14px;
   line-height: 1.7;
   word-wrap: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* Headings */
@@ -101,6 +104,8 @@
   border-collapse: collapse;
   margin: 10px 0;
   width: 100%;
+  display: block;
+  overflow-x: auto;
 }
 .md-content th,
 .md-content td {
