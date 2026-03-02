@@ -25,6 +25,7 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
   const [forkMessage, setForkMessage] = useState('');
   const [forking, setForking] = useState(false);
   const [viewMode, setViewMode] = useState<'chat' | 'terminal'>('chat');
+  const [showContextDetail, setShowContextDetail] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,6 +56,21 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
       setForking(false);
     }
   };
+
+  // Extract latest /context usage from events
+  const contextInfo = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.type !== 'user') continue;
+      const content = typeof e.message?.content === 'string' ? e.message.content : '';
+      if (!content.includes('<local-command-stdout>') || !content.includes('Context Usage')) continue;
+      const stdoutMatch = content.match(/<local-command-stdout>([\s\S]*)<\/local-command-stdout>/);
+      if (!stdoutMatch) continue;
+      const info = parseContextOutput(stdoutMatch[1], e);
+      if (info) return info;
+    }
+    return null;
+  }, [events]);
 
   // Check if a control_request has been responded to
   const respondedRequests = new Set(
@@ -316,7 +332,33 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
               </select>
             )}
           </label>
+          {contextInfo && (
+            <span
+              style={styles.contextBar}
+              onClick={() => setShowContextDetail(!showContextDetail)}
+              title="Click to toggle context details"
+            >
+              <span style={styles.contextTokens}>
+                {contextInfo.used}/{contextInfo.total} ({contextInfo.usagePercent}%)
+              </span>
+              <span style={styles.contextDot}>&middot;</span>
+              <span style={{
+                ...styles.contextFree,
+                color: contextInfo.freePercent < 10 ? '#f85149'
+                  : contextInfo.freePercent < 20 ? '#d29922'
+                  : '#8b949e',
+              }}>
+                Free: {contextInfo.freeSpace} ({contextInfo.freePercent}%)
+              </span>
+            </span>
+          )}
         </div>
+        {showContextDetail && contextInfo && (
+          <div style={styles.contextDetailPanel}>
+            <pre style={styles.contextDetailPre}>{contextInfo.fullText}</pre>
+            <RawJson data={contextInfo.rawEvent} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -403,6 +445,39 @@ function parseUserContent(text: string): ParsedUserContent {
     return { type: 'command-output', text: stripAnsi(stdoutMatch[1]).trim() };
   }
   return { type: 'normal', text };
+}
+
+// Parse /context command output into structured data for the status bar
+interface ContextInfo {
+  model: string;
+  used: string;
+  total: string;
+  usagePercent: number;
+  freeSpace: string;
+  freePercent: number;
+  fullText: string;     // stripped text for the detail bubble
+  rawEvent: any;        // original event for the raw JSON toggle
+}
+
+function parseContextOutput(text: string, rawEvent?: any): ContextInfo | null {
+  const stripped = stripAnsi(text).trim();
+
+  const usageMatch = stripped.match(/(claude-[\w.-]+)\s*·\s*([\d.]+k?)\/(\d+k?)\s*tokens\s*\(([\d.]+)%\)/);
+  if (!usageMatch) return null;
+
+  const freeMatch = stripped.match(/Free space:\s*([\d.]+k?)\s*\(([\d.]+)%\)/);
+  if (!freeMatch) return null;
+
+  return {
+    model: usageMatch[1],
+    used: usageMatch[2],
+    total: usageMatch[3],
+    usagePercent: parseFloat(usageMatch[4]),
+    freeSpace: freeMatch[1],
+    freePercent: parseFloat(freeMatch[2]),
+    fullText: stripped,
+    rawEvent: rawEvent || null,
+  };
 }
 
 function RawJson({ data }: { data: any }) {
@@ -592,6 +667,8 @@ function EventMessage({ event, allEvents, nested, respondedRequests, onControlRe
     }
 
     if (parsed.type === 'command') {
+      // Hide /context commands — shown in status bar instead
+      if (parsed.name === '/context') return null;
       return (
         <div style={styles.commandMsg}>
           <span style={styles.commandBadge}>{parsed.name}</span>
@@ -602,6 +679,8 @@ function EventMessage({ event, allEvents, nested, respondedRequests, onControlRe
     }
 
     if (parsed.type === 'command-output') {
+      // Hide /context output — shown in status bar instead
+      if (parsed.text.includes('Context Usage')) return null;
       return (
         <div style={styles.commandOutputMsg}>
           <pre style={styles.commandOutputPre}>{parsed.text}</pre>
@@ -930,6 +1009,48 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'inherit',
     cursor: 'pointer',
     outline: 'none',
+  },
+  contextBar: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 'auto',
+    padding: '3px 10px',
+    background: '#161b22',
+    border: '1px solid #30363d',
+    borderRadius: 4,
+    cursor: 'pointer',
+    fontSize: 11,
+    fontFamily: 'monospace',
+    userSelect: 'none' as const,
+    transition: 'border-color 0.15s ease',
+  },
+  contextTokens: {
+    color: '#8b949e',
+  },
+  contextDot: {
+    color: '#484f58',
+  },
+  contextFree: {
+    fontWeight: 500,
+  },
+  contextDetailPanel: {
+    background: '#0d1117',
+    border: '1px solid #21262d',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  contextDetailPre: {
+    margin: 0,
+    padding: '10px 12px',
+    fontSize: 12,
+    fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, monospace",
+    color: '#8b949e',
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-word' as const,
+    lineHeight: 1.5,
+    maxHeight: 400,
+    overflow: 'auto',
   },
   typingIndicator: {
     margin: '12px 0',
