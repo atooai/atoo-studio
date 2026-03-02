@@ -277,6 +277,7 @@ export default function SessionList({ selectedId, onSelect }: Props) {
                       </div>
                       <div style={styles.itemMeta}>
                         {s.event_count} events &middot; {s.status}
+                        {(s.change_count ?? 0) > 0 && <span> &middot; {s.change_count} files changed</span>}
                         {s.parent_session_id && <span style={styles.forkedLabel}> &middot; forked</span>}
                       </div>
                     </div>

@@ -4,3 +4,6 @@ certs/
 frontend/node_modules/
 frontend/dist/
 *.log
+*.so
+.overlay-bench/
+overlay-bench.sh

@@ -1,9 +1,10 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import Markdown from 'react-markdown';
 import { sendMessage, forkSession } from '../api/client.js';
 import { useSessionWebSocket } from '../hooks/useWebSocket.js';
 import ToolApproval from './ToolApproval.js';
 import UserQuestion from './UserQuestion.js';
+import TurnChanges from './TurnChanges.js';
 import type { SessionEvent } from '../types/index.js';
 import '../markdown.css';
 
@@ -61,6 +62,40 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
       .filter(Boolean)
   );
 
+  // Compute turn boundaries: indices of user messages (top-level, non-tool-result)
+  const turnBoundaries = useMemo(() => {
+    const boundaries: { startTime: number; endTime: number; insertAfterIndex: number }[] = [];
+    const userEventIndices: number[] = [];
+
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i];
+      if (e.type === 'user' && !e.parent_tool_use_id) {
+        const content = e.message?.content;
+        if (Array.isArray(content) && content.every((item: any) => item.type === 'tool_result')) continue;
+        userEventIndices.push(i);
+      }
+    }
+
+    // Each turn is between user messages. Insert TurnChanges before each subsequent user message.
+    for (let j = 1; j < userEventIndices.length; j++) {
+      const prevUserIdx = userEventIndices[j - 1];
+      const nextUserIdx = userEventIndices[j];
+      // Use _receivedAt (epoch seconds stamped on arrival) for turn boundaries
+      const startTime = events[prevUserIdx]?._receivedAt || 0;
+      const endTime = events[nextUserIdx]?._receivedAt || (Date.now() / 1000);
+      boundaries.push({ startTime, endTime, insertAfterIndex: nextUserIdx - 1 });
+    }
+
+    // If agent is idle after the last user message, add a boundary for the current turn
+    if (userEventIndices.length > 0 && agentStatus === 'idle') {
+      const lastIdx = userEventIndices[userEventIndices.length - 1];
+      const startTime = events[lastIdx]?._receivedAt || 0;
+      boundaries.push({ startTime, endTime: Date.now() / 1000, insertAfterIndex: events.length - 1 });
+    }
+
+    return boundaries;
+  }, [events, agentStatus]);
+
   // Filter to visible events (ones that render something) for fork dividers
   const visibleEvents = events.filter((e) => {
     if (e.type === 'system' || e.type === 'keep_alive' || e.type === 'control_response') return false;
@@ -110,15 +145,38 @@ export default function ChatView({ sessionId, onSelectSession, parentSessionId, 
             />
           );
 
+          // Check if a TurnChanges widget should be inserted after this event
+          const turnBoundary = turnBoundaries.find(b => b.insertAfterIndex === i);
+
           // Add fork divider after visible events
           const isVisible = visibleEvents.includes(event);
           const eventUuid = event.uuid;
 
-          if (!isVisible || !eventUuid) return rendered;
+          if (!isVisible || !eventUuid) {
+            return (
+              <React.Fragment key={i}>
+                {rendered}
+                {turnBoundary && (
+                  <TurnChanges
+                    sessionId={sessionId}
+                    startTime={turnBoundary.startTime}
+                    endTime={turnBoundary.endTime}
+                  />
+                )}
+              </React.Fragment>
+            );
+          }
 
           return (
             <React.Fragment key={i}>
               {rendered}
+              {turnBoundary && (
+                <TurnChanges
+                  sessionId={sessionId}
+                  startTime={turnBoundary.startTime}
+                  endTime={turnBoundary.endTime}
+                />
+              )}
               <ForkDivider
                 eventUuid={eventUuid}
                 isOpen={forkingAtUuid === eventUuid}

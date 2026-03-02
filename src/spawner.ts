@@ -2,14 +2,23 @@ import * as pty from 'node-pty';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
+import { fileURLToPath } from 'url';
 import { PROXY_PORT, CA_CERT_PATH } from './config.js';
 import { store } from './state/store.js';
 import { writeSessionJsonl } from './session-writer.js';
 import type { Session } from './state/types.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const PRELOAD_SO_PATH = path.join(__dirname, '..', 'preload', 'ccproxy-preload.so');
+const PRELOAD_SOCKET_PATH = path.join(os.homedir(), '.ccproxy', 'preload.sock');
+
 interface SpawnedProcess {
   pty: pty.IPty;
   envId: string;
+  pid: number;
+  preloadSessionId?: string;
 }
 
 const spawnedProcesses = new Map<string, SpawnedProcess>();
@@ -60,10 +69,21 @@ export function spawnCliProcess(options: {
     // Track existing environments so we can detect the new one
     const existingEnvIds = new Set(store.environments.keys());
 
+    // Generate a tracking UUID for preload session mapping
+    const preloadSessionId = uuidv4();
+
     const env = { ...process.env };
     env.HTTPS_PROXY = `http://localhost:${PROXY_PORT}`;
     env.NODE_EXTRA_CA_CERTS = CA_CERT_PATH;
     delete env.CLAUDECODE; // Prevent "nested session" detection
+
+    // LD_PRELOAD filesystem monitoring
+    if (fs.existsSync(PRELOAD_SO_PATH)) {
+      env.LD_PRELOAD = PRELOAD_SO_PATH;
+      env.CCPROXY_SESSION_ID = preloadSessionId;
+      env.CCPROXY_SOCKET_PATH = PRELOAD_SOCKET_PATH;
+      env.UV_USE_IO_URING = '0'; // Force libc open() so LD_PRELOAD can intercept
+    }
 
     const term = pty.spawn('claude', args, {
       name: 'xterm-256color',
@@ -105,7 +125,7 @@ export function spawnCliProcess(options: {
         if (!existingEnvIds.has(id)) {
           clearInterval(timer);
           resolved = true;
-          spawnedProcesses.set(id, { pty: term, envId: id });
+          spawnedProcesses.set(id, { pty: term, envId: id, pid, preloadSessionId });
           console.log(`[spawner] CLI registered as environment ${id}`);
           resolve(id);
           return;
@@ -146,10 +166,21 @@ export function spawnForkedCliProcess(options: {
 
     const existingEnvIds = new Set(store.environments.keys());
 
+    // Generate a tracking UUID for preload session mapping
+    const preloadSessionId = uuidv4();
+
     const env = { ...process.env };
     env.HTTPS_PROXY = `http://localhost:${PROXY_PORT}`;
     env.NODE_EXTRA_CA_CERTS = CA_CERT_PATH;
     delete env.CLAUDECODE;
+
+    // LD_PRELOAD filesystem monitoring
+    if (fs.existsSync(PRELOAD_SO_PATH)) {
+      env.LD_PRELOAD = PRELOAD_SO_PATH;
+      env.CCPROXY_SESSION_ID = preloadSessionId;
+      env.CCPROXY_SOCKET_PATH = PRELOAD_SOCKET_PATH;
+      env.UV_USE_IO_URING = '0'; // Force libc open() so LD_PRELOAD can intercept
+    }
 
     // Try --resume first
     const args: string[] = [];
@@ -208,7 +239,7 @@ export function spawnForkedCliProcess(options: {
         if (!existingEnvIds.has(id)) {
           clearInterval(timer);
           resolved = true;
-          spawnedProcesses.set(id, { pty: term, envId: id });
+          spawnedProcesses.set(id, { pty: term, envId: id, pid, preloadSessionId });
           console.log(`[spawner] Forked CLI registered as environment ${id}`);
           resolve(id);
           return;
@@ -241,10 +272,21 @@ function spawnFreshFallback(
     const args: string[] = ['remote-control'];
     if (skipPermissions) args.unshift('--dangerously-skip-permissions');
 
+    // Generate a tracking UUID for preload session mapping
+    const preloadSessionId = uuidv4();
+
     const env = { ...process.env };
     env.HTTPS_PROXY = `http://localhost:${PROXY_PORT}`;
     env.NODE_EXTRA_CA_CERTS = CA_CERT_PATH;
     delete env.CLAUDECODE;
+
+    // LD_PRELOAD filesystem monitoring
+    if (fs.existsSync(PRELOAD_SO_PATH)) {
+      env.LD_PRELOAD = PRELOAD_SO_PATH;
+      env.CCPROXY_SESSION_ID = preloadSessionId;
+      env.CCPROXY_SOCKET_PATH = PRELOAD_SOCKET_PATH;
+      env.UV_USE_IO_URING = '0'; // Force libc open() so LD_PRELOAD can intercept
+    }
 
     const term = pty.spawn('claude', args, {
       name: 'xterm-256color',
@@ -285,7 +327,7 @@ function spawnFreshFallback(
         if (!existingEnvIds.has(id)) {
           clearInterval(timer);
           resolved = true;
-          spawnedProcesses.set(id, { pty: term, envId: id });
+          spawnedProcesses.set(id, { pty: term, envId: id, pid, preloadSessionId });
           console.log(`[spawner] Fallback CLI registered as environment ${id}`);
           resolve(id);
           return;
@@ -328,6 +370,14 @@ export function buildContextSummary(session: Session): string {
     }
   }
   return parts.join('\n\n');
+}
+
+export function getProcessPid(envId: string): number | undefined {
+  return spawnedProcesses.get(envId)?.pid;
+}
+
+export function getPreloadSessionId(envId: string): string | undefined {
+  return spawnedProcesses.get(envId)?.preloadSessionId;
 }
 
 export function killCliProcess(envId: string): boolean {

@@ -66,6 +66,40 @@ export async function forkSession(sessionId: string, afterEventUuid: string, mes
   return res.json();
 }
 
+export async function fetchChanges(sessionId: string, from?: number, to?: number) {
+  let url = `${BASE}/api/sessions/${sessionId}/changes`;
+  const params = new URLSearchParams();
+  if (from !== undefined) params.set('from', String(from));
+  if (to !== undefined) params.set('to', String(to));
+  const qs = params.toString();
+  if (qs) url += `?${qs}`;
+  const res = await fetch(url);
+  return res.json();
+}
+
+export async function fetchDiff(sessionId: string, changeId: string) {
+  const res = await fetch(`${BASE}/api/sessions/${sessionId}/changes/${changeId}/diff`);
+  return res.json();
+}
+
+export async function revertChange(sessionId: string, changeId: string) {
+  const res = await fetch(`${BASE}/api/sessions/${sessionId}/changes/${changeId}/revert`, {
+    method: 'POST',
+  });
+  return res.json();
+}
+
+export async function revertAllChanges(sessionId: string) {
+  const res = await fetch(`${BASE}/api/sessions/${sessionId}/changes/revert-all`, {
+    method: 'POST',
+  });
+  return res.json();
+}
+
+export function objectUrl(hash: string): string {
+  return `${BASE}/api/objects/${encodeURIComponent(hash)}`;
+}
+
 export async function sendControlResponse(
   sessionId: string,
   requestId: string,

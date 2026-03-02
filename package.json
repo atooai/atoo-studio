@@ -5,7 +5,9 @@
   "scripts": {
     "setup": "tsx scripts/setup.ts",
     "dev": "tsx --watch src/index.ts",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "build:preload": "make -C preload",
+    "build": "npm run build:preload && tsc"
   },
   "dependencies": {
     "express": "^4.21.0",

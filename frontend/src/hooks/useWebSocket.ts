@@ -84,6 +84,9 @@ export function useSessionWebSocket(sessionId: string | null) {
           setAgentStatus('waiting');
         }
 
+        // Stamp event with receive time (epoch seconds) for turn boundary tracking
+        msg._receivedAt = Date.now() / 1000;
+
         setEvents((prev) => {
           if (msg.uuid && prev.some((ev) => ev.uuid === msg.uuid)) return prev;
           return [...prev, msg];
@@ -131,6 +134,13 @@ export function useSessionWebSocket(sessionId: string | null) {
           },
         })
       );
+      // Optimistically update local state
+      if (subtype === 'set_permission_mode' && params.mode) {
+        setMeta((prev) => ({ ...prev, permissionMode: params.mode }));
+      }
+      if (subtype === 'set_model' && params.model) {
+        setMeta((prev) => ({ ...prev, model: params.model }));
+      }
     },
     []
   );

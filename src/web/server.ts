@@ -7,7 +7,9 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
-import { spawnCliProcess, spawnForkedCliProcess, buildContextSummary } from '../spawner.js';
+import { spawnCliProcess, spawnForkedCliProcess, buildContextSummary, getProcessPid, getPreloadSessionId } from '../spawner.js';
+import { fsMonitor } from '../fs-monitor.js';
+import { changesRouter } from '../handlers/changes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,6 +46,7 @@ export function createWebServer(): http.Server {
         event_count: s.events.length,
         parent_session_id: s.parentSessionId || null,
         fork_after_event_uuid: s.forkAfterEventUuid || null,
+        change_count: fsMonitor.getChangeCount(s.id),
       };
     });
     res.json(sessions);
@@ -103,6 +106,20 @@ export function createWebServer(): http.Server {
       });
 
       console.log(`[web] CLI created session ${sessionId}`);
+
+      // Start filesystem monitoring for this session
+      const cliPid = getProcessPid(envId);
+      const preloadSid = getPreloadSessionId(envId);
+      console.log(`[web] CLI PID for env ${envId}: ${cliPid ?? 'NOT FOUND'}`);
+      if (cliPid) {
+        const cliCwd = cwd || os.homedir();
+        fsMonitor.watchPid(sessionId, cliPid, cliCwd);
+        if (preloadSid) {
+          fsMonitor.registerSessionMapping(preloadSid, sessionId);
+        }
+      } else {
+        console.warn(`[web] No PID found for env ${envId}, filesystem monitoring disabled`);
+      }
 
       // Wait for the CLI's ingress WebSocket to connect before sending the message
       if (message) {
@@ -239,6 +256,16 @@ export function createWebServer(): http.Server {
 
       console.log(`[web] Forked CLI created session ${cliSessionId}`);
 
+      // Start filesystem monitoring for forked session
+      const forkedPid = getProcessPid(envId);
+      const forkedPreloadSid = getPreloadSessionId(envId);
+      if (forkedPid) {
+        fsMonitor.watchPid(cliSessionId, forkedPid, directory);
+        if (forkedPreloadSid) {
+          fsMonitor.registerSessionMapping(forkedPreloadSid, cliSessionId);
+        }
+      }
+
       // 5. Link: update our forked session's environmentId
       forkedSession.environmentId = envId;
 
@@ -308,6 +335,9 @@ export function createWebServer(): http.Server {
     }
   });
 
+  // Mount changes API routes
+  app.use(changesRouter);
+
   // Proxy status
   app.get('/api/status', (_req, res) => {
     res.json({
@@ -348,6 +378,27 @@ export function createWebServer(): http.Server {
 
   const server = http.createServer(app);
 
+  // Broadcast file change events to session subscribers
+  fsMonitor.onChangeEvent((change) => {
+    const event = {
+      type: 'file_change',
+      change: {
+        change_id: change.changeId,
+        session_id: change.sessionId,
+        timestamp: change.timestamp,
+        pid: change.pid,
+        operation: change.operation,
+        path: change.path,
+        old_path: change.oldPath || null,
+        before_hash: change.beforeHash,
+        after_hash: change.afterHash,
+        file_size: change.fileSize,
+        is_binary: change.isBinary,
+      },
+    };
+    store.broadcastToSubscribers(change.sessionId, event);
+  });
+
   // WebSocket for frontend live updates
   const wss = new WebSocketServer({ noServer: true });
 
@@ -376,7 +427,7 @@ export function createWebServer(): http.Server {
         ws.on('message', (data) => {
           try {
             const msg = JSON.parse(data.toString());
-            if (msg.type === 'control_response') {
+            if (msg.type === 'control_response' || msg.type === 'control_request') {
               store.forwardToIngress(sessionId, msg);
             }
           } catch {}

@@ -6,6 +6,7 @@ import { createApiApp } from './router.js';
 import { createWebServer } from './web/server.js';
 import { killAllCliProcesses } from './spawner.js';
 import { PROXY_PORT, WEB_PORT, CA_CERT_PATH } from './config.js';
+import { fsMonitor } from './fs-monitor.js';
 
 async function main() {
   console.log('=== CCProxy ===');
@@ -15,7 +16,10 @@ async function main() {
   const certManager = new CertManager();
   console.log('[init] CA certificate loaded');
 
-  // 2. Create the internal API app (handles decrypted Anthropic traffic)
+  // 2. Connect to filesystem monitor (graceful — no-op if unavailable)
+  fsMonitor.connect().catch(err => console.warn('[init] FS monitor not available:', err.message));
+
+  // 3. Create the internal API app (handles decrypted Anthropic traffic)
   const apiApp = createApiApp();
 
   // 3. Create and start the MITM proxy (bind to 0.0.0.0 for WSL access from Windows)
@@ -41,6 +45,7 @@ async function main() {
   // Graceful shutdown
   process.on('SIGINT', () => {
     console.log('\n[shutdown] Stopping...');
+    fsMonitor.disconnect();
     killAllCliProcesses();
     proxyServer.close();
     webServer.close();
@@ -48,6 +53,7 @@ async function main() {
   });
 
   process.on('SIGTERM', () => {
+    fsMonitor.disconnect();
     killAllCliProcesses();
     proxyServer.close();
     webServer.close();
