@@ -109,6 +109,8 @@ function connectStatusWs() {
               messages: [],
               lastMessage: '',
               viewMode: 'chat',
+              permissionMode: s.permission_mode || null,
+              model: s.model || null,
             });
             connectSessionWs(s.id);
             renderSidebarProjects();
@@ -137,6 +139,8 @@ function connectStatusWs() {
                   messages: [],
                   lastMessage: '',
                   viewMode: 'chat',
+                  permissionMode: newSess.permission_mode || null,
+                  model: newSess.model || null,
                 });
                 connectSessionWs(newSess.id);
                 renderSidebarProjects();
@@ -185,7 +189,7 @@ function connectStatusWs() {
               const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
               const activeSession = activeSessions[proj.activeSessionIdx || 0];
               if (activeSession && activeSession.id === msg.session_id) {
-                updateTokenBar(sess);
+                updateChatStatusBar(sess);
               }
             }
             break;
@@ -274,6 +278,30 @@ function handleSessionEvent(sessionId, event) {
         if (hasAnsi(raw)) return;
         const content = raw.substring(0, 200);
         sess.messages.push({ role: 'tool', content: content, _eventUuid: event.uuid, _rawEvent: event });
+      }
+    } else if (event.type === 'system' && event.subtype === 'init') {
+      // Capture model and permission mode from CLI's system init event
+      if (event.model) sess.model = event.model;
+      if (event.permissionMode) sess.permissionMode = event.permissionMode;
+      // Update status bar if this is the active session
+      if (proj.id === state.activeProjectId) {
+        const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+        const activeSession = activeSessions[proj.activeSessionIdx || 0];
+        if (activeSession && activeSession.id === sess.id) {
+          updateChatStatusBar(sess);
+        }
+      }
+    } else if (event.type === 'system' && event.subtype === 'status') {
+      // Status updates can carry permissionMode changes
+      if (event.permissionMode) {
+        sess.permissionMode = event.permissionMode;
+        if (proj.id === state.activeProjectId) {
+          const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+          const activeSession = activeSessions[proj.activeSessionIdx || 0];
+          if (activeSession && activeSession.id === sess.id) {
+            updateChatStatusBar(sess);
+          }
+        }
       }
     } else if (event.type === 'control_request') {
       // Tool approval needed
@@ -563,6 +591,8 @@ async function selectProject(projectId, peId, fromRouter = false) {
         messages: [],
         lastMessage: '',
         viewMode: 'chat',
+        model: s.model || null,
+        permissionMode: s.permission_mode || null,
       }));
       // Connect WebSocket for each live session
       for (const s of proj.sessions) {
@@ -1914,8 +1944,9 @@ function toggleVerbose() {
 
 function updateChatStatusBar(session) {
   if (!session) return;
-  document.getElementById('cs-mode').value = session.mode || 'ask';
-  document.getElementById('cs-model').value = session.model || 'sonnet';
+  document.getElementById('cs-mode').value = session.permissionMode || 'default';
+  const model = session.model || session.contextUsage?.model || 'claude-sonnet-4-6';
+  document.getElementById('cs-model').value = model;
   updateTokenBar(session);
 }
 
@@ -1947,14 +1978,11 @@ function updateSessionMode(value) {
   const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
   const session = activeSessions[proj.activeSessionIdx || 0];
   if (!session) return;
-  session.mode = value;
-  // Send /permissions slash command via PTY to change mode
-  const modeMap = { ask: 'default', edit: 'auto-edit', bypass: 'full-auto' };
-  const termId = `term-${session.id}`;
-  const inst = terminalInstances[termId];
-  if (inst && inst.ws.readyState === 1) {
-    inst.ws.send(JSON.stringify({ type: 'input', data: `/permissions ${modeMap[value] || value}\r` }));
-  }
+  session.permissionMode = value;
+  // Use PTY Shift+Tab cycling (REPL bridge doesn't support set_permission_mode control requests)
+  api('POST', `/api/sessions/${session.id}/set-mode`, { mode: value }).catch(err => {
+    console.error('[mode] Failed:', err);
+  });
 }
 
 function updateSessionModel(value) {
@@ -1964,12 +1992,19 @@ function updateSessionModel(value) {
   const session = activeSessions[proj.activeSessionIdx || 0];
   if (!session) return;
   session.model = value;
-  // Send /model slash command via PTY to change model
-  const termId = `term-${session.id}`;
-  const inst = terminalInstances[termId];
-  if (inst && inst.ws.readyState === 1) {
-    inst.ws.send(JSON.stringify({ type: 'input', data: `/model ${value}\r` }));
+  // Send set_model control request via session WS
+  const ws = sessionWsMap[session.id];
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type: 'control_request',
+      request_id: crypto.randomUUID(),
+      request: { subtype: 'set_model', model: value },
+    }));
   }
+  // Refresh context usage after model change so token bar updates
+  setTimeout(() => {
+    api('POST', `/api/sessions/${session.id}/refresh-context`).catch(() => {});
+  }, 1000);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2077,8 +2112,14 @@ async function newSession() {
 
   try {
     const result = await api('POST', '/api/sessions', { cwd: proj.path, skip_permissions: true });
-    // Skip if the statusWs session_created broadcast already added this session
-    if (proj.sessions.find(s => s.id === result.id)) return;
+    // If the statusWs session_created broadcast already added this session, update it with API data
+    const existing = proj.sessions.find(s => s.id === result.id);
+    if (existing) {
+      existing.permissionMode = result.permission_mode || 'bypassPermissions';
+      if (result.model) existing.model = result.model;
+      updateChatStatusBar(existing);
+      return;
+    }
     const session = {
       id: result.id,
       title: result.title || 'New session',
@@ -2087,6 +2128,8 @@ async function newSession() {
       messages: [],
       lastMessage: '',
       viewMode: 'chat',
+      permissionMode: result.permission_mode || 'bypassPermissions',
+      model: result.model || null,
     };
     proj.sessions.push(session);
     proj.activeSessionIdx = proj.sessions.filter(s => s.status !== 'ended').length - 1;
@@ -2128,6 +2171,8 @@ async function resumeSession(projId, sessionId) {
           messages: [],
           lastMessage: '',
           viewMode: 'chat',
+          permissionMode: 'bypassPermissions',
+          model: null,
         });
       }
       connectSessionWs(newId);

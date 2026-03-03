@@ -53,6 +53,8 @@ export function createWebServer(): http.Server {
   app.get('/api/sessions', (_req, res) => {
     const sessions = Array.from(store.sessions.values()).map((s) => {
       const env = store.environments.get(s.environmentId);
+      const initEvent = s.events.find((e: any) => e.type === 'system' && e.subtype === 'init');
+      const ctxUsage = store.contextUsages.get(s.id);
       return {
         id: s.id,
         title: s.title,
@@ -66,6 +68,8 @@ export function createWebServer(): http.Server {
         fork_after_event_uuid: s.forkAfterEventUuid || null,
         change_count: fsMonitor.getChangeCount(s.id),
         fs_uuid: s.fsUuid || null,
+        model: initEvent?.model || ctxUsage?.model || null,
+        permission_mode: initEvent?.permissionMode || s.permissionMode || null,
       };
     });
     res.json(sessions);
@@ -126,6 +130,12 @@ export function createWebServer(): http.Server {
 
       console.log(`[web] CLI created session ${sessionId}`);
 
+      // Set initial permission mode based on how the session was spawned
+      const newSession = store.sessions.get(sessionId);
+      if (newSession) {
+        newSession.permissionMode = skip_permissions ? 'bypassPermissions' : 'default';
+      }
+
       // Start filesystem monitoring for this session
       const cliPid = getProcessPid(envId);
       const preloadSid = getPreloadSessionId(envId);
@@ -178,6 +188,7 @@ export function createWebServer(): http.Server {
         id: session.id,
         title: session.title || message?.substring(0, 50) || 'New Session',
         status: session.status,
+        permission_mode: session.permissionMode || null,
       });
     } catch (err: any) {
       console.error(`[web] Failed to create session:`, err.message);
@@ -218,6 +229,85 @@ export function createWebServer(): http.Server {
     };
 
     store.forwardToIngress(session.id, controlResponse);
+    res.json({ success: true });
+  });
+
+  // Change permission mode via PTY Shift+Tab cycling
+  // The REPL bridge doesn't support set_permission_mode control requests.
+  const MODE_CYCLE = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+
+  app.post('/api/sessions/:id/set-mode', (req, res) => {
+    const session = store.sessions.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Not found' });
+
+    const targetMode = req.body.mode;
+    if (!targetMode || !MODE_CYCLE.includes(targetMode)) {
+      return res.status(400).json({ error: `Invalid mode` });
+    }
+
+    const envId = getEnvIdForSession(session.id);
+    if (!envId) return res.status(400).json({ error: 'No environment for session' });
+    const ptyInst = getPty(envId);
+    if (!ptyInst) return res.status(400).json({ error: 'No PTY for session' });
+
+    // Use server-tracked mode (authoritative), not frontend's guess
+    const currentMode = session.permissionMode || 'default';
+    const currentIdx = MODE_CYCLE.indexOf(currentMode);
+    const targetIdx = MODE_CYCLE.indexOf(targetMode);
+    let presses = (targetIdx - currentIdx + MODE_CYCLE.length) % MODE_CYCLE.length;
+    if (presses === 0) return res.json({ success: true, mode: targetMode });
+
+    // Update stored mode
+    session.permissionMode = targetMode;
+
+    console.log(`[web] Cycling permission mode: ${currentMode} → ${targetMode} (${presses} Shift+Tab presses)`);
+
+    let sent = 0;
+    const sendNext = () => {
+      if (sent >= presses) return;
+      ptyInst.write('\x1b[Z');
+      sent++;
+      if (sent < presses) setTimeout(sendNext, 200);
+    };
+    sendNext();
+
+    res.json({ success: true, mode: targetMode });
+  });
+
+  // Trigger /context + /rewind for token usage update
+  app.post('/api/sessions/:id/refresh-context', (req, res) => {
+    const session = store.sessions.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Not found' });
+
+    const envId = getEnvIdForSession(session.id);
+    if (!envId) return res.status(400).json({ error: 'No environment for session' });
+    const ptyInst = getPty(envId);
+    if (!ptyInst) return res.status(400).json({ error: 'No PTY for session' });
+
+    // Type /context + Enter, wait, then /rewind sequence
+    ptyInst.write('/context');
+    setTimeout(() => {
+      ptyInst.write('\r');
+      setTimeout(() => {
+        ptyInst.write('/rewind');
+        setTimeout(() => {
+          ptyInst.write('\r');
+          setTimeout(() => {
+            ptyInst.write('\x1b[A'); // Arrow up
+            setTimeout(() => {
+              ptyInst.write('\r');
+              setTimeout(() => {
+                ptyInst.write('\r');
+                setTimeout(() => {
+                  ptyInst.write('\x7f'.repeat(12)); // backspaces to clear
+                }, 1000);
+              }, 1000);
+            }, 500);
+          }, 1500);
+        }, 200);
+      }, 3000);
+    }, 200);
+
     res.json({ success: true });
   });
 

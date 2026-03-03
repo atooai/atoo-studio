@@ -39,14 +39,20 @@ projectsRouter.get('/api/projects/:id/sessions', (req, res) => {
       const env = store.environments.get(s.environmentId);
       return env?.directory === project.path;
     })
-    .map(s => ({
-      id: s.id,
-      title: s.title,
-      status: s.status,
-      agent_status: store.getAgentStatus(s.id),
-      created_at: s.createdAt.toISOString(),
-      event_count: s.events.length,
-    }));
+    .map(s => {
+      const initEvent = s.events.find((e: any) => e.type === 'system' && e.subtype === 'init');
+      const ctxUsage = store.contextUsages.get(s.id);
+      return {
+        id: s.id,
+        title: s.title,
+        status: s.status,
+        agent_status: store.getAgentStatus(s.id),
+        created_at: s.createdAt.toISOString(),
+        event_count: s.events.length,
+        model: initEvent?.model || ctxUsage?.model || null,
+        permission_mode: initEvent?.permissionMode || s.permissionMode || null,
+      };
+    });
 
   res.json(sessions);
 });

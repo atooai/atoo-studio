@@ -201,18 +201,19 @@ window.addEventListener('unhandledrejection', function(e) {
               <div class="chat-status-item">
                 <span class="chat-status-label">Mode</span>
                 <select id="cs-mode" onchange="updateSessionMode(this.value)">
-                  <option value="ask">Always Ask</option>
-                  <option value="edit">Allow Edit</option>
-                  <option value="bypass">Bypass</option>
+                  <option value="default">Always Ask</option>
+                  <option value="acceptEdits">Auto-Edit</option>
+                  <option value="plan">Plan Mode</option>
+                  <option value="bypassPermissions">Bypass All</option>
                 </select>
               </div>
               <div class="chat-status-sep"></div>
               <div class="chat-status-item">
                 <span class="chat-status-label">Model</span>
                 <select id="cs-model" onchange="updateSessionModel(this.value)">
-                  <option value="opus">Opus</option>
-                  <option value="sonnet" selected>Sonnet</option>
-                  <option value="haiku">Haiku</option>
+                  <option value="claude-opus-4-6">Opus</option>
+                  <option value="claude-sonnet-4-6" selected>Sonnet</option>
+                  <option value="claude-haiku-4-5-20251001">Haiku</option>
                 </select>
               </div>
               <div class="chat-status-sep"></div>
