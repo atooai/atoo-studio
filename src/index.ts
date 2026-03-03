@@ -7,6 +7,7 @@ import { createWebServer } from './web/server.js';
 import { killAllCliProcesses } from './spawner.js';
 import { PROXY_PORT, WEB_PORT, CA_CERT_PATH } from './config.js';
 import { fsMonitor } from './fs-monitor.js';
+import { vccDb } from './state/db.js';
 
 async function main() {
   console.log('=== CCProxy ===');
@@ -47,6 +48,7 @@ async function main() {
     console.log('\n[shutdown] Stopping...');
     fsMonitor.disconnect();
     killAllCliProcesses();
+    vccDb.close();
     proxyServer.close();
     webServer.close();
     process.exit(0);
@@ -55,6 +57,7 @@ async function main() {
   process.on('SIGTERM', () => {
     fsMonitor.disconnect();
     killAllCliProcesses();
+    vccDb.close();
     proxyServer.close();
     webServer.close();
     process.exit(0);

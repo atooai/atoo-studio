@@ -7,10 +7,27 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
+import * as pty from 'node-pty';
 import { spawnCliProcess, spawnForkedCliProcess, spawnResumeCliProcess, buildContextSummary, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession } from '../spawner.js';
 import { fsMonitor } from '../fs-monitor.js';
 import { changesRouter } from '../handlers/changes.js';
+import { projectsRouter } from '../handlers/projects.js';
+import { environmentsRouter, setBroadcastSettingsChange } from '../handlers/environments.js';
 import { fsSessionScanner } from '../fs-sessions.js';
+
+// Standalone shell terminals (not tied to Claude sessions)
+const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
+
+// Broadcast registries for multi-browser terminal/shell connections
+// Each entry keeps a scrollback buffer so late-joining browsers get existing output
+const MAX_SCROLLBACK = 200_000; // characters
+interface TermBroadcast {
+  clients: Set<WebSocket>;
+  handler: { dispose(): void } | null;
+  scrollback: string;
+}
+const terminalClients = new Map<string, TermBroadcast>();
+const shellClients = new Map<string, TermBroadcast>();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,8 +37,8 @@ export function createWebServer(): http.Server {
 
   // API routes for the React frontend
 
-  // List environments
-  app.get('/api/environments', (_req, res) => {
+  // List CLI environments (runtime)
+  app.get('/api/cli-environments', (_req, res) => {
     const envs = Array.from(store.environments.values()).map((e) => ({
       id: e.id,
       machine_name: e.machineName,
@@ -174,7 +191,7 @@ export function createWebServer(): http.Server {
     if (!session) return res.status(404).json({ error: 'Not found' });
 
     const event = {
-      uuid: uuidv4(),
+      uuid: req.body.uuid || uuidv4(),
       session_id: session.id,
       type: 'user',
       parent_tool_use_id: null,
@@ -426,6 +443,60 @@ export function createWebServer(): http.Server {
   // Mount changes API routes
   app.use(changesRouter);
 
+  // Mount project/file/git API routes
+  app.use(projectsRouter);
+
+  // Mount environment API routes
+  app.use(environmentsRouter);
+
+  // List running shell terminals
+  app.get('/api/terminals', (_req, res) => {
+    const terminals = [];
+    for (const [id, entry] of shellTerminals) {
+      terminals.push({ id, cwd: entry.cwd, projectPath: entry.projectPath, pid: entry.pty.pid });
+    }
+    res.json(terminals);
+  });
+
+  // Spawn a standalone shell terminal
+  app.post('/api/terminals', (req, res) => {
+    const { cwd } = req.body || {};
+    const shell = process.env.SHELL || '/bin/bash';
+    const termCwd = cwd || os.homedir();
+    const id = uuidv4();
+
+    try {
+      const term = pty.spawn(shell, [], {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 30,
+        cwd: termCwd,
+        env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
+      });
+      shellTerminals.set(id, { pty: term, cwd: termCwd, projectPath: termCwd });
+
+      // Broadcast terminal_created to all status clients (cross-browser sync)
+      const createdMsg = JSON.stringify({ type: 'terminal_created', terminal: { id, cwd: termCwd, projectPath: termCwd, pid: term.pid } });
+      for (const ws of store.statusClients) {
+        if (ws.readyState === 1) ws.send(createdMsg);
+      }
+
+      term.onExit(() => {
+        shellTerminals.delete(id);
+        // Broadcast terminal_exited to all status clients
+        const exitMsg = JSON.stringify({ type: 'terminal_exited', terminal: { id } });
+        for (const ws of store.statusClients) {
+          if (ws.readyState === 1) ws.send(exitMsg);
+        }
+      });
+
+      console.log(`[shell] Spawned standalone terminal ${id} (PID ${term.pid}) in ${termCwd}`);
+      res.json({ id, pid: term.pid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Proxy status
   app.get('/api/status', (_req, res) => {
     res.json({
@@ -454,7 +525,7 @@ export function createWebServer(): http.Server {
               <p>Or use the API directly:</p>
               <ul>
                 <li>GET <a href="/api/status">/api/status</a></li>
-                <li>GET <a href="/api/environments">/api/environments</a></li>
+                <li>GET <a href="/api/cli-environments">/api/cli-environments</a></li>
                 <li>GET <a href="/api/sessions">/api/sessions</a></li>
               </ul>
             </body>
@@ -485,6 +556,17 @@ export function createWebServer(): http.Server {
       },
     };
     store.broadcastToSubscribers(change.sessionId, event);
+  });
+
+  // Settings WS clients for real-time sync across browser tabs
+  const settingsClients = new Set<WebSocket>();
+  setBroadcastSettingsChange((scope, key, settings, excludeWs) => {
+    const msg = JSON.stringify({ type: 'settings_change', scope, key, settings });
+    for (const ws of settingsClients) {
+      if (ws !== excludeWs && ws.readyState === 1) {
+        ws.send(msg);
+      }
+    }
   });
 
   // WebSocket for frontend live updates
@@ -533,7 +615,17 @@ export function createWebServer(): http.Server {
         for (const [sid, status] of store.agentStatuses.entries()) {
           ws.send(JSON.stringify({ type: 'agent_status', status, session_id: sid }));
         }
+        // Send current context usage
+        for (const [sid, usage] of store.contextUsages.entries()) {
+          ws.send(JSON.stringify({ type: 'context_usage', session_id: sid, ...usage }));
+        }
         ws.on('close', () => store.statusClients.delete(ws));
+      });
+    } else if (url.startsWith('/ws/settings')) {
+      // Settings sync across browser tabs
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        settingsClients.add(ws);
+        ws.on('close', () => settingsClients.delete(ws));
       });
     } else {
       // /ws/terminal/:sessionId — pty I/O for browser terminal
@@ -556,12 +648,34 @@ export function createWebServer(): http.Server {
         wss.handleUpgrade(req, socket, head, (ws) => {
           console.log(`[ws:terminal] Browser connected for session ${sessionId}`);
 
-          // Send pty output to browser
-          const dataHandler = ptyProcess.onData((data: string) => {
-            if (ws.readyState === 1) {
-              ws.send(JSON.stringify({ type: 'output', data }));
-            }
-          });
+          // Get or create broadcast entry for this session's terminal
+          if (!terminalClients.has(sessionId)) {
+            terminalClients.set(sessionId, { clients: new Set(), handler: null, scrollback: '' });
+          }
+          const entry = terminalClients.get(sessionId)!;
+          entry.clients.add(ws);
+
+          // Replay scrollback buffer to this late-joining client
+          if (entry.scrollback) {
+            ws.send(JSON.stringify({ type: 'output', data: entry.scrollback }));
+          }
+
+          // Register single shared onData handler if first client
+          if (!entry.handler) {
+            entry.handler = ptyProcess.onData((data: string) => {
+              // Append to scrollback buffer (ring-trim if too large)
+              entry.scrollback += data;
+              if (entry.scrollback.length > MAX_SCROLLBACK) {
+                entry.scrollback = entry.scrollback.slice(-MAX_SCROLLBACK);
+              }
+              const msg = JSON.stringify({ type: 'output', data });
+              for (const client of entry.clients) {
+                if (client.readyState === 1) {
+                  client.send(msg);
+                }
+              }
+            });
+          }
 
           // Receive input/resize from browser
           ws.on('message', (raw) => {
@@ -577,11 +691,82 @@ export function createWebServer(): http.Server {
 
           ws.on('close', () => {
             console.log(`[ws:terminal] Browser disconnected for session ${sessionId}`);
-            dataHandler.dispose();
+            entry.clients.delete(ws);
+            if (entry.clients.size === 0 && entry.handler) {
+              entry.handler.dispose();
+              entry.handler = null;
+              terminalClients.delete(sessionId);
+            }
           });
         });
       } else {
-        socket.destroy();
+        // /ws/shell/:id — standalone shell terminal
+        const shellMatch = url.match(/^\/ws\/shell\/([^/?]+)/);
+        if (shellMatch) {
+          const shellId = shellMatch[1];
+          const shellEntry = shellTerminals.get(shellId);
+          if (!shellEntry) {
+            socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            console.log(`[ws:shell] Browser connected for shell ${shellId}`);
+            const ptyProcess = shellEntry.pty;
+
+            // Get or create broadcast entry for this shell
+            if (!shellClients.has(shellId)) {
+              shellClients.set(shellId, { clients: new Set(), handler: null, scrollback: '' });
+            }
+            const entry = shellClients.get(shellId)!;
+            entry.clients.add(ws);
+
+            // Replay scrollback buffer to this late-joining client
+            if (entry.scrollback) {
+              ws.send(JSON.stringify({ type: 'output', data: entry.scrollback }));
+            }
+
+            // Register single shared onData handler if first client
+            if (!entry.handler) {
+              entry.handler = ptyProcess.onData((data: string) => {
+                entry.scrollback += data;
+                if (entry.scrollback.length > MAX_SCROLLBACK) {
+                  entry.scrollback = entry.scrollback.slice(-MAX_SCROLLBACK);
+                }
+                const msg = JSON.stringify({ type: 'output', data });
+                for (const client of entry.clients) {
+                  if (client.readyState === 1) {
+                    client.send(msg);
+                  }
+                }
+              });
+            }
+
+            ws.on('message', (raw) => {
+              try {
+                const msg = JSON.parse(raw.toString());
+                if (msg.type === 'input' && typeof msg.data === 'string') {
+                  ptyProcess.write(msg.data);
+                } else if (msg.type === 'resize' && msg.cols && msg.rows) {
+                  ptyProcess.resize(msg.cols, msg.rows);
+                }
+              } catch {}
+            });
+
+            ws.on('close', () => {
+              console.log(`[ws:shell] Browser disconnected for shell ${shellId}`);
+              entry.clients.delete(ws);
+              if (entry.clients.size === 0 && entry.handler) {
+                entry.handler.dispose();
+                entry.handler = null;
+                shellClients.delete(shellId);
+              }
+            });
+          });
+        } else {
+          socket.destroy();
+        }
       }
     }
   });

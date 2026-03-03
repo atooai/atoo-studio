@@ -18,6 +18,7 @@ class Store {
   workItems = new Map<string, WorkItem>();
   pendingPolls = new Map<string, PendingPoll>();
   agentStatuses = new Map<string, AgentStatus>(); // sessionId → status
+  contextUsages = new Map<string, { model: string; usedTokens: number; totalTokens: number; percent: number; freePercent: number }>(); // sessionId → token usage
 
   // WebSocket connections
   subscribeClients = new Map<string, Set<WebSocket>>(); // sessionId → browser WSs
@@ -82,6 +83,25 @@ class Store {
     };
     this.sessions.set(id, session);
     console.log(`[store] Session created: ${id} for env ${body.environment_id}`);
+
+    // Broadcast to all status listeners so other browsers discover the new session
+    const env = this.environments.get(body.environment_id);
+    console.log(`[store] Broadcasting session_created to ${this.statusClients.size} status clients (dir: ${env?.directory || 'null'})`);
+    const msg = JSON.stringify({
+      type: 'session_created',
+      session: {
+        id,
+        title: session.title,
+        status: session.status,
+        environment_id: body.environment_id,
+        directory: env?.directory || null,
+        created_at: session.createdAt.toISOString(),
+      },
+    });
+    for (const ws of this.statusClients) {
+      if (ws.readyState === 1) ws.send(msg);
+    }
+
     return session;
   }
 
@@ -162,6 +182,15 @@ class Store {
 
   getAgentStatus(sessionId: string): AgentStatus {
     return this.agentStatuses.get(sessionId) || 'idle';
+  }
+
+  setContextUsage(sessionId: string, usage: { model: string; usedTokens: number; totalTokens: number; percent: number; freePercent: number }): void {
+    this.contextUsages.set(sessionId, usage);
+    const msg = { type: 'context_usage', session_id: sessionId, ...usage };
+    const data = JSON.stringify(msg);
+    for (const ws of this.statusClients) {
+      if (ws.readyState === 1) ws.send(data);
+    }
   }
 
   forwardToIngress(sessionId: string, message: any): void {
