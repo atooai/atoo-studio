@@ -35,7 +35,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createWebServer(): http.Server {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
 
   // API routes for the React frontend
 
@@ -203,12 +203,24 @@ export function createWebServer(): http.Server {
     const session = store.sessions.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Not found' });
 
+    // Build content: plain string for text-only, content blocks array for attachments
+    let content: any = req.body.message;
+    if (req.body.attachments?.length) {
+      content = [
+        ...req.body.attachments.map((a: any) => ({
+          type: 'image',
+          source: { type: 'base64', media_type: a.media_type, data: a.data },
+        })),
+        { type: 'text', text: req.body.message },
+      ];
+    }
+
     const event = {
       uuid: req.body.uuid || uuidv4(),
       session_id: session.id,
       type: 'user',
       parent_tool_use_id: null,
-      message: { role: 'user', content: req.body.message },
+      message: { role: 'user', content },
     };
 
     store.addEvent(session.id, event);

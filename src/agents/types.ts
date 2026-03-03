@@ -13,6 +13,7 @@ export interface AbstractMessageBase {
 export interface UserMessage extends AbstractMessageBase {
   type: 'user_message';
   text: string;
+  attachments?: Attachment[];
 }
 
 export interface AssistantMessage extends AbstractMessageBase {
@@ -155,7 +156,7 @@ export interface Agent extends EventEmitter {
   destroy(): Promise<void>;
 
   // Messaging
-  sendMessage(text: string): void;
+  sendMessage(text: string, attachments?: Attachment[]): void;
   approve(requestId: string, updatedInput?: any): void;
   deny(requestId: string): void;
   answerQuestion(requestId: string, answers: Record<string, string>): void;
@@ -181,11 +182,21 @@ export interface AgentFactory {
 }
 
 // ═══════════════════════════════════════════════════════
+// Attachment
+// ═══════════════════════════════════════════════════════
+
+export interface Attachment {
+  media_type: string;
+  data: string;      // base64
+  name?: string;
+}
+
+// ═══════════════════════════════════════════════════════
 // Agent WS Command Types (client → server)
 // ═══════════════════════════════════════════════════════
 
 export type AgentCommand =
-  | { action: 'send_message'; text: string }
+  | { action: 'send_message'; text: string; attachments?: Attachment[] }
   | { action: 'approve'; requestId: string; updatedInput?: any }
   | { action: 'deny'; requestId: string }
   | { action: 'answer_question'; requestId: string; answers: Record<string, string> }

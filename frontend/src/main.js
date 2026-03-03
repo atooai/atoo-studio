@@ -1,4 +1,7 @@
 import '@xterm/xterm/css/xterm.css';
+import { marked } from 'marked';
+import hljs from 'highlight.js';
+import 'highlight.js/styles/github-dark.css';
 
 // ═══════════════════════════════════════════════════════
 // STATE
@@ -275,7 +278,15 @@ function handleSessionEvent(sessionId, event) {
       // Skip if we already have this message (sent by us or already received)
       if (sess.messages.some(m => m._eventUuid === event.uuid)) return;
       const displayContent = typeof event.message.content === 'string' ? event.message.content : text;
-      sess.messages.push({ role: 'user', content: displayContent, _eventUuid: event.uuid, _rawEvent: event });
+      // Extract image attachments from content blocks
+      let attachments;
+      if (Array.isArray(event.message.content)) {
+        attachments = event.message.content
+          .filter(b => b.type === 'image' && b.source)
+          .map(b => ({ media_type: b.source.media_type, data: b.source.data }));
+        if (!attachments.length) attachments = undefined;
+      }
+      sess.messages.push({ role: 'user', content: displayContent, _eventUuid: event.uuid, _rawEvent: event, _attachments: attachments });
     } else if (event.type === 'assistant' && event.message) {
       const msg = event.message;
       if (msg.content) {
@@ -411,7 +422,7 @@ function handleAgentMessage(sessionId, msg) {
 
     if (msg.type === 'user_message') {
       if (sess.messages.some(m => m._eventUuid === msg.id)) return;
-      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id });
+      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _attachments: msg.attachments });
     } else if (msg.type === 'assistant_message') {
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
     } else if (msg.type === 'tool_request') {
@@ -1812,9 +1823,29 @@ function renderChat(proj) {
       return renderControlRequest(m, session);
     }
     const isUser = m.role === 'user';
+    const attachHtml = (m._attachments && m._attachments.length)
+      ? m._attachments.map(a => `<img class="chat-attachment-img" src="data:${a.media_type};base64,${a.data}" alt="attachment">`).join('')
+      : '';
+    let bubbleContent;
+    if (isUser) {
+      bubbleContent = escHtml(m.content);
+    } else {
+      const uuid = m._eventUuid || '';
+      const mode = mdToggleState[uuid] || 'md';
+      const toolbar = `<span class="chat-bubble-toolbar"><span class="chat-bubble-btn" onclick="event.stopPropagation(); copyBubble(this)" title="Copy">${svgCopy}</span><span class="chat-bubble-btn" onclick="event.stopPropagation(); toggleMd('${esc(uuid)}')" title="Toggle view mode">${mode}</span></span>`;
+      const rawAttr = `data-raw-md="${escAttr(m.content)}"`;
+      if (mode === 'txt') {
+        bubbleContent = `${toolbar}<div class="chat-text-raw" ${rawAttr}>${escHtml(m.content)}</div>`;
+      } else if (mode === 'raw') {
+        const rawJson = m._rawEvent ? JSON.stringify(m._rawEvent, null, 2) : m.content;
+        bubbleContent = `${toolbar}<div class="chat-text-raw" ${rawAttr}>${escHtml(rawJson)}</div>`;
+      } else {
+        bubbleContent = `${toolbar}<div class="md-content" ${rawAttr}>${renderMd(m.content)}</div>`;
+      }
+    }
     return `<div class="chat-msg ${m.role}">
       <div class="chat-avatar ${isUser ? 'you' : 'claude'}">${isUser ? 'Y' : 'C'}</div>
-      <div class="chat-bubble">${isUser ? escHtml(m.content) : m.content}${rawBtn}</div>
+      <div class="chat-bubble">${attachHtml}${bubbleContent}</div>
     </div>`;
   }).join('');
 
@@ -2311,15 +2342,25 @@ async function sendMessage() {
   const msgUuid = crypto.randomUUID();
   session.status = 'running';
   input.value = '';
+
+  // Collect attachments before clearing
+  const attachments = chatAttachments
+    .filter(a => a.data)
+    .map(a => ({ media_type: a.type, data: a.data, name: a.name }));
   clearAttachments();
 
+  const cmd = { action: 'send_message', text, attachments: attachments.length ? attachments : undefined };
+
   // Use agent WS if available, otherwise fall back to HTTP
-  if (sendAgentCommand(session.id, { action: 'send_message', text })) {
+  if (sendAgentCommand(session.id, cmd)) {
     // Agent WS will echo back user_message — no local push needed
   } else {
     session.messages.push({ role: 'user', content: text, _eventUuid: msgUuid });
     try {
-      await api('POST', `/api/sessions/${session.id}/message`, { message: text, uuid: msgUuid });
+      await api('POST', `/api/sessions/${session.id}/message`, {
+        message: text, uuid: msgUuid,
+        attachments: attachments.length ? attachments : undefined,
+      });
     } catch (e) {
       showToast(proj.name, `Failed to send: ${e.message}`, 'attention');
     }
@@ -3150,8 +3191,15 @@ function handleChatPaste(e) {
 
 function addAttachment(file) {
   const id = 'att-' + Date.now();
-  chatAttachments.push({ id, name: file.name, size: file.size, type: file.type });
+  const entry = { id, name: file.name, size: file.size, type: file.type, data: null };
+  chatAttachments.push(entry);
   renderAttachments();
+  // Read file content as base64
+  const reader = new FileReader();
+  reader.onload = () => {
+    entry.data = reader.result.split(',')[1]; // strip data:...;base64, prefix
+  };
+  reader.readAsDataURL(file);
 }
 
 function removeAttachment(id) {
@@ -3413,6 +3461,63 @@ function filterProjects(type) {
 // ═══════════════════════════════════════════════════════
 function esc(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+// Copy icon SVG (inline, 14x14)
+const svgCopy = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+const svgCheck = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+// Markdown rendering for assistant messages
+const mdRenderer = new marked.Renderer();
+// Escape raw HTML so it renders as text, not DOM
+mdRenderer.html = function({ text }) { return escHtml(text); };
+// Syntax-highlight fenced code blocks
+mdRenderer.code = function({ text, lang }) {
+  let highlighted;
+  if (lang && hljs.getLanguage(lang)) {
+    highlighted = hljs.highlight(text, { language: lang }).value;
+  } else {
+    highlighted = escHtml(text);
+  }
+  const langLabel = lang ? `<span class="code-lang-label">${escHtml(lang)}</span>` : '';
+  const copyBtn = `<span class="code-copy-btn" onclick="event.stopPropagation(); copyCode(this)" title="Copy code">${svgCopy}</span>`;
+  return `<pre><div class="code-toolbar">${copyBtn}${langLabel}</div><code class="hljs${lang ? ' language-' + escHtml(lang) : ''}">${highlighted}</code></pre>`;
+};
+marked.setOptions({ breaks: true, gfm: true, renderer: mdRenderer });
+function renderMd(text) {
+  return marked.parse(text);
+}
+
+// Track per-message view mode: 'md' (default) → 'txt' → 'raw' → 'md'
+const mdToggleState = {};
+function toggleMd(uuid) {
+  const cur = mdToggleState[uuid] || 'md';
+  mdToggleState[uuid] = cur === 'md' ? 'txt' : cur === 'txt' ? 'raw' : 'md';
+  const proj = state.projects.find(p => p.id === state.activeProjectId);
+  if (proj) renderChat(proj);
+}
+
+function copyBubble(el) {
+  const bubble = el.closest('.chat-bubble');
+  if (!bubble) return;
+  const content = bubble.querySelector('[data-raw-md]');
+  if (!content) return;
+  navigator.clipboard.writeText(content.dataset.rawMd).then(() => flashCopied(el));
+}
+
+function copyCode(el) {
+  const pre = el.closest('pre');
+  if (!pre) return;
+  const code = pre.querySelector('code');
+  if (!code) return;
+  navigator.clipboard.writeText(code.innerText).then(() => flashCopied(el));
+}
+
+function flashCopied(el) {
+  const origHtml = el.innerHTML;
+  el.innerHTML = svgCheck;
+  el.classList.add('copied');
+  setTimeout(() => { el.innerHTML = origHtml; el.classList.remove('copied'); }, 1500);
+}
 
 // ═══════════════════════════════════════════════════════
 // ENVIRONMENTS
@@ -3823,7 +3928,7 @@ Object.assign(window, {
   togglePreviewPanel, addPreviewTab, closePreviewTab, switchPreviewTab, loadPreview, openPreviewExternal,
   toggleSessionsPanel, closeModal, addNewProject, openExistingProject,
   toggleRemoteUrl, toggleFolderBrowser, loadFolderBrowser, selectBrowsePath,
-  expandCollapsed, showRawEvent, selectCommit, copyHash, toggleCommitExpand,
+  expandCollapsed, showRawEvent, toggleMd, copyBubble, copyCode, selectCommit, copyHash, toggleCommitExpand,
   showCommitInfoModal, showCommitCtxMenu, hideCtxMenu,
   updateSessionMode, updateSessionModel, approveControl, denyControl,
   selectQuestionOption, selectQuestionCustom, updateQuestionCustom,
