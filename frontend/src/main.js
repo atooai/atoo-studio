@@ -62,6 +62,13 @@ let xtermModule = null;
 let fitAddonModule = null;
 
 // ═══════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ═══════════════════════════════════════════════════════
 // API
 // ═══════════════════════════════════════════════════════
 async function api(method, url, body) {
@@ -767,10 +774,13 @@ async function selectProject(projectId, peId, fromRouter = false) {
     }
   }
 
-  // Lazy-load sessions
+  // Lazy-load sessions + historical sessions in parallel
   if (!proj._sessionsLoaded) {
     try {
-      const sessions = await api('GET', `/api/projects/${proj.id}/sessions`);
+      const [sessions, historical] = await Promise.all([
+        api('GET', `/api/projects/${proj.id}/sessions`),
+        api('GET', '/api/historical-sessions').catch(() => []),
+      ]);
       proj.sessions = sessions.map(s => ({
         id: s.id,
         title: s.title || 'Untitled',
@@ -782,6 +792,17 @@ async function selectProject(projectId, peId, fromRouter = false) {
         model: s.model || null,
         permissionMode: s.permission_mode || null,
       }));
+      // Filter historical sessions for this project's directory, already sorted by date desc
+      const activeIds = new Set(proj.sessions.map(s => s.id));
+      proj.historicalSessions = historical
+        .filter(h => h.directory === proj.path && !activeIds.has(h.id))
+        .map(h => ({
+          id: h.id,
+          agentType: h.agentType,
+          title: h.title || 'Untitled',
+          lastModified: h.lastModified,
+          eventCount: h.eventCount,
+        }));
       // Connect WebSocket for each live session
       for (const s of proj.sessions) {
         if (s.status !== 'ended') {
@@ -1681,7 +1702,7 @@ function renderCenterTabs(proj) {
     const warn = s.permissionMode === 'bypassPermissions' ? '<span class="tab-warn" title="--dangerously-skip-permissions">⚠</span>' : '';
     return `<div class="center-tab ${isActive ? 'active' : ''}" onclick="switchToSession('${proj.id}', ${i})">
       <span class="tab-dot ${s.status}"></span>
-      <span>${s.title}</span>${warn}
+      <span>${s.title && s.title.length > 10 ? s.title.substring(0, 10) + '…' : (s.title || 'New session')}</span>${warn}
       <span class="tab-close" onclick="event.stopPropagation()">×</span>
     </div>`;
   }).join('');
@@ -2497,40 +2518,121 @@ async function resumeSession(projId, sessionId) {
   const session = proj.sessions.find(s => s.id === sessionId);
   if (!session) return;
 
+  // If already running/waiting, just switch to it
+  if (session.status === 'running' || session.status === 'waiting') {
+    const idx = proj.sessions.filter(s => s.status !== 'ended').indexOf(session);
+    if (idx >= 0) switchToSession(projId, idx);
+    return;
+  }
+
+  // Resume idle/ended sessions via agent abstraction layer
   try {
-    // Try resuming via fs-sessions endpoint (spawns a new CLI with --resume)
-    const result = await api('POST', `/api/fs-sessions/${sessionId}/resume`, { skip_permissions: true });
-    // The backend returns a new session ID for the resumed CLI
-    const newId = result.id;
-    if (newId && newId !== sessionId) {
-      // Update or add the new session
-      const existing = proj.sessions.find(s => s.id === newId);
-      if (!existing) {
-        proj.sessions.push({
-          id: newId,
-          title: session.title || 'Resumed session',
-          status: 'waiting',
-          startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          messages: [],
-          lastMessage: '',
-          viewMode: 'chat',
-          permissionMode: 'bypassPermissions',
-          model: null,
-        });
-      }
-      connectSessionWs(newId);
+    pendingAgentCreation = true;
+    const result = await api('POST', '/api/agent-sessions/resume', {
+      sessionUuid: sessionId,
+      cwd: proj.path,
+      skipPermissions: true,
+    });
+    pendingAgentCreation = false;
+
+    const newSessionId = result.sessionId;
+    const newSession = {
+      id: newSessionId,
+      title: session.title || 'Resumed session',
+      status: 'waiting',
+      startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      messages: [],
+      lastMessage: '',
+      viewMode: 'chat',
+      permissionMode: result.mode || 'bypassPermissions',
+      model: result.model || null,
+      _capabilities: result.capabilities,
+    };
+
+    // Replace the old entry or add new one
+    const existingIdx = proj.sessions.findIndex(s => s.id === newSessionId);
+    if (existingIdx >= 0) {
+      Object.assign(proj.sessions[existingIdx], newSession);
     } else {
-      session.status = 'waiting';
-      connectSessionWs(sessionId);
+      proj.sessions.push(newSession);
     }
+
+    proj.activeSessionIdx = proj.sessions.filter(s => s.status !== 'ended').length - 1;
+    state.activeTabType = 'session';
+    connectAgentWs(newSessionId);
+
+    renderCenterTabs(proj);
+    renderCenterContent(proj);
+    renderSessions(proj);
+    renderSidebarProjects();
+    updateGlobalCounts();
     showToast(proj.name, 'Session resumed', 'success');
   } catch (e) {
-    // Fallback: just reconnect WebSocket for live sessions
-    session.status = 'waiting';
-    connectSessionWs(sessionId);
+    pendingAgentCreation = false;
+    showToast(proj.name, `Failed to resume: ${e.message}`, 'attention');
   }
-  selectProject(projId);
 }
+
+async function resumeHistoricalSession(projId, sessionUuid) {
+  const proj = state.projects.find(p => p.id === projId);
+  if (!proj) return;
+
+  try {
+    // Resume via agent abstraction layer — no agent type needed
+    pendingAgentCreation = true;
+    const result = await api('POST', '/api/agent-sessions/resume', {
+      sessionUuid,
+      cwd: proj.path,
+      skipPermissions: true,
+    });
+    pendingAgentCreation = false;
+
+    const sessionId = result.sessionId;
+    const histEntry = (proj.historicalSessions || []).find(h => h.id === sessionUuid);
+
+    // Remove from historical list since it's now active
+    if (proj.historicalSessions) {
+      proj.historicalSessions = proj.historicalSessions.filter(h => h.id !== sessionUuid);
+    }
+
+    const existing = proj.sessions.find(s => s.id === sessionId);
+    if (existing) {
+      existing.status = 'waiting';
+      existing.permissionMode = result.mode || 'bypassPermissions';
+      if (result.model) existing.model = result.model;
+      existing._capabilities = result.capabilities;
+      connectAgentWs(sessionId);
+    } else {
+      const session = {
+        id: sessionId,
+        title: histEntry?.title || result.title || 'Resumed session',
+        status: 'waiting',
+        startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        messages: [],
+        lastMessage: '',
+        viewMode: 'chat',
+        permissionMode: result.mode || 'bypassPermissions',
+        model: result.model || null,
+        _capabilities: result.capabilities,
+      };
+      proj.sessions.push(session);
+      proj.activeSessionIdx = proj.sessions.filter(s => s.status !== 'ended').length - 1;
+      state.activeTabType = 'session';
+      connectAgentWs(sessionId);
+    }
+
+    renderCenterTabs(proj);
+    renderCenterContent(proj);
+    renderSessions(proj);
+    renderSidebarProjects();
+    updateGlobalCounts();
+    showToast(proj.name, 'Session resumed', 'success');
+  } catch (e) {
+    pendingAgentCreation = false;
+    showToast(proj.name, `Failed to resume: ${e.message}`, 'attention');
+  }
+}
+window.resumeHistoricalSession = resumeHistoricalSession;
 
 function switchToSession(projId, idx) {
   const proj = state.projects.find(p => p.id === projId);
@@ -2552,7 +2654,9 @@ function switchToTerminal(projId, idx) {
 
 function renderSessions(proj) {
   const list = document.getElementById('session-list');
-  list.innerHTML = proj.sessions.map(s =>
+
+  // Active/live sessions
+  const activeHtml = proj.sessions.map(s =>
     `<div class="session-item ${s.status !== 'ended' ? 'active-session' : ''}">
       <div class="session-status-dot ${s.status === 'ended' ? 'ended' : s.status === 'waiting' ? 'waiting' : s.status === 'running' ? 'live' : 'ended'}"></div>
       <div class="session-info">
@@ -2562,6 +2666,26 @@ function renderSessions(proj) {
       ${s.status === 'ended' || s.status === 'idle' ? `<button class="session-resume-btn" onclick="resumeSession('${proj.id}', '${s.id}')">Resume</button>` : ''}
     </div>`
   ).join('');
+
+  // Historical sessions (from agent factories, already sorted by date desc)
+  const historical = proj.historicalSessions || [];
+  const historyHtml = historical.length ? `
+    <div class="session-history-divider">History</div>
+    ${historical.map(h => {
+      const d = new Date(h.lastModified);
+      const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+      return `<div class="session-item session-historical" onclick="resumeHistoricalSession('${proj.id}', '${h.id}')">
+        <div class="session-status-dot ended"></div>
+        <div class="session-info">
+          <div class="session-title">${escapeHtml(h.title)}</div>
+          <div class="session-meta"><span>${dateStr} ${timeStr}</span><span>${h.eventCount} events</span></div>
+        </div>
+        <button class="session-resume-btn" onclick="event.stopPropagation(); resumeHistoricalSession('${proj.id}', '${h.id}')">Resume</button>
+      </div>`;
+    }).join('')}` : '';
+
+  list.innerHTML = activeHtml + historyHtml;
 }
 
 async function addTerminal() {

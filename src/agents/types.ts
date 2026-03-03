@@ -173,12 +173,27 @@ export interface Agent extends EventEmitter {
 }
 
 // ═══════════════════════════════════════════════════════
+// Historical Session (returned by AgentFactory)
+// ═══════════════════════════════════════════════════════
+
+export interface HistoricalSession {
+  id: string;            // Unique identifier (e.g., UUID from JSONL filename)
+  agentType: string;     // Which agent implementation owns this
+  title: string;
+  directory: string;     // Working directory the session ran in
+  lastModified: string;  // ISO timestamp
+  eventCount: number;    // Approximate number of events
+}
+
+// ═══════════════════════════════════════════════════════
 // Agent Factory
 // ═══════════════════════════════════════════════════════
 
 export interface AgentFactory {
   agentType: string;
   create(sessionId: string): Agent;
+  getHistoricalSessions(): Promise<HistoricalSession[]>;
+  ownsSession(uuid: string): Promise<boolean>;
 }
 
 // ═══════════════════════════════════════════════════════

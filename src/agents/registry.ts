@@ -1,5 +1,6 @@
 import type WebSocket from 'ws';
-import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AbstractMessage, AgentStatus } from './types.js';
+import { v4 as uuidv4 } from 'uuid';
+import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AbstractMessage, AgentStatus, HistoricalSession } from './types.js';
 import { store } from '../state/store.js';
 
 interface AgentEntry {
@@ -107,6 +108,37 @@ class AgentRegistry {
     const entry = this.agents.get(sessionId);
     if (!entry) return;
     entry.browserClients.delete(ws);
+  }
+
+  async getHistoricalSessions(): Promise<HistoricalSession[]> {
+    const allSessions: HistoricalSession[] = [];
+    for (const factory of this.factories.values()) {
+      const sessions = await factory.getHistoricalSessions();
+      allSessions.push(...sessions);
+    }
+    // Sort by date descending (most recent first)
+    allSessions.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+    return allSessions;
+  }
+
+  async resumeAgent(sessionUuid: string, options: { cwd?: string; skipPermissions?: boolean } = {}): Promise<Agent> {
+    // Find the factory that owns this session
+    let owningFactory: AgentFactory | null = null;
+    for (const factory of this.factories.values()) {
+      if (await factory.ownsSession(sessionUuid)) {
+        owningFactory = factory;
+        break;
+      }
+    }
+    if (!owningFactory) {
+      throw new Error(`No agent implementation recognizes session ${sessionUuid}`);
+    }
+
+    const sessionId = `agent_${uuidv4()}`;
+    return this.createAgent(owningFactory.agentType, sessionId, {
+      ...options,
+      resumeSessionUuid: sessionUuid,
+    });
   }
 
   private broadcastToClients(sessionId: string, message: AbstractMessage): void {

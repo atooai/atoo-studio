@@ -2841,6 +2841,19 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 }
 .session-resume-btn:hover { background: var(--accent-blue); color: #fff; }
 
+.session-history-divider {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 4px;
+}
+.session-item.session-historical { opacity: 0.7; }
+.session-item.session-historical:hover { opacity: 1; }
+
 /* ═══════════════════════════════════════════════════════
    PREVIEW PANEL (widescreen — app iframes)
    ═══════════════════════════════════════════════════════ */
