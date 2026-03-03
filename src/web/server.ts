@@ -8,12 +8,14 @@ import { fileURLToPath } from 'url';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
-import { spawnCliProcess, spawnForkedCliProcess, spawnResumeCliProcess, buildContextSummary, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession } from '../spawner.js';
+import { spawnCliProcess, spawnForkedCliProcess, spawnResumeCliProcess, buildContextSummary, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback } from '../spawner.js';
 import { fsMonitor } from '../fs-monitor.js';
 import { changesRouter } from '../handlers/changes.js';
 import { projectsRouter } from '../handlers/projects.js';
 import { environmentsRouter, setBroadcastSettingsChange } from '../handlers/environments.js';
 import { fsSessionScanner } from '../fs-sessions.js';
+import { isAgentWsUpgrade, handleAgentWsUpgrade } from '../ws/agent-ws.js';
+import { agentRegistry } from '../agents/registry.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -274,6 +276,33 @@ export function createWebServer(): http.Server {
     res.json({ success: true, mode: targetMode });
   });
 
+  // Send a key to the CLI PTY (accepts both sess_xxx and agent_xxx IDs)
+  const ALLOWED_KEYS: Record<string, string> = { escape: '\x1b' };
+
+  app.post('/api/sessions/:id/send-key', (req, res) => {
+    const key = req.body.key;
+    const sequence = key && ALLOWED_KEYS[key];
+    if (!sequence) return res.status(400).json({ error: 'Invalid key' });
+
+    // Try direct session lookup first
+    let envId = getEnvIdForSession(req.params.id);
+
+    // Fall back to agent registry (agent_xxx → underlying envId)
+    if (!envId) {
+      const agent = agentRegistry.getAgent(req.params.id);
+      if (agent) {
+        envId = (agent as any).envId;
+      }
+    }
+
+    if (!envId) return res.status(404).json({ error: 'No environment for session' });
+    const ptyInst = getPty(envId);
+    if (!ptyInst) return res.status(400).json({ error: 'No PTY for session' });
+
+    ptyInst.write(sequence);
+    res.json({ success: true });
+  });
+
   // Trigger /context + /rewind for token usage update
   app.post('/api/sessions/:id/refresh-context', (req, res) => {
     const session = store.sessions.get(req.params.id);
@@ -285,6 +314,7 @@ export function createWebServer(): http.Server {
     if (!ptyInst) return res.status(400).json({ error: 'No PTY for session' });
 
     // Type /context + Enter, wait, then /rewind sequence
+    store.setContextInProgress(session.id, true);
     ptyInst.write('/context');
     setTimeout(() => {
       ptyInst.write('\r');
@@ -300,6 +330,9 @@ export function createWebServer(): http.Server {
                 ptyInst.write('\r');
                 setTimeout(() => {
                   ptyInst.write('\x7f'.repeat(12)); // backspaces to clear
+                  setTimeout(() => {
+                    store.setContextInProgress(session.id, false);
+                  }, 500);
                 }, 1000);
               }, 1000);
             }, 500);
@@ -600,6 +633,45 @@ export function createWebServer(): http.Server {
     });
   });
 
+  // ═══════════════════════════════════════════════════════
+  // Agent Session Endpoints (abstract layer)
+  // ═══════════════════════════════════════════════════════
+
+  // Create a new agent session
+  app.post('/api/agent-sessions', async (req, res) => {
+    const { agentType, cwd, skipPermissions, message,
+            resumeSessionUuid, forkParentSessionId, forkAfterEventUuid } = req.body;
+
+    const type = agentType || 'claude-code';
+    const sessionId = `agent_${uuidv4()}`;
+
+    try {
+      const agent = await agentRegistry.createAgent(type, sessionId, {
+        cwd: cwd || undefined,
+        skipPermissions: !!skipPermissions,
+        resumeSessionUuid,
+        forkParentSessionId,
+        forkAfterEventUuid,
+      });
+
+      // Send initial message if provided
+      if (message) {
+        agent.sendMessage(message);
+      }
+
+      const info = agent.getInfo();
+      res.json(info);
+    } catch (err: any) {
+      console.error(`[web] Failed to create agent session:`, err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // List agent sessions
+  app.get('/api/agent-sessions', (_req, res) => {
+    res.json(agentRegistry.listAgents());
+  });
+
   // Serve frontend static files (production)
   const frontendDist = path.join(__dirname, '..', '..', '..', 'frontend', 'dist');
   app.use(express.static(frontendDist));
@@ -665,7 +737,13 @@ export function createWebServer(): http.Server {
   server.on('upgrade', (req, socket, head) => {
     const url = req.url || '';
 
-    // /ws/sessions/:id — live event stream for frontend
+    // /ws/agent/:sessionId — abstract agent WebSocket (new)
+    if (isAgentWsUpgrade(url)) {
+      handleAgentWsUpgrade(wss, req, socket, head);
+      return;
+    }
+
+    // /ws/sessions/:id — live event stream for frontend (legacy)
     const match = url.match(/^\/ws\/sessions\/([^/?]+)/);
     if (match) {
       const sessionId = match[1];
@@ -709,6 +787,10 @@ export function createWebServer(): http.Server {
         for (const [sid, usage] of store.contextUsages.entries()) {
           ws.send(JSON.stringify({ type: 'context_usage', session_id: sid, ...usage }));
         }
+        // Send current context-in-progress state
+        for (const sid of store.contextInProgressSessions) {
+          ws.send(JSON.stringify({ type: 'context_in_progress', session_id: sid, inProgress: true }));
+        }
         ws.on('close', () => store.statusClients.delete(ws));
       });
     } else if (url.startsWith('/ws/settings')) {
@@ -722,7 +804,15 @@ export function createWebServer(): http.Server {
       const termMatch = url.match(/^\/ws\/terminal\/([^/?]+)/);
       if (termMatch) {
         const sessionId = termMatch[1];
-        const envId = getEnvIdForSession(sessionId);
+        // Resolve agent session IDs to the underlying CLI envId
+        let envId = getEnvIdForSession(sessionId);
+        if (!envId) {
+          // Try agent registry — agent sessions use agent_* IDs
+          const agent = agentRegistry.getAgent(sessionId);
+          if (agent) {
+            envId = (agent as any).envId;
+          }
+        }
         if (!envId) {
           socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
           socket.destroy();
@@ -740,7 +830,9 @@ export function createWebServer(): http.Server {
 
           // Get or create broadcast entry for this session's terminal
           if (!terminalClients.has(sessionId)) {
-            terminalClients.set(sessionId, { clients: new Set(), handler: null, scrollback: '' });
+            // Seed scrollback from spawner's buffer (captures PTY output since spawn)
+            const spawnerBuf = envId ? getScrollback(envId) : '';
+            terminalClients.set(sessionId, { clients: new Set(), handler: null, scrollback: spawnerBuf });
           }
           const entry = terminalClients.get(sessionId)!;
           entry.clients.add(ws);
@@ -782,11 +874,7 @@ export function createWebServer(): http.Server {
           ws.on('close', () => {
             console.log(`[ws:terminal] Browser disconnected for session ${sessionId}`);
             entry.clients.delete(ws);
-            if (entry.clients.size === 0 && entry.handler) {
-              entry.handler.dispose();
-              entry.handler = null;
-              terminalClients.delete(sessionId);
-            }
+            // Keep handler alive so scrollback continues accumulating even with no browsers
           });
         });
       } else {
@@ -847,11 +935,7 @@ export function createWebServer(): http.Server {
             ws.on('close', () => {
               console.log(`[ws:shell] Browser disconnected for shell ${shellId}`);
               entry.clients.delete(ws);
-              if (entry.clients.size === 0 && entry.handler) {
-                entry.handler.dispose();
-                entry.handler = null;
-                shellClients.delete(shellId);
-              }
+              // Keep handler alive so scrollback continues accumulating even with no browsers
             });
           });
         } else {

@@ -8,6 +8,8 @@ import { killAllCliProcesses } from './spawner.js';
 import { PROXY_PORT, WEB_PORT, CA_CERT_PATH } from './config.js';
 import { fsMonitor } from './fs-monitor.js';
 import { vccDb } from './state/db.js';
+import { agentRegistry } from './agents/registry.js';
+import { ClaudeCodeAgentFactory } from './agents/claude-code/index.js';
 
 async function main() {
   console.log('=== CCProxy ===');
@@ -19,6 +21,9 @@ async function main() {
 
   // 2. Connect to filesystem monitor (graceful — no-op if unavailable)
   fsMonitor.connect().catch(err => console.warn('[init] FS monitor not available:', err.message));
+
+  // 2b. Register agent factories
+  agentRegistry.registerFactory(new ClaudeCodeAgentFactory());
 
   // 3. Create the internal API app (handles decrypted Anthropic traffic)
   const apiApp = createApiApp();

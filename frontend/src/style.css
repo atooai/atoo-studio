@@ -1470,6 +1470,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
 }
 .center-tab:hover .tab-close { opacity: 0.5; }
 .tab-close:hover { opacity: 1 !important; background: var(--bg-hover); }
+.tab-warn { color: var(--accent-amber); font-size: 12px; margin-left: 4px; }
 
 /* Tab section divider */
 .center-tab-sep {
@@ -2168,7 +2169,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   flex-shrink: 0;
 }
@@ -2179,9 +2180,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   background: var(--bg-surface-2);
   border: 1px solid var(--border);
   font-size: 13px;
+  font-family: inherit;
   resize: none;
   min-height: 36px;
-  max-height: 120px;
+  max-height: calc(5 * 1.4em + 16px);
+  overflow-y: auto;
+  line-height: 1.4;
+  field-sizing: content;
 }
 .chat-input:focus { border-color: var(--accent-blue); }
 .chat-send-btn {
@@ -2194,7 +2199,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   transition: all var(--transition-fast);
 }
 .chat-send-btn:hover { filter: brightness(1.15); }
-.chat-send-btn:disabled { opacity: 0.3; }
+.chat-send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.chat-input:disabled { opacity: 0.5; cursor: not-allowed; }
+.chat-attach-btn:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
 
 /* Attachment Button */
 .chat-attach-btn {

@@ -1,0 +1,135 @@
+import type WebSocket from 'ws';
+import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AbstractMessage, AgentStatus } from './types.js';
+import { store } from '../state/store.js';
+
+interface AgentEntry {
+  agent: Agent;
+  agentType: string;
+  browserClients: Set<WebSocket>;
+  contextInProgress: boolean;
+}
+
+class AgentRegistry {
+  private factories = new Map<string, AgentFactory>();
+  private agents = new Map<string, AgentEntry>();
+
+  registerFactory(factory: AgentFactory): void {
+    this.factories.set(factory.agentType, factory);
+    console.log(`[agent-registry] Registered factory: ${factory.agentType}`);
+  }
+
+  async createAgent(agentType: string, sessionId: string, options: AgentInitOptions): Promise<Agent> {
+    const factory = this.factories.get(agentType);
+    if (!factory) {
+      throw new Error(`Unknown agent type: ${agentType}`);
+    }
+
+    const agent = factory.create(sessionId);
+    const entry: AgentEntry = {
+      agent,
+      agentType,
+      browserClients: new Set(),
+      contextInProgress: false,
+    };
+
+    this.agents.set(sessionId, entry);
+
+    // Wire up event forwarding
+    agent.on('message', (msg: AbstractMessage) => {
+      this.broadcastToClients(sessionId, msg);
+    });
+
+    agent.on('status', (status: AgentStatus) => {
+      // Broadcast status to global status clients (sidebar)
+      const storeStatus = status === 'active' ? 'active' : status === 'waiting' ? 'waiting' : 'idle';
+      store.setAgentStatus(sessionId, storeStatus as any);
+    });
+
+    agent.on('context_in_progress', (inProgress: boolean) => {
+      const e = this.agents.get(sessionId);
+      if (e) e.contextInProgress = inProgress;
+      this.broadcastRawToClients(sessionId, { type: 'context_in_progress', inProgress });
+    });
+
+    agent.on('exit', () => {
+      console.log(`[agent-registry] Agent exited: ${sessionId}`);
+    });
+
+    agent.on('error', (err: Error) => {
+      console.error(`[agent-registry] Agent error for ${sessionId}:`, err.message);
+    });
+
+    // Initialize the agent
+    await agent.initialize(options);
+
+    console.log(`[agent-registry] Agent created: ${sessionId} (type: ${agentType})`);
+    return agent;
+  }
+
+  getAgent(sessionId: string): Agent | undefined {
+    return this.agents.get(sessionId)?.agent;
+  }
+
+  async destroyAgent(sessionId: string): Promise<void> {
+    const entry = this.agents.get(sessionId);
+    if (!entry) return;
+
+    // Close all browser WS connections
+    for (const ws of entry.browserClients) {
+      try { ws.close(); } catch {}
+    }
+    entry.browserClients.clear();
+
+    await entry.agent.destroy();
+    this.agents.delete(sessionId);
+    console.log(`[agent-registry] Agent destroyed: ${sessionId}`);
+  }
+
+  listAgents(): AgentSessionInfo[] {
+    const infos: AgentSessionInfo[] = [];
+    for (const entry of this.agents.values()) {
+      infos.push(entry.agent.getInfo());
+    }
+    return infos;
+  }
+
+  addBrowserClient(sessionId: string, ws: WebSocket): void {
+    const entry = this.agents.get(sessionId);
+    if (!entry) return;
+    entry.browserClients.add(ws);
+    // Send current context_in_progress state so late-joining browsers get it
+    if (entry.contextInProgress) {
+      ws.send(JSON.stringify({ type: 'context_in_progress', inProgress: true }));
+    }
+  }
+
+  removeBrowserClient(sessionId: string, ws: WebSocket): void {
+    const entry = this.agents.get(sessionId);
+    if (!entry) return;
+    entry.browserClients.delete(ws);
+  }
+
+  private broadcastToClients(sessionId: string, message: AbstractMessage): void {
+    const entry = this.agents.get(sessionId);
+    if (!entry) return;
+    const data = JSON.stringify(message);
+    for (const ws of entry.browserClients) {
+      if (ws.readyState === 1) {
+        ws.send(data);
+      }
+    }
+  }
+
+  private broadcastRawToClients(sessionId: string, message: Record<string, any>): void {
+    const entry = this.agents.get(sessionId);
+    if (!entry) return;
+    const data = JSON.stringify(message);
+    for (const ws of entry.browserClients) {
+      if (ws.readyState === 1) {
+        ws.send(data);
+      }
+    }
+  }
+}
+
+export const agentRegistry = new AgentRegistry();

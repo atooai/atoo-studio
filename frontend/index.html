@@ -194,7 +194,7 @@ window.addEventListener('unhandledrejection', function(e) {
             <div class="chat-input-bar" id="chat-input-bar">
               <button class="chat-attach-btn" onclick="document.getElementById('chat-file-input').click()" title="Attach file">📎</button>
               <input type="file" id="chat-file-input" multiple style="display:none" onchange="handleFileAttach(this.files)">
-              <input type="text" class="chat-input" id="chat-input" placeholder="Message Claude..." onkeydown="handleChatKey(event)" onpaste="handleChatPaste(event)">
+              <textarea class="chat-input" id="chat-input" placeholder="Message Claude..." onkeydown="handleChatKey(event)" onpaste="handleChatPaste(event)" rows="1"></textarea>
               <button class="chat-send-btn" id="chat-send-btn" onclick="sendMessage()">↑</button>
             </div>
             <div class="chat-status-bar hidden" id="chat-status-bar">

@@ -19,11 +19,42 @@ class Store {
   pendingPolls = new Map<string, PendingPoll>();
   agentStatuses = new Map<string, AgentStatus>(); // sessionId → status
   contextUsages = new Map<string, { model: string; usedTokens: number; totalTokens: number; percent: number; freePercent: number }>(); // sessionId → token usage
+  contextInProgressSessions = new Set<string>(); // sessions currently running /context flow
 
   // WebSocket connections
   subscribeClients = new Map<string, Set<WebSocket>>(); // sessionId → browser WSs
   ingressClients = new Map<string, WebSocket>(); // sessionId → CLI WS
   statusClients = new Set<WebSocket>(); // global status listeners
+
+  // Event listeners for agent layer
+  private eventListeners = new Map<string, Set<(event: any) => void>>();
+
+  /**
+   * Subscribe to ingress events for a session. Returns an unsubscribe function.
+   */
+  addEventListener(sessionId: string, cb: (event: any) => void): () => void {
+    if (!this.eventListeners.has(sessionId)) {
+      this.eventListeners.set(sessionId, new Set());
+    }
+    this.eventListeners.get(sessionId)!.add(cb);
+    return () => {
+      this.eventListeners.get(sessionId)?.delete(cb);
+      if (this.eventListeners.get(sessionId)?.size === 0) {
+        this.eventListeners.delete(sessionId);
+      }
+    };
+  }
+
+  /** Notify event listeners for a session. */
+  notifyEventListeners(sessionId: string, event: any): void {
+    const listeners = this.eventListeners.get(sessionId);
+    if (!listeners) return;
+    for (const cb of listeners) {
+      try { cb(event); } catch (err) {
+        console.error(`[store] Event listener error for ${sessionId}:`, err);
+      }
+    }
+  }
 
   registerEnvironment(body: {
     machine_name: string;
@@ -113,6 +144,8 @@ class Store {
       return false;
     }
     session.events.push(event);
+    // Notify event listeners (agent layer)
+    this.notifyEventListeners(sessionId, event);
     return true;
   }
 
@@ -182,6 +215,25 @@ class Store {
 
   getAgentStatus(sessionId: string): AgentStatus {
     return this.agentStatuses.get(sessionId) || 'idle';
+  }
+
+  setContextInProgress(sessionId: string, inProgress: boolean): void {
+    if (inProgress) {
+      this.contextInProgressSessions.add(sessionId);
+    } else {
+      this.contextInProgressSessions.delete(sessionId);
+    }
+    const listeners = this.eventListeners.get(sessionId);
+    const subscribers = this.subscribeClients.get(sessionId);
+    console.log(`[store] setContextInProgress(${sessionId}, ${inProgress}) — eventListeners=${listeners?.size ?? 0}, subscribers=${subscribers?.size ?? 0}, statusClients=${this.statusClients.size}`);
+    const msg = { type: 'context_in_progress', session_id: sessionId, inProgress };
+    // Notify agent event listeners so the adapter can re-emit with agent session ID
+    this.notifyEventListeners(sessionId, msg);
+    this.broadcastToSubscribers(sessionId, msg);
+    const data = JSON.stringify(msg);
+    for (const ws of this.statusClients) {
+      if (ws.readyState === 1) ws.send(data);
+    }
   }
 
   setContextUsage(sessionId: string, usage: { model: string; usedTokens: number; totalTokens: number; percent: number; freePercent: number }): void {

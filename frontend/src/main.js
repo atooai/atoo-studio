@@ -50,6 +50,8 @@ let dragState = {
 // WebSocket connections
 let statusWs = null;
 let sessionWsMap = {};
+let agentWsMap = {}; // sessionId → agent WebSocket (abstract layer)
+let pendingAgentCreation = false; // suppress legacy session_created handling during agent creation
 
 // Terminal state: Map of terminal id -> { term, fitAddon, ws, container }
 const terminalInstances = {};
@@ -95,6 +97,11 @@ function connectStatusWs() {
           }
         }
       } else if (msg.type === 'session_created' && msg.session) {
+        // Skip if we're in the middle of creating an agent session —
+        // the CLI's internal session_created would create a duplicate entry
+        // with the CLI session ID. The agent session will be added by newSession().
+        if (pendingAgentCreation) { /* suppress */ }
+        else {
         // New session created (possibly from another browser) — refresh sessions
         const s = msg.session;
         for (const proj of state.projects) {
@@ -152,6 +159,7 @@ function connectStatusWs() {
             }).catch(() => {});
           }
         }
+      } // end else (not pendingAgentCreation)
       }
       else if (msg.type === 'terminal_created' && msg.terminal) {
         const t = msg.terminal;
@@ -190,6 +198,22 @@ function connectStatusWs() {
               const activeSession = activeSessions[proj.activeSessionIdx || 0];
               if (activeSession && activeSession.id === msg.session_id) {
                 updateChatStatusBar(sess);
+              }
+            }
+            break;
+          }
+        }
+      }
+      else if (msg.type === 'context_in_progress' && msg.session_id) {
+        for (const proj of state.projects) {
+          const sess = proj.sessions.find(s => s.id === msg.session_id);
+          if (sess) {
+            sess.contextInProgress = !!msg.inProgress;
+            if (proj.id === state.activeProjectId) {
+              const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+              const activeSession = activeSessions[proj.activeSessionIdx || 0];
+              if (activeSession && activeSession.id === msg.session_id) {
+                setChatInputsDisabled(msg.inProgress);
               }
             }
             break;
@@ -324,6 +348,159 @@ function handleSessionEvent(sessionId, event) {
     }
 
     // Re-render if this is the active project
+    if (proj.id === state.activeProjectId) {
+      renderChat(proj);
+      renderCenterTabs(proj);
+      renderSessions(proj);
+    }
+    renderSidebarProjects();
+    updateGlobalCounts();
+    return;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// AGENT WEBSOCKET (Abstract Layer)
+// ═══════════════════════════════════════════════════════
+
+function connectAgentWs(sessionId) {
+  if (agentWsMap[sessionId]) return;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws/agent/${sessionId}`);
+  agentWsMap[sessionId] = ws;
+
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      handleAgentMessage(sessionId, msg);
+    } catch {}
+  };
+  ws.onclose = () => {
+    delete agentWsMap[sessionId];
+  };
+}
+
+function sendAgentCommand(sessionId, command) {
+  const ws = agentWsMap[sessionId];
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify(command));
+    return true;
+  }
+  return false;
+}
+
+function handleAgentMessage(sessionId, msg) {
+  // Find the project and session
+  for (const proj of state.projects) {
+    const sess = proj.sessions.find(s => s.id === sessionId);
+    if (!sess) continue;
+
+    console.log('[agent]', msg.type, JSON.stringify(msg).substring(0, 300));
+
+    if (msg.type === 'agent_info') {
+      // Initial agent info — update capabilities, mode, model
+      sess._agentInfo = msg;
+      if (msg.mode) sess.permissionMode = msg.mode;
+      if (msg.model) sess.model = msg.model;
+      if (msg.capabilities) sess._capabilities = msg.capabilities;
+      if (proj.id === state.activeProjectId) {
+        updateChatStatusBar(sess);
+      }
+      return;
+    }
+
+    if (msg.type === 'user_message') {
+      if (sess.messages.some(m => m._eventUuid === msg.id)) return;
+      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id });
+    } else if (msg.type === 'assistant_message') {
+      sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
+    } else if (msg.type === 'tool_request') {
+      sess.status = 'waiting';
+      sess._pendingControl = msg;
+      // Check if it's an AskUserQuestion-type by tool name
+      sess.messages.push({
+        role: 'control_request',
+        content: {
+          subtype: msg.toolName === 'AskUserQuestion' ? 'ask_user_question' : 'tool_use',
+          tool_use: { name: msg.toolName, input: msg.input },
+        },
+        _eventUuid: msg.id,
+        _requestId: msg.requestId,
+        _responded: msg.responded,
+      });
+    } else if (msg.type === 'tool_result') {
+      sess.messages.push({
+        role: 'tool',
+        content: `${msg.toolName}: ${msg.output.substring(0, 100)}`,
+        _eventUuid: msg.id,
+      });
+    } else if (msg.type === 'question') {
+      sess.status = 'waiting';
+      sess._pendingControl = msg;
+      sess.messages.push({
+        role: 'control_request',
+        content: {
+          subtype: 'ask_user_question',
+          tool_use: { name: 'AskUserQuestion', input: { questions: msg.questions } },
+        },
+        _eventUuid: msg.id,
+        _requestId: msg.requestId,
+        _responded: msg.responded,
+      });
+    } else if (msg.type === 'status_update') {
+      if (msg.mode) sess.permissionMode = msg.mode;
+      if (msg.model) sess.model = msg.model;
+      if (msg.status === 'active') sess.status = 'running';
+      else if (msg.status === 'waiting') sess.status = 'waiting';
+      else if (msg.status === 'idle') sess.status = 'idle';
+      if (proj.id === state.activeProjectId) {
+        updateChatStatusBar(sess);
+      }
+    } else if (msg.type === 'context_usage') {
+      sess.contextUsage = {
+        model: msg.model,
+        usedTokens: msg.usedTokens,
+        totalTokens: msg.totalTokens,
+        percent: msg.percent,
+        freePercent: msg.freePercent,
+      };
+      if (proj.id === state.activeProjectId) {
+        const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+        const activeSession = activeSessions[proj.activeSessionIdx || 0];
+        if (activeSession && activeSession.id === msg.sessionId) {
+          updateChatStatusBar(sess);
+        }
+      }
+      return; // Don't re-render chat for context updates
+    } else if (msg.type === 'context_in_progress') {
+      sess.contextInProgress = !!msg.inProgress;
+      if (proj.id === state.activeProjectId) {
+        const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+        const activeSession = activeSessions[proj.activeSessionIdx || 0];
+        if (activeSession && activeSession.id === sess.id) {
+          setChatInputsDisabled(msg.inProgress);
+        }
+      }
+      return; // Don't re-render chat for context progress updates
+    } else if (msg.type === 'result') {
+      // Turn complete — mark idle
+      sess.status = 'idle';
+    } else if (msg.type === 'system_message') {
+      sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
+    } else if (msg.type === 'file_change') {
+      // File change notifications — could update changes panel
+      return;
+    }
+
+    // Update title from first user message
+    if (!sess.title || sess.title === 'New session') {
+      const firstUser = sess.messages.find(m => m.role === 'user');
+      if (firstUser) {
+        sess.title = firstUser.content.substring(0, 50);
+      }
+    }
+
+    // Re-render
     if (proj.id === state.activeProjectId) {
       renderChat(proj);
       renderCenterTabs(proj);
@@ -1490,9 +1667,10 @@ function renderCenterTabs(proj) {
 
   let html = activeSessions.map((s, i) => {
     const isActive = state.activeTabType === 'session' && i === (proj.activeSessionIdx || 0);
+    const warn = s.permissionMode === 'bypassPermissions' ? '<span class="tab-warn" title="--dangerously-skip-permissions">⚠</span>' : '';
     return `<div class="center-tab ${isActive ? 'active' : ''}" onclick="switchToSession('${proj.id}', ${i})">
       <span class="tab-dot ${s.status}"></span>
-      <span>${s.title}</span>
+      <span>${s.title}</span>${warn}
       <span class="tab-close" onclick="event.stopPropagation()">×</span>
     </div>`;
   }).join('');
@@ -1821,58 +1999,99 @@ async function submitQuestion(uuid, sessionId) {
   }
   // Find the message and mark as responded
   markControlResponded(sessionId, uuid);
-  try {
-    await api('POST', `/api/sessions/${sessionId}/control-response`, {
-      permission: 'allow',
-      updatedInput: { answers: cleanAnswers },
-    });
-  } catch {}
+  // Find the requestId from the message
+  let requestId;
+  for (const proj of state.projects) {
+    const sess = proj.sessions.find(s => s.id === sessionId);
+    if (sess) {
+      const msg = sess.messages.find(m => m._eventUuid === uuid);
+      if (msg) requestId = msg._requestId;
+    }
+  }
+  if (requestId && sendAgentCommand(sessionId, { action: 'answer_question', requestId, answers: cleanAnswers })) {
+    // Sent via agent WS
+  } else {
+    try {
+      await api('POST', `/api/sessions/${sessionId}/control-response`, {
+        permission: 'allow',
+        updatedInput: { answers: cleanAnswers },
+      });
+    } catch {}
+  }
   rerenderChat();
 }
 
 async function skipQuestion(uuid, sessionId) {
   questionAnswers[uuid] = questionAnswers[uuid] || {};
   markControlResponded(sessionId, uuid);
-  try {
-    await api('POST', `/api/sessions/${sessionId}/control-response`, {
-      permission: 'deny',
-    });
-  } catch {}
+  // Find the requestId from the message
+  let requestId;
+  for (const proj of state.projects) {
+    const sess = proj.sessions.find(s => s.id === sessionId);
+    if (sess) {
+      const msg = sess.messages.find(m => m._eventUuid === uuid);
+      if (msg) requestId = msg._requestId;
+    }
+  }
+  if (requestId && sendAgentCommand(sessionId, { action: 'deny', requestId })) {
+    // Sent via agent WS
+  } else {
+    try {
+      await api('POST', `/api/sessions/${sessionId}/control-response`, {
+        permission: 'deny',
+      });
+    } catch {}
+  }
   rerenderChat();
 }
 
 async function approveControl(sessionId) {
   const proj = state.projects.find(p => p.id === state.activeProjectId);
+  let requestId;
   if (proj) {
-    // Mark the last pending control_request as responded
     const sess = proj.sessions.find(s => s.id === sessionId);
     if (sess) {
       const lastCtrl = [...sess.messages].reverse().find(m => m.role === 'control_request' && !m._responded);
-      if (lastCtrl) lastCtrl._responded = true;
+      if (lastCtrl) {
+        lastCtrl._responded = true;
+        requestId = lastCtrl._requestId;
+      }
     }
   }
-  try {
-    await api('POST', `/api/sessions/${sessionId}/control-response`, {
-      permission: 'allow',
-    });
-  } catch {}
+  if (requestId && sendAgentCommand(sessionId, { action: 'approve', requestId })) {
+    // Sent via agent WS
+  } else {
+    try {
+      await api('POST', `/api/sessions/${sessionId}/control-response`, {
+        permission: 'allow',
+      });
+    } catch {}
+  }
   rerenderChat();
 }
 
 async function denyControl(sessionId) {
   const proj = state.projects.find(p => p.id === state.activeProjectId);
+  let requestId;
   if (proj) {
     const sess = proj.sessions.find(s => s.id === sessionId);
     if (sess) {
       const lastCtrl = [...sess.messages].reverse().find(m => m.role === 'control_request' && !m._responded);
-      if (lastCtrl) lastCtrl._responded = true;
+      if (lastCtrl) {
+        lastCtrl._responded = true;
+        requestId = lastCtrl._requestId;
+      }
     }
   }
-  try {
-    await api('POST', `/api/sessions/${sessionId}/control-response`, {
-      permission: 'deny',
-    });
-  } catch {}
+  if (requestId && sendAgentCommand(sessionId, { action: 'deny', requestId })) {
+    // Sent via agent WS
+  } else {
+    try {
+      await api('POST', `/api/sessions/${sessionId}/control-response`, {
+        permission: 'deny',
+      });
+    } catch {}
+  }
   rerenderChat();
 }
 
@@ -1942,12 +2161,34 @@ function toggleVerbose() {
   renderCenterContent(proj);
 }
 
+function setChatInputsDisabled(disabled) {
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send-btn');
+  const attachBtn = document.querySelector('.chat-attach-btn');
+  const modeSelect = document.getElementById('cs-mode');
+  const modelSelect = document.getElementById('cs-model');
+
+  if (input) {
+    input.disabled = !!disabled;
+    if (disabled) {
+      input.placeholder = 'Refreshing context...';
+    } else {
+      input.placeholder = 'Message Claude...';
+    }
+  }
+  if (sendBtn) sendBtn.disabled = !!disabled;
+  if (attachBtn) attachBtn.disabled = !!disabled;
+  if (modeSelect) modeSelect.disabled = !!disabled;
+  if (modelSelect) modelSelect.disabled = !!disabled;
+}
+
 function updateChatStatusBar(session) {
   if (!session) return;
   document.getElementById('cs-mode').value = session.permissionMode || 'default';
   const model = session.model || session.contextUsage?.model || 'claude-sonnet-4-6';
   document.getElementById('cs-model').value = model;
   updateTokenBar(session);
+  setChatInputsDisabled(!!session.contextInProgress);
 }
 
 function updateTokenBar(session) {
@@ -1979,10 +2220,13 @@ function updateSessionMode(value) {
   const session = activeSessions[proj.activeSessionIdx || 0];
   if (!session) return;
   session.permissionMode = value;
-  // Use PTY Shift+Tab cycling (REPL bridge doesn't support set_permission_mode control requests)
-  api('POST', `/api/sessions/${session.id}/set-mode`, { mode: value }).catch(err => {
-    console.error('[mode] Failed:', err);
-  });
+  renderCenterTabs(proj);
+  if (!sendAgentCommand(session.id, { action: 'set_mode', mode: value })) {
+    // Fall back to HTTP
+    api('POST', `/api/sessions/${session.id}/set-mode`, { mode: value }).catch(err => {
+      console.error('[mode] Failed:', err);
+    });
+  }
 }
 
 function updateSessionModel(value) {
@@ -1992,19 +2236,23 @@ function updateSessionModel(value) {
   const session = activeSessions[proj.activeSessionIdx || 0];
   if (!session) return;
   session.model = value;
-  // Send set_model control request via session WS
-  const ws = sessionWsMap[session.id];
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify({
-      type: 'control_request',
-      request_id: crypto.randomUUID(),
-      request: { subtype: 'set_model', model: value },
-    }));
+  if (sendAgentCommand(session.id, { action: 'set_model', model: value })) {
+    // Agent handles model change + context refresh
+  } else {
+    // Fall back to legacy: send set_model control request via session WS
+    const ws = sessionWsMap[session.id];
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({
+        type: 'control_request',
+        request_id: crypto.randomUUID(),
+        request: { subtype: 'set_model', model: value },
+      }));
+    }
+    // Refresh context usage after model change so token bar updates
+    setTimeout(() => {
+      api('POST', `/api/sessions/${session.id}/refresh-context`).catch(() => {});
+    }, 1000);
   }
-  // Refresh context usage after model change so token bar updates
-  setTimeout(() => {
-    api('POST', `/api/sessions/${session.id}/refresh-context`).catch(() => {});
-  }, 1000);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2042,7 +2290,7 @@ function renderTuiView(proj, session) {
 // SEND MESSAGE
 // ═══════════════════════════════════════════════════════
 function handleChatKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
 }
 
 function handleTuiKey(e) {
@@ -2061,21 +2309,26 @@ async function sendMessage() {
   if (!session) return;
 
   const msgUuid = crypto.randomUUID();
-  session.messages.push({ role: 'user', content: text, _eventUuid: msgUuid });
   session.status = 'running';
   input.value = '';
   clearAttachments();
+
+  // Use agent WS if available, otherwise fall back to HTTP
+  if (sendAgentCommand(session.id, { action: 'send_message', text })) {
+    // Agent WS will echo back user_message — no local push needed
+  } else {
+    session.messages.push({ role: 'user', content: text, _eventUuid: msgUuid });
+    try {
+      await api('POST', `/api/sessions/${session.id}/message`, { message: text, uuid: msgUuid });
+    } catch (e) {
+      showToast(proj.name, `Failed to send: ${e.message}`, 'attention');
+    }
+  }
 
   renderChat(proj);
   renderCenterTabs(proj);
   renderSidebarProjects();
   updateGlobalCounts();
-
-  try {
-    await api('POST', `/api/sessions/${session.id}/message`, { message: text, uuid: msgUuid });
-  } catch (e) {
-    showToast(proj.name, `Failed to send: ${e.message}`, 'attention');
-  }
 }
 
 async function sendTuiMessage() {
@@ -2095,10 +2348,12 @@ async function sendTuiMessage() {
   renderTuiView(proj, session);
   renderCenterTabs(proj);
 
-  try {
-    await api('POST', `/api/sessions/${session.id}/message`, { message: text, uuid: msgUuid });
-  } catch (e) {
-    showToast(proj.name, `Failed: ${e.message}`, 'attention');
+  if (!sendAgentCommand(session.id, { action: 'send_message', text })) {
+    try {
+      await api('POST', `/api/sessions/${session.id}/message`, { message: text, uuid: msgUuid });
+    } catch (e) {
+      showToast(proj.name, `Failed: ${e.message}`, 'attention');
+    }
   }
 }
 
@@ -2111,31 +2366,44 @@ async function newSession() {
   if (!proj) return;
 
   try {
-    const result = await api('POST', '/api/sessions', { cwd: proj.path, skip_permissions: true });
-    // If the statusWs session_created broadcast already added this session, update it with API data
-    const existing = proj.sessions.find(s => s.id === result.id);
+    // Try agent-sessions endpoint first
+    pendingAgentCreation = true;
+    const result = await api('POST', '/api/agent-sessions', {
+      agentType: 'claude-code',
+      cwd: proj.path,
+      skipPermissions: true,
+    });
+    pendingAgentCreation = false;
+
+    const sessionId = result.sessionId;
+
+    // If the statusWs session_created broadcast already added this session, update it
+    const existing = proj.sessions.find(s => s.id === sessionId);
     if (existing) {
-      existing.permissionMode = result.permission_mode || 'bypassPermissions';
+      existing.permissionMode = result.mode || 'bypassPermissions';
       if (result.model) existing.model = result.model;
+      existing._capabilities = result.capabilities;
+      connectAgentWs(sessionId);
       updateChatStatusBar(existing);
       return;
     }
     const session = {
-      id: result.id,
-      title: result.title || 'New session',
+      id: sessionId,
+      title: 'New session',
       status: 'waiting',
       startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
       messages: [],
       lastMessage: '',
       viewMode: 'chat',
-      permissionMode: result.permission_mode || 'bypassPermissions',
+      permissionMode: result.mode || 'bypassPermissions',
       model: result.model || null,
+      _capabilities: result.capabilities,
     };
     proj.sessions.push(session);
     proj.activeSessionIdx = proj.sessions.filter(s => s.status !== 'ended').length - 1;
     state.activeTabType = 'session';
 
-    connectSessionWs(session.id);
+    connectAgentWs(sessionId);
 
     renderCenterTabs(proj);
     renderCenterContent(proj);
@@ -2144,7 +2412,41 @@ async function newSession() {
     updateGlobalCounts();
     showToast(proj.name, 'New session created', 'success');
   } catch (e) {
-    showToast(proj.name, `Failed: ${e.message}`, 'attention');
+    pendingAgentCreation = false;
+    // Fall back to legacy session creation
+    try {
+      const result = await api('POST', '/api/sessions', { cwd: proj.path, skip_permissions: true });
+      const existing = proj.sessions.find(s => s.id === result.id);
+      if (existing) {
+        existing.permissionMode = result.permission_mode || 'bypassPermissions';
+        if (result.model) existing.model = result.model;
+        updateChatStatusBar(existing);
+        return;
+      }
+      const session = {
+        id: result.id,
+        title: result.title || 'New session',
+        status: 'waiting',
+        startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        messages: [],
+        lastMessage: '',
+        viewMode: 'chat',
+        permissionMode: result.permission_mode || 'bypassPermissions',
+        model: result.model || null,
+      };
+      proj.sessions.push(session);
+      proj.activeSessionIdx = proj.sessions.filter(s => s.status !== 'ended').length - 1;
+      state.activeTabType = 'session';
+      connectSessionWs(session.id);
+      renderCenterTabs(proj);
+      renderCenterContent(proj);
+      renderSessions(proj);
+      renderSidebarProjects();
+      updateGlobalCounts();
+      showToast(proj.name, 'New session created', 'success');
+    } catch (e2) {
+      showToast(proj.name, `Failed: ${e2.message}`, 'attention');
+    }
   }
 }
 
@@ -3433,8 +3735,21 @@ function applyProjectSettings(settings) {
     const ghp = document.getElementById('git-history-panel');
     if (ghp) ghp.style.height = settings.git_history_height;
   }
-  if (settings.file_filter) setFileFilter(settings.file_filter);
-  if (settings.file_view) setFileView(settings.file_view);
+  // Apply file filter/view directly without triggering saveProjectSettings (avoid save loop)
+  if (settings.file_filter) {
+    state.fileFilter = settings.file_filter;
+    document.getElementById('tb-filter-all')?.classList.toggle('active', settings.file_filter === 'all');
+    document.getElementById('tb-filter-changed')?.classList.toggle('active', settings.file_filter === 'changed');
+  }
+  if (settings.file_view) {
+    state.fileView = settings.file_view;
+    document.getElementById('tb-view-tree')?.classList.toggle('active', settings.file_view === 'tree');
+    document.getElementById('tb-view-flat')?.classList.toggle('active', settings.file_view === 'flat');
+  }
+  if (settings.file_filter || settings.file_view) {
+    const proj = state.projects.find(p => p.id === state.activeProjectId);
+    if (proj) renderFileTree(proj);
+  }
   if (settings.stash_open !== undefined) state.stashOpen = settings.stash_open;
   if (settings.preview_visible !== undefined) state.previewVisible = settings.preview_visible;
   if (settings.preview_tabs) previewState.tabs = settings.preview_tabs;
@@ -3466,8 +3781,22 @@ function connectSettingsWs() {
 // ═══════════════════════════════════════════════════════
 document.addEventListener('keydown', (e) => {
   const tag = document.activeElement?.tagName;
+  // Allow Escape through even from inputs
+  if (e.key === 'Escape') {
+    hideCtxMenu(); closeModal();
+    // Forward Escape to CLI PTY for the active session
+    const proj = state.projects.find(p => p.id === state.activeProjectId);
+    if (proj) {
+      const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+      const session = activeSessions[proj.activeSessionIdx || 0];
+      if (session) {
+        if (!sendAgentCommand(session.id, { action: 'send_key', key: 'escape' })) {
+          api('POST', `/api/sessions/${session.id}/send-key`, { key: 'escape' }).catch(() => {});
+        }
+      }
+    }
+  }
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-  if (e.key === 'Escape') { hideCtxMenu(); closeModal(); }
   if (!selectedFilePath || !state.activeProjectId) return;
   if (e.key === 'F2') { e.preventDefault(); ctxRename(selectedFilePath, selectedFileType); }
   if (e.key === 'Delete') { e.preventDefault(); ctxDelete(selectedFilePath, selectedFileType); }

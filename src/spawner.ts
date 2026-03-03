@@ -23,6 +23,15 @@ interface SpawnedProcess {
 
 const spawnedProcesses = new Map<string, SpawnedProcess>();
 
+// Per-envId scrollback buffer — captures PTY output from spawn so browsers
+// connecting later (or after reload) can see prior output.
+const MAX_SPAWNER_SCROLLBACK = 200_000;
+const spawnerScrollback = new Map<string, string>();
+
+export function getScrollback(envId: string): string {
+  return spawnerScrollback.get(envId) || '';
+}
+
 /**
  * Pre-trust a workspace directory in ~/.claude.json so that
  * `claude remote-control` doesn't fail with "Workspace not trusted".
@@ -99,8 +108,20 @@ export function spawnCliProcess(options: {
     console.log(`[spawner] Started claude (pid=${pid}): claude ${args.join(' ')}`);
 
     let resolved = false;
+    let resolvedEnvId: string | null = null;
+    let earlyBuffer = '';
 
     term.onData((data: string) => {
+      // Accumulate scrollback for browser terminal replay
+      if (resolvedEnvId) {
+        let buf = spawnerScrollback.get(resolvedEnvId) || '';
+        buf += data;
+        if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
+        spawnerScrollback.set(resolvedEnvId, buf);
+      } else {
+        earlyBuffer += data;
+        if (earlyBuffer.length > MAX_SPAWNER_SCROLLBACK) earlyBuffer = earlyBuffer.slice(-MAX_SPAWNER_SCROLLBACK);
+      }
       const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
       if (stripped) console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
     });
@@ -110,6 +131,7 @@ export function spawnCliProcess(options: {
       for (const [envId, proc] of Array.from(spawnedProcesses.entries())) {
         if (proc.pty === term) {
           spawnedProcesses.delete(envId);
+          spawnerScrollback.delete(envId);
           break;
         }
       }
@@ -127,6 +149,10 @@ export function spawnCliProcess(options: {
         if (!existingEnvIds.has(id)) {
           clearInterval(timer);
           resolved = true;
+          resolvedEnvId = id;
+          // Flush early buffer into scrollback map
+          spawnerScrollback.set(id, earlyBuffer);
+          earlyBuffer = '';
           spawnedProcesses.set(id, { pty: term, envId: id, pid, preloadSessionId });
           console.log(`[spawner] CLI registered as environment ${id}`);
           resolve(id);
@@ -201,9 +227,21 @@ export function spawnForkedCliProcess(options: {
     console.log(`[spawner] Started forked claude (pid=${pid}): claude ${args.join(' ')}`);
 
     let resolved = false;
+    let resolvedEnvId: string | null = null;
+    let earlyBuffer = '';
     let output = '';
 
     term.onData((data: string) => {
+      // Accumulate scrollback for browser terminal replay
+      if (resolvedEnvId) {
+        let buf = spawnerScrollback.get(resolvedEnvId) || '';
+        buf += data;
+        if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
+        spawnerScrollback.set(resolvedEnvId, buf);
+      } else {
+        earlyBuffer += data;
+        if (earlyBuffer.length > MAX_SPAWNER_SCROLLBACK) earlyBuffer = earlyBuffer.slice(-MAX_SPAWNER_SCROLLBACK);
+      }
       const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
       if (stripped) {
         console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
@@ -216,6 +254,7 @@ export function spawnForkedCliProcess(options: {
       for (const [envId, proc] of Array.from(spawnedProcesses.entries())) {
         if (proc.pty === term) {
           spawnedProcesses.delete(envId);
+          spawnerScrollback.delete(envId);
           break;
         }
       }
@@ -241,6 +280,9 @@ export function spawnForkedCliProcess(options: {
         if (!existingEnvIds.has(id)) {
           clearInterval(timer);
           resolved = true;
+          resolvedEnvId = id;
+          spawnerScrollback.set(id, earlyBuffer);
+          earlyBuffer = '';
           spawnedProcesses.set(id, { pty: term, envId: id, pid, preloadSessionId });
           console.log(`[spawner] Forked CLI registered as environment ${id}`);
           resolve(id);
@@ -304,8 +346,19 @@ function spawnFreshFallback(
     console.log(`[spawner] Started fallback CLI (pid=${pid}): claude ${args.join(' ')}`);
 
     let resolved = false;
+    let resolvedEnvId: string | null = null;
+    let earlyBuffer = '';
 
     term.onData((data: string) => {
+      if (resolvedEnvId) {
+        let buf = spawnerScrollback.get(resolvedEnvId) || '';
+        buf += data;
+        if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
+        spawnerScrollback.set(resolvedEnvId, buf);
+      } else {
+        earlyBuffer += data;
+        if (earlyBuffer.length > MAX_SPAWNER_SCROLLBACK) earlyBuffer = earlyBuffer.slice(-MAX_SPAWNER_SCROLLBACK);
+      }
       const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
       if (stripped) console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
     });
@@ -315,6 +368,7 @@ function spawnFreshFallback(
       for (const [envId, proc] of Array.from(spawnedProcesses.entries())) {
         if (proc.pty === term) {
           spawnedProcesses.delete(envId);
+          spawnerScrollback.delete(envId);
           break;
         }
       }
@@ -331,6 +385,9 @@ function spawnFreshFallback(
         if (!existingEnvIds.has(id)) {
           clearInterval(timer);
           resolved = true;
+          resolvedEnvId = id;
+          spawnerScrollback.set(id, earlyBuffer);
+          earlyBuffer = '';
           spawnedProcesses.set(id, { pty: term, envId: id, pid, preloadSessionId });
           console.log(`[spawner] Fallback CLI registered as environment ${id}`);
           resolve(id);
@@ -398,8 +455,19 @@ export function spawnResumeCliProcess(options: {
     console.log(`[spawner] Started resume claude (pid=${pid}): claude ${args.join(' ')}`);
 
     let resolved = false;
+    let resolvedEnvId: string | null = null;
+    let earlyBuffer = '';
 
     term.onData((data: string) => {
+      if (resolvedEnvId) {
+        let buf = spawnerScrollback.get(resolvedEnvId) || '';
+        buf += data;
+        if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
+        spawnerScrollback.set(resolvedEnvId, buf);
+      } else {
+        earlyBuffer += data;
+        if (earlyBuffer.length > MAX_SPAWNER_SCROLLBACK) earlyBuffer = earlyBuffer.slice(-MAX_SPAWNER_SCROLLBACK);
+      }
       const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
       if (stripped) console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
     });
@@ -409,6 +477,7 @@ export function spawnResumeCliProcess(options: {
       for (const [envId, proc] of Array.from(spawnedProcesses.entries())) {
         if (proc.pty === term) {
           spawnedProcesses.delete(envId);
+          spawnerScrollback.delete(envId);
           break;
         }
       }
@@ -425,6 +494,9 @@ export function spawnResumeCliProcess(options: {
         if (!existingEnvIds.has(id)) {
           clearInterval(timer);
           resolved = true;
+          resolvedEnvId = id;
+          spawnerScrollback.set(id, earlyBuffer);
+          earlyBuffer = '';
           spawnedProcesses.set(id, { pty: term, envId: id, pid, preloadSessionId });
           console.log(`[spawner] Resume CLI registered as environment ${id}`);
           resolve(id);
