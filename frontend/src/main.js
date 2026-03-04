@@ -429,9 +429,20 @@ function handleAgentMessage(sessionId, msg) {
 
     if (msg.type === 'user_message') {
       if (sess.messages.some(m => m._eventUuid === msg.id)) return;
-      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _attachments: msg.attachments });
+      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _rawEvent: msg.rawEvent, _attachments: msg.attachments });
     } else if (msg.type === 'assistant_message') {
-      sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
+      sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id, _rawEvent: msg.rawEvent });
+    } else if (msg.type === 'plan_approval') {
+      sess.status = 'waiting';
+      sess._pendingControl = msg;
+      sess.messages.push({
+        role: 'control_request',
+        content: { subtype: 'plan_approval', plan: msg.plan },
+        _eventUuid: msg.id,
+        _rawEvent: msg.rawEvent,
+        _requestId: msg.requestId,
+        _responded: msg.responded,
+      });
     } else if (msg.type === 'tool_request') {
       sess.status = 'waiting';
       sess._pendingControl = msg;
@@ -443,6 +454,7 @@ function handleAgentMessage(sessionId, msg) {
           tool_use: { name: msg.toolName, input: msg.input },
         },
         _eventUuid: msg.id,
+        _rawEvent: msg.rawEvent,
         _requestId: msg.requestId,
         _responded: msg.responded,
       });
@@ -451,6 +463,7 @@ function handleAgentMessage(sessionId, msg) {
         role: 'tool',
         content: `${msg.toolName}: ${msg.output.substring(0, 100)}`,
         _eventUuid: msg.id,
+        _rawEvent: msg.rawEvent,
       });
     } else if (msg.type === 'question') {
       sess.status = 'waiting';
@@ -462,6 +475,7 @@ function handleAgentMessage(sessionId, msg) {
           tool_use: { name: 'AskUserQuestion', input: { questions: msg.questions } },
         },
         _eventUuid: msg.id,
+        _rawEvent: msg.rawEvent,
         _requestId: msg.requestId,
         _responded: msg.responded,
       });
@@ -1883,13 +1897,19 @@ const questionAnswers = {};
 
 function renderControlRequest(m, session) {
   const req = m.content;
-  const toolName = req?.tool_name || req?.request?.tool_name || req?.name || '';
-  const input = req?.input || req?.request?.input || {};
+  const toolName = req?.tool_use?.name || req?.tool_name || req?.request?.tool_name || req?.name || '';
+  const input = req?.tool_use?.input || req?.input || req?.request?.input || req?.tool_use || {};
   const isResponded = m._responded;
 
   // AskUserQuestion — show radio button options
-  if (toolName === 'AskUserQuestion') {
+  if (toolName === 'AskUserQuestion' || req?.subtype === 'ask_user_question') {
     return renderUserQuestion(m, session, input, isResponded);
+  }
+
+  // ExitPlanMode — show plan with Approve/Deny
+  if (toolName === 'ExitPlanMode' || req?.subtype === 'plan_approval') {
+    const plan = req?.plan || input?.plan || '';
+    return renderPlanApproval(m, session, plan, isResponded);
   }
 
   // Already responded tool approval — show nothing
@@ -1955,6 +1975,26 @@ function renderUserQuestion(m, session, input, isResponded) {
   html += `<div class="chat-question-buttons">
     <button class="chat-question-submit" ${allAnswered ? '' : 'disabled'} onclick="submitQuestion('${uuid}','${session.id}')">Submit</button>
     <button class="chat-question-skip" onclick="skipQuestion('${uuid}','${session.id}')">Skip</button>
+  </div>`;
+  html += '</div>';
+  return html;
+}
+
+function renderPlanApproval(m, session, plan, isResponded) {
+  if (isResponded) {
+    const approved = m._response === 'approved';
+    return `<div class="chat-plan-responded">
+      <span class="chat-plan-responded-icon">${approved ? '\u2705' : '\u274C'}</span>
+      <span>Plan ${approved ? 'approved' : 'denied'}</span>
+    </div>`;
+  }
+
+  let html = '<div class="chat-plan-approval">';
+  html += '<div class="chat-plan-header">Plan Approval</div>';
+  html += `<div class="chat-plan-content">${renderMd(plan)}</div>`;
+  html += `<div class="chat-plan-buttons">
+    <button class="chat-plan-approve" onclick="approveControl('${session.id}')">Approve Plan</button>
+    <button class="chat-plan-deny" onclick="denyControl('${session.id}')">Deny</button>
   </div>`;
   html += '</div>';
   return html;

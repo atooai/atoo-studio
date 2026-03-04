@@ -8,6 +8,7 @@ export interface AbstractMessageBase {
   id: string;
   sessionId: string;
   timestamp: number;
+  rawEvent?: any;
 }
 
 export interface UserMessage extends AbstractMessageBase {
@@ -40,10 +41,23 @@ export interface ToolResult extends AbstractMessageBase {
   isError: boolean;
 }
 
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface QuestionItem {
+  question: string;
+  header?: string;
+  options: QuestionOption[];
+  allowFreeInput?: boolean;
+  multiSelect?: boolean;
+}
+
 export interface Question extends AbstractMessageBase {
   type: 'question';
   requestId: string;
-  questions: any[];
+  questions: QuestionItem[];
   responded: boolean;
 }
 
@@ -82,6 +96,14 @@ export interface FileChange extends AbstractMessageBase {
   oldPath?: string;
 }
 
+export interface PlanApproval extends AbstractMessageBase {
+  type: 'plan_approval';
+  requestId: string;
+  plan: string;
+  responded: boolean;
+  response?: 'approved' | 'denied';
+}
+
 export type AbstractMessage =
   | UserMessage
   | AssistantMessage
@@ -92,7 +114,8 @@ export type AbstractMessage =
   | ContextUsage
   | SystemMessage
   | ResultMessage
-  | FileChange;
+  | FileChange
+  | PlanApproval;
 
 // ═══════════════════════════════════════════════════════
 // Agent Status

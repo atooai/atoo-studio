@@ -20,6 +20,7 @@ class Store {
   agentStatuses = new Map<string, AgentStatus>(); // sessionId → status
   contextUsages = new Map<string, { model: string; usedTokens: number; totalTokens: number; percent: number; freePercent: number }>(); // sessionId → token usage
   contextInProgressSessions = new Set<string>(); // sessions currently running /context flow
+  pendingIngressResponses = new Map<string, any[]>(); // sessionId → queued control_responses for HTTP delivery
 
   // WebSocket connections
   subscribeClients = new Map<string, Set<WebSocket>>(); // sessionId → browser WSs
@@ -246,10 +247,24 @@ class Store {
   }
 
   forwardToIngress(sessionId: string, message: any): void {
+    // Send via WS
     const ws = this.ingressClients.get(sessionId);
     if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify(message) + '\n'); // NDJSON
+      ws.send(JSON.stringify(message) + '\n');
     }
+    // Also queue for HTTP delivery (CLI's HybridTransport may read responses from POST replies)
+    if (!this.pendingIngressResponses.has(sessionId)) {
+      this.pendingIngressResponses.set(sessionId, []);
+    }
+    this.pendingIngressResponses.get(sessionId)!.push(message);
+  }
+
+  /** Drain pending responses queued for a session (used by HTTP POST handler). */
+  drainPendingIngressResponses(sessionId: string): any[] {
+    const pending = this.pendingIngressResponses.get(sessionId);
+    if (!pending || pending.length === 0) return [];
+    this.pendingIngressResponses.delete(sessionId);
+    return pending;
   }
 
   /**
