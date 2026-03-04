@@ -2261,7 +2261,6 @@ function setChatInputsDisabled(disabled) {
   const modelSelect = document.getElementById('cs-model');
 
   if (input) {
-    input.disabled = !!disabled;
     if (disabled) {
       input.placeholder = 'Refreshing context...';
     } else {

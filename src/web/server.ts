@@ -16,6 +16,7 @@ import { environmentsRouter, setBroadcastSettingsChange } from '../handlers/envi
 import { isAgentWsUpgrade, handleAgentWsUpgrade } from '../ws/agent-ws.js';
 import { agentRegistry } from '../agents/registry.js';
 import { createPortProxy, portProxyMiddleware, isPortProxyUpgrade, handlePortProxyUpgrade } from './port-proxy.js';
+import { sendContextAndRewind } from '../agents/claude-code/pty-actions.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -330,33 +331,12 @@ export function createWebServer(): http.Server {
     const ptyInst = getPty(envId);
     if (!ptyInst) return res.status(400).json({ error: 'No PTY for session' });
 
-    // Type /context + Enter, wait, then /rewind sequence
-    store.setContextInProgress(session.id, true);
-    ptyInst.write('/context');
-    setTimeout(() => {
-      ptyInst.write('\r');
-      setTimeout(() => {
-        ptyInst.write('/rewind');
-        setTimeout(() => {
-          ptyInst.write('\r');
-          setTimeout(() => {
-            ptyInst.write('\x1b[A'); // Arrow up
-            setTimeout(() => {
-              ptyInst.write('\r');
-              setTimeout(() => {
-                ptyInst.write('\r');
-                setTimeout(() => {
-                  ptyInst.write('\x7f'.repeat(12)); // backspaces to clear
-                  setTimeout(() => {
-                    store.setContextInProgress(session.id, false);
-                  }, 500);
-                }, 1000);
-              }, 1000);
-            }, 500);
-          }, 1500);
-        }, 200);
-      }, 3000);
-    }, 200);
+    sendContextAndRewind(ptyInst, session.id, 500, (inProgress) => {
+      store.setContextInProgress(session.id, inProgress);
+    }).catch(err => {
+      console.error(`[server] /context sequence error:`, err);
+      store.setContextInProgress(session.id, false);
+    });
 
     res.json({ success: true });
   });
