@@ -474,6 +474,65 @@ export function createWebServer(): http.Server {
     }
   });
 
+  // Extract text from office documents (docx, xlsx, pptx)
+  app.post('/api/extract-text', async (req, res) => {
+    const { data, name } = req.body;
+    if (!data || !name) return res.status(400).json({ error: 'data and name are required' });
+
+    const ext = name.split('.').pop()?.toLowerCase();
+    const buf = Buffer.from(data, 'base64');
+
+    try {
+      let text = '';
+      if (ext === 'docx') {
+        const mammoth = await import('mammoth');
+        const result = await mammoth.default.extractRawText({ buffer: buf });
+        text = result.value;
+      } else if (ext === 'xlsx' || ext === 'xls') {
+        const XLSX = await import('xlsx');
+        const workbook = XLSX.read(buf, { type: 'buffer' });
+        const sheets: string[] = [];
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          sheets.push(`--- Sheet: ${sheetName} ---\n${csv}`);
+        }
+        text = sheets.join('\n\n');
+      } else if (ext === 'pptx') {
+        // pptx is a zip of XML slides — extract text from slide XML files
+        const { Readable } = await import('stream');
+        const unzipper = await import('unzipper');
+        const slides: { num: number; text: string }[] = [];
+        const stream = Readable.from(buf);
+        const directory = await (stream.pipe(unzipper.default.Parse()) as any);
+        for await (const entry of directory) {
+          const entryPath: string = entry.path;
+          if (entryPath.match(/^ppt\/slides\/slide\d+\.xml$/)) {
+            const xml: string = (await entry.buffer()).toString('utf-8');
+            // Extract text from <a:t> tags
+            const texts: string[] = [];
+            const re = /<a:t[^>]*>([\s\S]*?)<\/a:t>/g;
+            let m;
+            while ((m = re.exec(xml)) !== null) texts.push(m[1]);
+            const slideNum = parseInt(entryPath.match(/slide(\d+)/)?.[1] || '0');
+            if (texts.length) slides.push({ num: slideNum, text: texts.join(' ') });
+          } else {
+            entry.autodrain();
+          }
+        }
+        slides.sort((a, b) => a.num - b.num);
+        text = slides.map(s => `--- Slide ${s.num} ---\n${s.text}`).join('\n\n');
+      } else {
+        return res.status(400).json({ error: `Unsupported file type: .${ext}` });
+      }
+
+      res.json({ text });
+    } catch (err: any) {
+      console.error(`[web] extract-text error for ${name}:`, err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Mount changes API routes
   app.use(changesRouter);
 

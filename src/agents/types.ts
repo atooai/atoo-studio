@@ -37,8 +37,10 @@ export interface ToolResult extends AbstractMessageBase {
   type: 'tool_result';
   requestId: string;
   toolName: string;
+  input?: any;
   output: string;
   isError: boolean;
+  isPending?: boolean;
 }
 
 export interface QuestionOption {
@@ -104,6 +106,11 @@ export interface PlanApproval extends AbstractMessageBase {
   response?: 'approved' | 'denied';
 }
 
+export interface ThinkingMessage extends AbstractMessageBase {
+  type: 'thinking';
+  text: string;
+}
+
 export type AbstractMessage =
   | UserMessage
   | AssistantMessage
@@ -115,7 +122,8 @@ export type AbstractMessage =
   | SystemMessage
   | ResultMessage
   | FileChange
-  | PlanApproval;
+  | PlanApproval
+  | ThinkingMessage;
 
 // ═══════════════════════════════════════════════════════
 // Agent Status
@@ -225,8 +233,9 @@ export interface AgentFactory {
 
 export interface Attachment {
   media_type: string;
-  data: string;      // base64
+  data: string;      // base64 (image/pdf) or empty string (text-based)
   name?: string;
+  text?: string;     // plain text content (for text-based files)
 }
 
 // ═══════════════════════════════════════════════════════

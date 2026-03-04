@@ -47,9 +47,9 @@ window.addEventListener('unhandledrejection', function(e) {
         <span class="status-chip-count" id="count-active">0</span>
         <span class="status-chip-label">Active</span>
       </div>
-      <div class="status-chip idle" onclick="filterProjects('all')" title="Total projects">
-        <span class="status-chip-count" id="count-total">0</span>
-        <span class="status-chip-label">Projects</span>
+      <div class="status-chip open-chats" onclick="filterProjects('chats')" title="Open chats across all projects">
+        <span class="status-chip-count" id="count-chats">0</span>
+        <span class="status-chip-label">Open Chats</span>
       </div>
     </div>
     <div class="project-list-header">
@@ -195,6 +195,7 @@ window.addEventListener('unhandledrejection', function(e) {
               <button class="chat-attach-btn" onclick="document.getElementById('chat-file-input').click()" title="Attach file">📎</button>
               <input type="file" id="chat-file-input" multiple style="display:none" onchange="handleFileAttach(this.files)">
               <textarea class="chat-input" id="chat-input" placeholder="Message Claude..." onkeydown="handleChatKey(event)" onpaste="handleChatPaste(event)" rows="1"></textarea>
+              <button class="chat-mic-btn" id="chat-mic-btn" onclick="toggleSpeech()" title="Voice input (Ctrl+Space)"><span class="mic-icon">🎤</span><span class="mic-lang" id="mic-lang"></span></button>
               <button class="chat-send-btn" id="chat-send-btn" onclick="sendMessage()">↑</button>
             </div>
             <div class="chat-status-bar hidden" id="chat-status-bar">
@@ -249,6 +250,7 @@ window.addEventListener('unhandledrejection', function(e) {
         <div class="preview-frame-container" id="preview-frames"></div>
         <div class="preview-bottom-bar">
           <div class="preview-url-bar">
+            <button class="preview-mode-btn" id="preview-mode-btn" onclick="togglePreviewMode()" title="Browser mode: URL is loaded directly by your browser.&#10;Click to switch to Server mode.">B</button>
             <input type="text" class="preview-url-input" id="preview-url" placeholder="">
             <button class="preview-refresh-btn" onclick="loadPreview()">↻</button>
             <button class="preview-refresh-btn" onclick="openPreviewExternal()" title="Open in new tab">↗</button>

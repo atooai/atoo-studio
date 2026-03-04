@@ -35,9 +35,24 @@ const editorState = {
 const previewState = {
   tabs: [],
   activeIdx: 0,
+  mode: 'browser', // 'browser' = direct URL, 'server' = proxy through /at/port/
 };
 
 const chatAttachments = [];
+let historyIndex = -1;       // -1 = composing new message
+let historyDraft = '';        // stash current draft when navigating
+let historyDraftAttachments = [];
+let speechRecognition = null;
+let isRecording = false;
+let speechLang = localStorage.getItem('speechLang') || navigator.language || 'en-US';
+let micLongPressTimer = null;
+const SPEECH_LANGUAGES = [
+  { code: 'en-US', label: 'English' },
+  { code: 'de-DE', label: 'Deutsch' },
+  { code: 'fr-FR', label: 'Français' },
+  { code: 'es-ES', label: 'Español' },
+  { code: 'zh-CN', label: '中文' },
+];
 
 let selectedFilePath = null;
 let selectedFileType = null;
@@ -285,26 +300,30 @@ function handleSessionEvent(sessionId, event) {
       // Skip if we already have this message (sent by us or already received)
       if (sess.messages.some(m => m._eventUuid === event.uuid)) return;
       const displayContent = typeof event.message.content === 'string' ? event.message.content : text;
-      // Extract image attachments from content blocks
+      // Extract attachments from content blocks (images, documents, text files)
       let attachments;
       if (Array.isArray(event.message.content)) {
         attachments = event.message.content
-          .filter(b => b.type === 'image' && b.source)
-          .map(b => ({ media_type: b.source.media_type, data: b.source.data }));
+          .filter(b => (b.type === 'image' && b.source) || (b.type === 'document' && b.source))
+          .map(b => ({ media_type: b.source.media_type, data: b.source.data, name: b.name, kind: b.type === 'image' ? 'image' : 'pdf' }));
         if (!attachments.length) attachments = undefined;
       }
       sess.messages.push({ role: 'user', content: displayContent, _eventUuid: event.uuid, _rawEvent: event, _attachments: attachments });
     } else if (event.type === 'assistant' && event.message) {
       const msg = event.message;
+      // Skip synthetic messages
+      if (msg.model === '<synthetic>') return;
       if (msg.content) {
         // Handle content array or string
         if (Array.isArray(msg.content)) {
           for (const block of msg.content) {
-            if (block.type === 'text') {
+            if (block.type === 'thinking' && block.thinking) {
+              sess.messages.push({ role: 'thinking', content: block.thinking, _eventUuid: event.uuid, _rawEvent: event });
+            } else if (block.type === 'text') {
               if (hasAnsi(block.text)) continue;
               sess.messages.push({ role: 'assistant', content: block.text, _eventUuid: event.uuid, _rawEvent: event });
             } else if (block.type === 'tool_use') {
-              sess.messages.push({ role: 'tool', content: `${block.name}: ${JSON.stringify(block.input).substring(0, 100)}`, _eventUuid: event.uuid, _toolUseId: block.id, _rawEvent: event });
+              sess.messages.push({ role: 'tool', content: `${block.name}: ${JSON.stringify(block.input).substring(0, 100)}`, _eventUuid: event.uuid, _toolUseId: block.id, _rawEvent: event, _toolName: block.name, _toolInput: block.input });
             }
           }
         } else if (typeof msg.content === 'string') {
@@ -421,6 +440,7 @@ function handleAgentMessage(sessionId, msg) {
       if (msg.mode) sess.permissionMode = msg.mode;
       if (msg.model) sess.model = msg.model;
       if (msg.capabilities) sess._capabilities = msg.capabilities;
+      removeSessionLoadingOverlay();
       if (proj.id === state.activeProjectId) {
         updateChatStatusBar(sess);
       }
@@ -431,7 +451,11 @@ function handleAgentMessage(sessionId, msg) {
       if (sess.messages.some(m => m._eventUuid === msg.id)) return;
       sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _rawEvent: msg.rawEvent, _attachments: msg.attachments });
     } else if (msg.type === 'assistant_message') {
+      // Skip synthetic messages
+      if (msg.rawEvent?.message?.model === '<synthetic>') return;
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id, _rawEvent: msg.rawEvent });
+    } else if (msg.type === 'thinking') {
+      sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.id, _rawEvent: msg.rawEvent });
     } else if (msg.type === 'plan_approval') {
       sess.status = 'waiting';
       sess._pendingControl = msg;
@@ -444,9 +468,10 @@ function handleAgentMessage(sessionId, msg) {
         _responded: msg.responded,
       });
     } else if (msg.type === 'tool_request') {
+      // Skip if already responded (auto-approved) — pending tool_result handles display
+      if (msg.responded) return;
       sess.status = 'waiting';
       sess._pendingControl = msg;
-      // Check if it's an AskUserQuestion-type by tool name
       sess.messages.push({
         role: 'control_request',
         content: {
@@ -459,12 +484,43 @@ function handleAgentMessage(sessionId, msg) {
         _responded: msg.responded,
       });
     } else if (msg.type === 'tool_result') {
-      sess.messages.push({
-        role: 'tool',
-        content: `${msg.toolName}: ${msg.output.substring(0, 100)}`,
-        _eventUuid: msg.id,
-        _rawEvent: msg.rawEvent,
-      });
+      if (msg.isPending) {
+        // Tool just started — show pending bubble
+        sess.messages.push({
+          role: 'tool',
+          content: `${msg.toolName}: running...`,
+          _eventUuid: msg.id,
+          _rawEvent: msg.rawEvent,
+          _toolName: msg.toolName,
+          _toolInput: msg.input,
+          _requestId: msg.requestId,
+          _pending: true,
+        });
+      } else {
+        // Tool finished — try to update existing pending message in-place
+        const pending = sess.messages.find(m => m._pending && m._requestId === msg.requestId);
+        if (pending) {
+          pending.content = `${msg.toolName}: ${msg.output.substring(0, 100)}`;
+          pending._toolOutput = msg.output;
+          pending._toolInput = pending._toolInput || msg.input;
+          pending._isError = msg.isError;
+          pending._pending = false;
+          pending._rawEvent = msg.rawEvent || pending._rawEvent;
+          // Force re-render of this specific element
+          _chatRenderedCount = 0;
+        } else {
+          sess.messages.push({
+            role: 'tool',
+            content: `${msg.toolName}: ${msg.output.substring(0, 100)}`,
+            _eventUuid: msg.id,
+            _rawEvent: msg.rawEvent,
+            _toolName: msg.toolName,
+            _toolInput: msg.input,
+            _toolOutput: msg.output,
+            _isError: msg.isError,
+          });
+        }
+      }
     } else if (msg.type === 'question') {
       sess.status = 'waiting';
       sess._pendingControl = msg;
@@ -560,10 +616,11 @@ function renderSidebarProjects() {
     const isActive = p.id === state.activeProjectId;
     const initials = p.name.substring(0, 2).toUpperCase();
     const waitingCount = p.sessions.filter(s => s.status === 'waiting').length;
-    const runningCount = p.sessions.filter(s => s.status === 'running').length;
-    const sessionCount = p.sessions.length;
+    const activeCount = p.sessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
+    const openChats = p.sessions.filter(s => s.status !== 'ended').length;
+    const hasAttention = waitingCount > 0;
 
-    return `<div class="project-item ${isActive ? 'active' : ''}" onclick="selectProject('${p.id}', '${p.pe_id || ''}')" title="${p.name}">
+    return `<div class="project-item ${isActive ? 'active' : ''} ${hasAttention ? 'has-attention' : ''}" onclick="selectProject('${p.id}', '${p.pe_id || ''}')" title="${p.name}">
       <div class="project-square-icon">
         ${initials}
         <span class="project-square-notif ${status}"></span>
@@ -574,23 +631,24 @@ function renderSidebarProjects() {
         <div class="project-path">${p.path}</div>
       </div>
       <div class="project-badges">
-        ${waitingCount > 0 ? `<span class="badge badge-attention">${waitingCount}</span>` : ''}
-        ${runningCount > 0 ? `<span class="badge badge-tui">${runningCount}</span>` : ''}
-        ${p.isGit ? '<span class="badge badge-git">⑂</span>' : ''}
+        <span class="badge badge-attention">${waitingCount}</span>
+        <span class="badge badge-active">${activeCount}</span>
+        <span class="badge badge-chats">${openChats}</span>
       </div>
     </div>`;
   }).join('');
 }
 
 function updateGlobalCounts() {
-  let attention = 0, active = 0;
+  let attention = 0, active = 0, openChats = 0;
   state.projects.forEach(p => {
-    if (p.sessions.some(s => s.status === 'waiting')) attention++;
-    if (p.sessions.some(s => s.status === 'running' || s.status === 'waiting')) active++;
+    attention += p.sessions.filter(s => s.status === 'waiting').length;
+    active += p.sessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
+    openChats += p.sessions.filter(s => s.status !== 'ended').length;
   });
   document.getElementById('count-attention').textContent = attention;
   document.getElementById('count-active').textContent = active;
-  document.getElementById('count-total').textContent = state.projects.length;
+  document.getElementById('count-chats').textContent = openChats;
 }
 
 function toggleSidebarCollapse() {
@@ -614,8 +672,9 @@ function renderOverview() {
   grid.innerHTML = state.projects.map(p => {
     const status = getProjectStatus(p);
     const hasAttention = p.sessions.some(s => s.status === 'waiting');
-    const sessionCount = p.sessions.length;
-    const changeCount = (p.gitChanges || []).length;
+    const waitingCount = p.sessions.filter(s => s.status === 'waiting').length;
+    const activeCount = p.sessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
+    const openChats = p.sessions.filter(s => s.status !== 'ended').length;
 
     const sessionsHtml = p.sessions.slice(0, 3).map(s => {
       const dotClass = s.status === 'ended' ? 'ended' : s.status === 'waiting' ? 'waiting' : s.status === 'running' ? 'live' : 'ended';
@@ -632,9 +691,10 @@ function renderOverview() {
         <span class="oc-name">${p.name}</span>
       </div>
       <div class="oc-path">${p.path}</div>
-      <div class="oc-stats">
-        <span class="oc-stat"><span class="oc-stat-icon">◉</span><span class="oc-stat-value">${sessionCount}</span> sessions</span>
-        ${p.isGit ? `<span class="oc-stat"><span class="oc-stat-icon">Δ</span><span class="oc-stat-value">${changeCount}</span> changes</span>` : ''}
+      <div class="oc-badges">
+        <span class="badge badge-attention">${waitingCount}</span>
+        <span class="badge badge-active">${activeCount}</span>
+        <span class="badge badge-chats">${openChats}</span>
       </div>
       ${sessionsHtml ? `<div class="oc-sessions">${sessionsHtml}</div>` : ''}
     </div>`;
@@ -1814,7 +1874,7 @@ function filterMessages(messages, showVerbose) {
     let lastAssistantIdx = -1, toolCount = 0, intermediateCount = 0;
     while (i < messages.length && messages[i].role !== 'user') {
       if (messages[i].role === 'tool') toolCount++;
-      if (messages[i].role === 'assistant') lastAssistantIdx = i;
+      if (messages[i].role === 'assistant' || messages[i].role === 'thinking') lastAssistantIdx = i;
       i++;
     }
     for (let j = blockStart; j < i; j++) { if (j !== lastAssistantIdx) intermediateCount++; }
@@ -1828,67 +1888,239 @@ function filterMessages(messages, showVerbose) {
   return result;
 }
 
+// --- Incremental chat rendering ---
+// Tracks what's currently in the DOM to avoid full rebuilds.
+let _chatSessionId = null;
+let _chatRenderedCount = 0;
+let _chatRenderedVerbose = true;
+let _chatRenderedStatus = '';
+
+let _renderChatTimer = null;
 function renderChat(proj) {
+  if (_renderChatTimer) return;
+  _renderChatTimer = requestAnimationFrame(() => {
+    _renderChatTimer = null;
+    _renderChatImmediate(proj);
+  });
+}
+
+function renderThinkingBlock(m) {
+  const uuid = m._eventUuid || '';
+  const mode = mdToggleState[uuid] || 'md';
+  const toolbar = `<span class="chat-bubble-toolbar"><span class="chat-bubble-btn" onclick="event.stopPropagation(); copyBubble(this)" title="Copy">${svgCopy}</span><span class="chat-bubble-btn" onclick="event.stopPropagation(); toggleMd('${esc(uuid)}')" title="Toggle view mode">${mode}</span></span>`;
+  const rawAttr = `data-raw-md="${escAttr(m.content)}"`;
+  let body;
+  if (mode === 'txt') {
+    body = `<div class="chat-text-raw" ${rawAttr}>${escHtml(m.content)}</div>`;
+  } else if (mode === 'raw') {
+    const rawJson = m._rawEvent ? JSON.stringify(m._rawEvent, null, 2) : m.content;
+    body = `<div class="chat-text-raw" ${rawAttr}>${escHtml(rawJson)}</div>`;
+  } else {
+    body = `<div class="md-content" ${rawAttr}>${renderMd(m.content)}</div>`;
+  }
+  return `<div class="chat-thinking">
+    <div class="chat-thinking-header">Thinking</div>
+    ${toolbar}${body}
+  </div>`;
+}
+
+function renderToolBlock(m, fi) {
+  const rawBtn = m._rawEvent ? `<span class="chat-raw-btn" onclick="showRawEvent(${fi})" title="Show raw event JSON">raw</span>` : '';
+  const toolName = m._toolName || '';
+  const uuid = m._eventUuid || '';
+  const mode = mdToggleState[uuid] || 'md';
+  const toggleBtn = `<span class="chat-bubble-btn" onclick="event.stopPropagation(); toggleMd('${esc(uuid)}')" title="Toggle view mode">${mode}</span>`;
+
+  // Build the tool-specific detail section
+  let detail = '';
+  if (m._toolInput) {
+    const input = m._toolInput;
+    if (toolName === 'Bash' && input.command) {
+      detail = `<div class="chat-tool-command">${escHtml(input.command)}</div>`;
+    } else if ((toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') && input.file_path) {
+      detail = `<div class="chat-tool-filepath">${escHtml(input.file_path)}</div>`;
+      if (toolName === 'Edit' && input.old_string) {
+        detail += `<details class="chat-tool-details"><summary>diff</summary><pre>${escHtml(input.old_string)}\n→\n${escHtml(input.new_string || '')}</pre></details>`;
+      }
+    } else if ((toolName === 'Grep' || toolName === 'Glob') && input.pattern) {
+      detail = `<div class="chat-tool-filepath">${escHtml(input.pattern)}${input.path ? ' in ' + escHtml(input.path) : ''}</div>`;
+    } else {
+      // Generic: show JSON params
+      const json = JSON.stringify(input, null, 2);
+      if (json.length > 2) {
+        detail = `<details class="chat-tool-details"><summary>params</summary><pre>${escHtml(json)}</pre></details>`;
+      }
+    }
+  }
+
+  // Pending indicator
+  if (m._pending) {
+    const pendingHtml = `<div class="chat-tool-pending">Running...</div>`;
+    return `<div class="chat-tool-use pending">
+      <div class="chat-tool-header"><span class="tool-icon">⚡</span><span class="chat-tool-name">${escHtml(toolName || 'Tool')}</span>${rawBtn}</div>
+      ${detail}${pendingHtml}
+    </div>`;
+  }
+
+  // Tool output (from tool_result)
+  let outputHtml = '';
+  if (m._toolOutput) {
+    if (mode === 'raw') {
+      const rawJson = m._rawEvent ? JSON.stringify(m._rawEvent, null, 2) : m._toolOutput;
+      outputHtml = `<div class="chat-tool-output"><pre>${escHtml(rawJson)}</pre></div>`;
+    } else if (mode === 'txt') {
+      outputHtml = `<div class="chat-tool-output"><pre>${escHtml(m._toolOutput)}</pre></div>`;
+    } else {
+      // md mode — show truncated output, expandable
+      const output = m._toolOutput;
+      if (output.length > 300) {
+        outputHtml = `<details class="chat-tool-output"><summary>output (${output.length} chars)${m._isError ? ' ⚠ error' : ''}</summary><pre>${escHtml(output)}</pre></details>`;
+      } else if (output.trim()) {
+        outputHtml = `<div class="chat-tool-output${m._isError ? ' error' : ''}"><pre>${escHtml(output)}</pre></div>`;
+      }
+    }
+  }
+
+  // Fallback for tools without structured data
+  if (!toolName && !m._toolInput && !m._toolOutput) {
+    return `<div class="chat-tool-use"><span class="tool-icon">⚡</span>${escHtml(m.content)}${rawBtn}</div>`;
+  }
+
+  return `<div class="chat-tool-use">
+    <div class="chat-tool-header"><span class="tool-icon">⚡</span><span class="chat-tool-name">${escHtml(toolName || 'Tool')}</span>${toggleBtn}${rawBtn}</div>
+    ${detail}${outputHtml}
+  </div>`;
+}
+
+function renderOneMessage(m, fi, session) {
+  const rawBtn = m._rawEvent ? `<span class="chat-raw-btn" onclick="showRawEvent(${fi})" title="Show raw event JSON">raw</span>` : '';
+  if (m.role === '_collapsed') {
+    return `<div class="chat-collapsed-indicator" onclick="expandCollapsed()">
+      <span>⋯</span>
+      <span class="chat-collapsed-count">${m.toolCount > 0 ? m.toolCount + ' tool call' + (m.toolCount > 1 ? 's' : '') : ''}</span>
+      <span style="font-size:10px">click to show</span>
+    </div>`;
+  }
+  if (m.role === 'thinking') {
+    return renderThinkingBlock(m);
+  }
+  if (m.role === 'tool') {
+    return renderToolBlock(m, fi);
+  }
+  if (m.role === 'control_request') {
+    return renderControlRequest(m, session);
+  }
+  const isUser = m.role === 'user';
+  const attachHtml = (m._attachments && m._attachments.length)
+    ? m._attachments.map(a => {
+        if (a.text) {
+          // Text-based attachment — show as chip
+          const icon = getAttachIcon(a.kind || 'text');
+          return `<div class="chat-attach-chip-inline">${icon} ${escHtml(a.name || 'file')}</div>`;
+        }
+        if (a.media_type === 'application/pdf') {
+          return `<div class="chat-attach-chip-inline">📄 ${escHtml(a.name || 'document.pdf')}</div>`;
+        }
+        return `<img class="chat-attachment-img" src="data:${a.media_type};base64,${a.data}" alt="attachment">`;
+      }).join('')
+    : '';
+  let bubbleContent;
+  if (isUser) {
+    bubbleContent = escHtml(m.content);
+  } else {
+    const uuid = m._eventUuid || '';
+    const mode = mdToggleState[uuid] || 'md';
+    const toolbar = `<span class="chat-bubble-toolbar"><span class="chat-bubble-btn" onclick="event.stopPropagation(); copyBubble(this)" title="Copy">${svgCopy}</span><span class="chat-bubble-btn" onclick="event.stopPropagation(); toggleMd('${esc(uuid)}')" title="Toggle view mode">${mode}</span></span>`;
+    const rawAttr = `data-raw-md="${escAttr(m.content)}"`;
+    if (mode === 'txt') {
+      bubbleContent = `${toolbar}<div class="chat-text-raw" ${rawAttr}>${escHtml(m.content)}</div>`;
+    } else if (mode === 'raw') {
+      const rawJson = m._rawEvent ? JSON.stringify(m._rawEvent, null, 2) : m.content;
+      bubbleContent = `${toolbar}<div class="chat-text-raw" ${rawAttr}>${escHtml(rawJson)}</div>`;
+    } else {
+      bubbleContent = `${toolbar}<div class="md-content" ${rawAttr}>${renderMd(m.content)}</div>`;
+    }
+  }
+  return `<div class="chat-msg ${m.role}">
+    <div class="chat-avatar ${isUser ? 'you' : 'claude'}">${isUser ? 'Y' : 'C'}</div>
+    <div class="chat-bubble">${attachHtml}${bubbleContent}</div>
+  </div>`;
+}
+
+function getStatusHtml(session) {
+  if (session.status === 'waiting') {
+    return `<div class="chat-status-line"><span class="waiting-indicator">⏳ Waiting for your input</span></div>`;
+  } else if (session.status === 'running') {
+    return `<div class="chat-status-line" style="color: var(--accent-green)">● Claude is working...</div>`;
+  }
+  return '';
+}
+
+function _renderChatImmediate(proj) {
   const area = document.getElementById('chat-area');
   const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
   const session = activeSessions[proj.activeSessionIdx || 0];
   if (!session) {
     area.innerHTML = '<div class="empty-state"><div class="empty-state-icon">◉</div><div class="empty-state-title">No active session</div></div>';
+    _chatSessionId = null;
+    _chatRenderedCount = 0;
     return;
   }
   const showVerbose = session.showVerbose !== false;
   const filtered = filterMessages(session.messages, showVerbose);
-
-  // Store filtered messages for raw inspection
   session._filteredMessages = filtered;
 
-  area.innerHTML = filtered.map((m, fi) => {
-    const rawBtn = m._rawEvent ? `<span class="chat-raw-btn" onclick="showRawEvent(${fi})" title="Show raw event JSON">raw</span>` : '';
-    if (m.role === '_collapsed') {
-      return `<div class="chat-collapsed-indicator" onclick="expandCollapsed()">
-        <span>⋯</span>
-        <span class="chat-collapsed-count">${m.toolCount > 0 ? m.toolCount + ' tool call' + (m.toolCount > 1 ? 's' : '') : ''}</span>
-        <span style="font-size:10px">click to show</span>
-      </div>`;
-    }
-    if (m.role === 'tool') {
-      return `<div class="chat-tool-use"><span class="tool-icon">⚡</span>${escHtml(m.content)}${rawBtn}</div>`;
-    }
-    if (m.role === 'control_request') {
-      return renderControlRequest(m, session);
-    }
-    const isUser = m.role === 'user';
-    const attachHtml = (m._attachments && m._attachments.length)
-      ? m._attachments.map(a => `<img class="chat-attachment-img" src="data:${a.media_type};base64,${a.data}" alt="attachment">`).join('')
-      : '';
-    let bubbleContent;
-    if (isUser) {
-      bubbleContent = escHtml(m.content);
-    } else {
-      const uuid = m._eventUuid || '';
-      const mode = mdToggleState[uuid] || 'md';
-      const toolbar = `<span class="chat-bubble-toolbar"><span class="chat-bubble-btn" onclick="event.stopPropagation(); copyBubble(this)" title="Copy">${svgCopy}</span><span class="chat-bubble-btn" onclick="event.stopPropagation(); toggleMd('${esc(uuid)}')" title="Toggle view mode">${mode}</span></span>`;
-      const rawAttr = `data-raw-md="${escAttr(m.content)}"`;
-      if (mode === 'txt') {
-        bubbleContent = `${toolbar}<div class="chat-text-raw" ${rawAttr}>${escHtml(m.content)}</div>`;
-      } else if (mode === 'raw') {
-        const rawJson = m._rawEvent ? JSON.stringify(m._rawEvent, null, 2) : m.content;
-        bubbleContent = `${toolbar}<div class="chat-text-raw" ${rawAttr}>${escHtml(rawJson)}</div>`;
-      } else {
-        bubbleContent = `${toolbar}<div class="md-content" ${rawAttr}>${renderMd(m.content)}</div>`;
+  const needFullRebuild =
+    session.id !== _chatSessionId ||
+    showVerbose !== _chatRenderedVerbose ||
+    filtered.length < _chatRenderedCount;
+
+  if (needFullRebuild) {
+    // Full rebuild — session switched, verbose toggled, or messages shrank (collapse/rewind)
+    const statusHtml = getStatusHtml(session);
+    area.innerHTML = filtered.map((m, fi) => renderOneMessage(m, fi, session)).join('') + statusHtml;
+    _chatSessionId = session.id;
+    _chatRenderedCount = filtered.length;
+    _chatRenderedVerbose = showVerbose;
+    _chatRenderedStatus = session.status;
+    area.scrollTop = area.scrollHeight;
+    return;
+  }
+
+  // --- Incremental update ---
+
+  // Remove old status line (always last child if present)
+  const oldStatus = area.querySelector('.chat-status-line');
+  if (oldStatus) oldStatus.remove();
+
+  // Update last existing message (content may have changed — streaming, tool result, etc.)
+  if (_chatRenderedCount > 0 && _chatRenderedCount <= filtered.length) {
+    const lastIdx = _chatRenderedCount - 1;
+    const lastChild = area.children[lastIdx];
+    if (lastChild) {
+      const newHtml = renderOneMessage(filtered[lastIdx], lastIdx, session);
+      // Only touch DOM if content actually changed
+      const tmp = document.createElement('div');
+      tmp.innerHTML = newHtml;
+      if (tmp.firstElementChild && lastChild.innerHTML !== tmp.firstElementChild.innerHTML) {
+        lastChild.replaceWith(tmp.firstElementChild);
       }
     }
-    return `<div class="chat-msg ${m.role}">
-      <div class="chat-avatar ${isUser ? 'you' : 'claude'}">${isUser ? 'Y' : 'C'}</div>
-      <div class="chat-bubble">${attachHtml}${bubbleContent}</div>
-    </div>`;
-  }).join('');
-
-  if (session.status === 'waiting') {
-    area.innerHTML += `<div class="chat-status-line"><span class="waiting-indicator">⏳ Waiting for your input</span></div>`;
-  } else if (session.status === 'running') {
-    area.innerHTML += `<div class="chat-status-line" style="color: var(--accent-green)">● Claude is working...</div>`;
   }
+
+  // Append new messages
+  for (let i = _chatRenderedCount; i < filtered.length; i++) {
+    area.insertAdjacentHTML('beforeend', renderOneMessage(filtered[i], i, session));
+  }
+  _chatRenderedCount = filtered.length;
+
+  // Add status line
+  const statusHtml = getStatusHtml(session);
+  if (statusHtml) area.insertAdjacentHTML('beforeend', statusHtml);
+
+  // Update status tracking
+  _chatRenderedStatus = session.status;
+
   area.scrollTop = area.scrollHeight;
 }
 
@@ -2257,6 +2489,7 @@ function setChatInputsDisabled(disabled) {
   const input = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send-btn');
   const attachBtn = document.querySelector('.chat-attach-btn');
+  const micBtn = document.getElementById('chat-mic-btn');
   const modeSelect = document.getElementById('cs-mode');
   const modelSelect = document.getElementById('cs-model');
 
@@ -2269,8 +2502,108 @@ function setChatInputsDisabled(disabled) {
   }
   if (sendBtn) sendBtn.disabled = !!disabled;
   if (attachBtn) attachBtn.disabled = !!disabled;
+  if (micBtn) {
+    micBtn.disabled = !!disabled;
+    if (disabled && isRecording) toggleSpeech(); // stop recording when disabled
+  }
   if (modeSelect) modeSelect.disabled = !!disabled;
   if (modelSelect) modelSelect.disabled = !!disabled;
+}
+
+function updateMicLangLabel() {
+  const el = document.getElementById('mic-lang');
+  if (el) el.textContent = speechLang.split('-')[0];
+}
+
+function setSpeechLang(code) {
+  speechLang = code;
+  localStorage.setItem('speechLang', code);
+  updateMicLangLabel();
+}
+
+function showLangPicker() {
+  // Remove existing picker if any
+  document.getElementById('mic-lang-picker')?.remove();
+  const btn = document.getElementById('chat-mic-btn');
+  if (!btn) return;
+  const picker = document.createElement('div');
+  picker.id = 'mic-lang-picker';
+  picker.className = 'mic-lang-picker';
+  SPEECH_LANGUAGES.forEach(l => {
+    const opt = document.createElement('button');
+    opt.className = 'mic-lang-option' + (l.code === speechLang ? ' active' : '');
+    opt.textContent = l.label;
+    opt.onclick = (e) => { e.stopPropagation(); setSpeechLang(l.code); picker.remove(); };
+    picker.appendChild(opt);
+  });
+  btn.parentElement.style.position = 'relative';
+  btn.parentElement.appendChild(picker);
+  // Close on outside click
+  const close = (e) => { if (!picker.contains(e.target)) { picker.remove(); document.removeEventListener('pointerdown', close); } };
+  setTimeout(() => document.addEventListener('pointerdown', close), 0);
+}
+
+// Long-press detection for mic button
+document.addEventListener('DOMContentLoaded', () => {
+  updateMicLangLabel();
+  const btn = document.getElementById('chat-mic-btn');
+  if (!btn) return;
+  btn.addEventListener('pointerdown', (e) => {
+    micLongPressTimer = setTimeout(() => { micLongPressTimer = 'fired'; showLangPicker(); }, 500);
+  });
+  btn.addEventListener('pointerup', () => { if (micLongPressTimer !== 'fired') clearTimeout(micLongPressTimer); micLongPressTimer = null; });
+  btn.addEventListener('pointerleave', () => { if (micLongPressTimer !== 'fired') clearTimeout(micLongPressTimer); micLongPressTimer = null; });
+});
+
+function toggleSpeech() {
+  if (micLongPressTimer === 'fired') return; // long press opened picker, don't toggle
+  const btn = document.getElementById('chat-mic-btn');
+  if (isRecording) {
+    if (speechRecognition) speechRecognition.stop();
+    speechRecognition = null;
+    isRecording = false;
+    if (btn) btn.classList.remove('recording');
+    return;
+  }
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert('Speech recognition is not supported in this browser.');
+    return;
+  }
+  const rec = new SpeechRecognition();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = speechLang;
+  rec.onresult = (event) => {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) {
+        const transcript = event.results[i][0].transcript.trim();
+        if (transcript) {
+          input.value = input.value ? input.value + ' ' + transcript : transcript;
+          input.style.height = 'auto';
+          input.style.height = input.scrollHeight + 'px';
+        }
+      }
+    }
+  };
+  rec.onerror = () => {
+    speechRecognition = null;
+    isRecording = false;
+    if (btn) btn.classList.remove('recording');
+  };
+  rec.onend = () => {
+    if (isRecording) {
+      speechRecognition = null;
+      isRecording = false;
+      if (btn) btn.classList.remove('recording');
+    }
+  };
+  rec.start();
+  speechRecognition = rec;
+  isRecording = true;
+  if (btn) btn.classList.add('recording');
 }
 
 function updateChatStatusBar(session) {
@@ -2347,48 +2680,90 @@ function updateSessionModel(value) {
 }
 
 // ═══════════════════════════════════════════════════════
-// TUI VIEW
-// ═══════════════════════════════════════════════════════
-function renderTuiView(proj, session) {
-  const tui = document.getElementById('tui-view');
-  const showVerbose = session.showVerbose !== false;
-  let html = `<div class="tui-line" style="color:var(--accent-purple);font-weight:700">╭─ Claude Code ──────────────────────╮</div>`;
-  html += `<div class="tui-line" style="color:var(--accent-purple)">│ <span style="color:var(--text-muted)">Session:</span> <span style="color:var(--text-primary)">${session.title}</span></div>`;
-  html += `<div class="tui-line" style="color:var(--accent-purple)">│ <span style="color:var(--text-muted)">Project:</span> <span style="color:var(--text-secondary)">${proj.path}</span></div>`;
-  html += `<div class="tui-line" style="color:var(--accent-purple)">╰────────────────────────────────────╯</div><div class="tui-line">&nbsp;</div>`;
-
-  const filtered = filterMessages(session.messages, showVerbose);
-  filtered.forEach(m => {
-    if (m.role === '_collapsed') {
-      html += `<div class="tui-collapsed" onclick="expandCollapsed()">  ⋯ ${m.toolCount} tool calls (click to expand)</div>`;
-    } else if (m.role === 'user') {
-      html += `<div class="tui-line"><span class="tui-prompt">❯ </span><span class="tui-prompt-text">${escHtml(m.content)}</span></div><div class="tui-line">&nbsp;</div>`;
-    } else if (m.role === 'tool') {
-      html += `<div class="tui-tool"><span class="tui-tool-icon">✓</span> ${escHtml(m.content)}</div>`;
-    } else if (m.role === 'assistant') {
-      html += `<div class="tui-response">${escHtml(m.content)}</div><div class="tui-line">&nbsp;</div>`;
-    }
-  });
-
-  if (session.status === 'waiting') html += `<div class="tui-status waiting">⏳ Awaiting input...</div>`;
-  else if (session.status === 'running') html += `<div class="tui-status running">● Processing...</div>`;
-
-  tui.innerHTML = html;
-  tui.scrollTop = tui.scrollHeight;
-}
-
-// ═══════════════════════════════════════════════════════
 // SEND MESSAGE
 // ═══════════════════════════════════════════════════════
-function handleChatKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey) { e.preventDefault(); sendMessage(); }
+function getMessageHistory() {
+  const proj = state.projects.find(p => p.id === state.activeProjectId);
+  if (!proj) return [];
+  const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+  const session = activeSessions[proj.activeSessionIdx || 0];
+  if (!session) return [];
+  return session.messages.filter(m => m.role === 'user');
 }
 
-function handleTuiKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTuiMessage(); }
+function restoreAttachments(attachments) {
+  chatAttachments.length = 0;
+  if (attachments && attachments.length) {
+    for (const a of attachments) {
+      chatAttachments.push({
+        id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        name: a.name || 'attachment',
+        size: a.data ? Math.ceil(a.data.length * 3 / 4) : (a.text ? a.text.length : 0),
+        type: a.media_type || a.type || '',
+        data: a.data || null,
+        text: a.text || null,
+        kind: a.kind || null,
+      });
+    }
+  }
+  renderAttachments();
+}
+
+function handleChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey) {
+    e.preventDefault();
+    const sendBtn = document.getElementById('chat-send-btn');
+    if (sendBtn && sendBtn.disabled) return;
+    sendMessage();
+    return;
+  }
+
+  const input = document.getElementById('chat-input');
+  const history = getMessageHistory();
+  if (!history.length) return;
+
+  if (e.key === 'ArrowUp' && !e.shiftKey) {
+    // Only navigate if cursor is at the start of the input
+    if (input.selectionStart !== 0 || input.selectionEnd !== 0) return;
+    e.preventDefault();
+    if (historyIndex === -1) {
+      historyDraft = input.value;
+      historyDraftAttachments = chatAttachments.map(a => ({ ...a }));
+      historyIndex = history.length - 1;
+    } else if (historyIndex > 0) {
+      historyIndex--;
+    } else {
+      return;
+    }
+    const msg = history[historyIndex];
+    input.value = msg.content || '';
+    restoreAttachments(msg._attachments);
+    input.setSelectionRange(0, 0);
+  } else if (e.key === 'ArrowDown' && !e.shiftKey) {
+    if (historyIndex === -1) return;
+    // Only navigate if cursor is at the end of the input
+    if (input.selectionStart !== input.value.length || input.selectionEnd !== input.value.length) return;
+    e.preventDefault();
+    if (historyIndex < history.length - 1) {
+      historyIndex++;
+      const msg = history[historyIndex];
+      input.value = msg.content || '';
+      restoreAttachments(msg._attachments);
+    } else {
+      historyIndex = -1;
+      input.value = historyDraft;
+      restoreAttachments(historyDraftAttachments);
+      historyDraftAttachments = [];
+    }
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
 }
 
 async function sendMessage() {
+  historyIndex = -1;
+  historyDraft = '';
+  historyDraftAttachments = [];
+
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text || !state.activeProjectId) return;
@@ -2405,8 +2780,13 @@ async function sendMessage() {
 
   // Collect attachments before clearing
   const attachments = chatAttachments
-    .filter(a => a.data)
-    .map(a => ({ media_type: a.type, data: a.data, name: a.name }));
+    .filter(a => a.data || a.text)
+    .map(a => {
+      const att = { media_type: a.type, data: a.data || '', name: a.name };
+      if (a.text) att.text = a.text;
+      if (a.kind) att.kind = a.kind;
+      return att;
+    });
   clearAttachments();
 
   const cmd = { action: 'send_message', text, attachments: attachments.length ? attachments : undefined };
@@ -2432,40 +2812,31 @@ async function sendMessage() {
   updateGlobalCounts();
 }
 
-async function sendTuiMessage() {
-  const input = document.getElementById('tui-input');
-  const text = input.value.trim();
-  if (!text || !state.activeProjectId) return;
-  const proj = state.projects.find(p => p.id === state.activeProjectId);
-  if (!proj) return;
-  const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
-  const session = activeSessions[proj.activeSessionIdx || 0];
-  if (!session) return;
-
-  const msgUuid = crypto.randomUUID();
-  session.messages.push({ role: 'user', content: text, _eventUuid: msgUuid });
-  session.status = 'running';
-  input.value = '';
-  renderTuiView(proj, session);
-  renderCenterTabs(proj);
-
-  if (!sendAgentCommand(session.id, { action: 'send_message', text })) {
-    try {
-      await api('POST', `/api/sessions/${session.id}/message`, { message: text, uuid: msgUuid });
-    } catch (e) {
-      showToast(proj.name, `Failed: ${e.message}`, 'attention');
-    }
-  }
-}
 
 // ═══════════════════════════════════════════════════════
 // SESSION MANAGEMENT
 // ═══════════════════════════════════════════════════════
+function showSessionLoadingOverlay(label = 'Starting session...') {
+  const container = document.getElementById('center-content');
+  if (!container) return;
+  removeSessionLoadingOverlay();
+  const overlay = document.createElement('div');
+  overlay.className = 'session-loading-overlay';
+  overlay.innerHTML = `<div class="spinner"></div><div class="spinner-label">${label}</div>`;
+  container.appendChild(overlay);
+}
+
+function removeSessionLoadingOverlay() {
+  const el = document.querySelector('.session-loading-overlay');
+  if (el) el.remove();
+}
+
 async function newSession() {
   if (!state.activeProjectId) return;
   const proj = state.projects.find(p => p.id === state.activeProjectId);
   if (!proj) return;
 
+  showSessionLoadingOverlay('Starting session...');
   try {
     // Try agent-sessions endpoint first
     pendingAgentCreation = true;
@@ -2546,6 +2917,7 @@ async function newSession() {
       updateGlobalCounts();
       showToast(proj.name, 'New session created', 'success');
     } catch (e2) {
+      removeSessionLoadingOverlay();
       showToast(proj.name, `Failed: ${e2.message}`, 'attention');
     }
   }
@@ -2565,6 +2937,7 @@ async function resumeSession(projId, sessionId) {
   }
 
   // Resume idle/ended sessions via agent abstraction layer
+  showSessionLoadingOverlay('Resuming session...');
   try {
     pendingAgentCreation = true;
     const result = await api('POST', '/api/agent-sessions/resume', {
@@ -2608,6 +2981,7 @@ async function resumeSession(projId, sessionId) {
     showToast(proj.name, 'Session resumed', 'success');
   } catch (e) {
     pendingAgentCreation = false;
+    removeSessionLoadingOverlay();
     showToast(proj.name, `Failed to resume: ${e.message}`, 'attention');
   }
 }
@@ -2616,6 +2990,7 @@ async function resumeHistoricalSession(projId, sessionUuid) {
   const proj = state.projects.find(p => p.id === projId);
   if (!proj) return;
 
+  showSessionLoadingOverlay('Resuming session...');
   try {
     // Resume via agent abstraction layer — no agent type needed
     pendingAgentCreation = true;
@@ -2668,6 +3043,7 @@ async function resumeHistoricalSession(projId, sessionUuid) {
     showToast(proj.name, 'Session resumed', 'success');
   } catch (e) {
     pendingAgentCreation = false;
+    removeSessionLoadingOverlay();
     showToast(proj.name, `Failed to resume: ${e.message}`, 'attention');
   }
 }
@@ -3222,7 +3598,7 @@ function startVSplitDrag(e, side) {
   } else {
     const pp = document.getElementById('preview-panel');
     const startX = e.clientX, startW = pp.offsetWidth;
-    function onMove(ev) { workspace.style.setProperty('--pp-width', Math.max(200, Math.min(800, startW + (startX - ev.clientX))) + 'px'); }
+    function onMove(ev) { const maxW = workspace.offsetWidth - 200; workspace.style.setProperty('--pp-width', Math.max(200, Math.min(maxW, startW + (startX - ev.clientX))) + 'px'); }
     function onUp() {
       splitter.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
       saveProjectSettings({ pp_width: getComputedStyle(workspace).getPropertyValue('--pp-width').trim() });
@@ -3270,6 +3646,7 @@ function addPreviewTab(url) {
   previewState.tabs.push({ id, url, label });
   previewState.activeIdx = previewState.tabs.length - 1;
   renderPreview();
+  saveProjectSettings({ preview_tabs: previewState.tabs, preview_active_idx: previewState.activeIdx });
 }
 
 function closePreviewTab(idx, evt) {
@@ -3278,9 +3655,10 @@ function closePreviewTab(idx, evt) {
   if (previewState.activeIdx >= previewState.tabs.length) previewState.activeIdx = Math.max(0, previewState.tabs.length - 1);
   if (previewState.tabs.length === 0) { addPreviewTab(''); return; }
   renderPreview();
+  saveProjectSettings({ preview_tabs: previewState.tabs, preview_active_idx: previewState.activeIdx });
 }
 
-function switchPreviewTab(idx) { previewState.activeIdx = idx; renderPreview(); }
+function switchPreviewTab(idx) { previewState.activeIdx = idx; renderPreview(); saveProjectSettings({ preview_active_idx: previewState.activeIdx }); }
 
 function renderPreview() {
   const container = document.getElementById('preview-frames');
@@ -3293,8 +3671,8 @@ function renderPreview() {
       frame = document.createElement('iframe');
       frame.id = tab.id;
       frame.className = 'preview-iframe hidden';
-      frame.src = tab.url || 'about:blank';
       container.appendChild(frame);
+      frame.src = resolvePreviewSrc(tab.url);
     }
     frame.classList.toggle('hidden', i !== previewState.activeIdx);
   });
@@ -3314,16 +3692,55 @@ function renderPreview() {
   }).join('') + `<button class="preview-tab-add" onclick="addPreviewTab()" title="New preview tab">+</button>`;
 }
 
+function normalizePreviewUrl(url) {
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+  return url;
+}
+
+function resolvePreviewSrc(url) {
+  if (!url) return 'about:blank';
+  url = normalizePreviewUrl(url);
+  if (previewState.mode === 'server') {
+    try {
+      const u = new URL(url);
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+        const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+        const host = location.hostname;
+        return location.protocol + '//' + port + '.port.on.' + host + '.nip.io:' + location.port + (u.pathname || '/') + u.search + u.hash;
+      }
+    } catch {}
+  }
+  return url;
+}
+
+function togglePreviewMode() {
+  previewState.mode = previewState.mode === 'browser' ? 'server' : 'browser';
+  const btn = document.getElementById('preview-mode-btn');
+  btn.textContent = previewState.mode === 'browser' ? 'B' : 'S';
+  btn.title = previewState.mode === 'browser'
+    ? 'Browser mode: URL is loaded directly by your browser.\nClick to switch to Server mode.'
+    : 'Server mode: localhost URLs are rewritten to\n{port}.port.on.{host}.nip.io and proxied through the server,\nso you can reach services running on the remote machine.\nClick to switch to Browser mode.';
+  // Reload all tabs with new mode
+  previewState.tabs.forEach(tab => {
+    const frame = document.getElementById(tab.id);
+    if (frame && tab.url) frame.src = resolvePreviewSrc(tab.url);
+  });
+  saveProjectSettings({ preview_mode: previewState.mode });
+}
+
 function loadPreview() {
-  const url = document.getElementById('preview-url').value.trim();
+  let url = document.getElementById('preview-url').value.trim();
   if (!url) return;
+  url = normalizePreviewUrl(url);
   const tab = previewState.tabs[previewState.activeIdx];
   if (!tab) return;
   tab.url = url;
   tab.label = url.replace(/^https?:\/\//, '').slice(0, 20);
   const frame = document.getElementById(tab.id);
-  if (frame) frame.src = url;
+  if (frame) frame.src = resolvePreviewSrc(url);
   renderPreview();
+  saveProjectSettings({ preview_tabs: previewState.tabs });
 }
 
 function openPreviewExternal() {
@@ -3352,17 +3769,88 @@ function handleChatPaste(e) {
   }
 }
 
+// Classify a file into: 'image', 'pdf', 'text', 'office', or 'unsupported'
+function classifyFile(file) {
+  const ext = (file.name || '').split('.').pop()?.toLowerCase() || '';
+  const mime = (file.type || '').toLowerCase();
+
+  // Images
+  if (/^image\/(jpeg|jpg|png|gif|webp)$/.test(mime) || /^(jpg|jpeg|png|gif|webp)$/.test(ext)) return 'image';
+
+  // PDF
+  if (mime === 'application/pdf' || ext === 'pdf') return 'pdf';
+
+  // Office documents
+  if (/^(docx|xlsx|xls|pptx)$/.test(ext)) return 'office';
+
+  // Text / source code — check MIME first, then extension
+  const textMimes = /^(text\/|application\/json|application\/xml|application\/javascript|application\/typescript|application\/x-yaml|application\/toml)/;
+  if (textMimes.test(mime)) return 'text';
+
+  const textExts = /^(txt|md|csv|json|yaml|yml|toml|xml|html|htm|css|js|jsx|ts|tsx|mjs|cjs|py|rb|rs|go|java|c|cpp|cc|cxx|h|hpp|cs|swift|kt|kts|scala|sh|bash|zsh|fish|ps1|bat|cmd|sql|graphql|gql|lua|r|m|mm|pl|pm|php|ex|exs|erl|hs|elm|clj|cljs|dart|vue|svelte|astro|tf|hcl|dockerfile|makefile|cmake|gradle|groovy|ini|cfg|conf|env|log|diff|patch|rst|tex|bib|proto|thrift|avsc|lock|gitignore|editorconfig|prettierrc|eslintrc|babelrc|tsconfig)$/;
+  if (textExts.test(ext)) return 'text';
+
+  // Check for no extension or unknown — reject binary types
+  if (!ext && mime.startsWith('text/')) return 'text';
+
+  return 'unsupported';
+}
+
+function getAttachIcon(kind) {
+  switch (kind) {
+    case 'image': return '🖼️';
+    case 'pdf': return '📄';
+    case 'text': return '📝';
+    case 'office': return '📊';
+    default: return '📎';
+  }
+}
+
 function addAttachment(file) {
+  const kind = classifyFile(file);
+
+  if (kind === 'unsupported') {
+    const proj = state.projects.find(p => p.id === state.activeProjectId);
+    showToast(proj?.name || '', `Unsupported file type: ${file.name}`, 'attention');
+    return;
+  }
+
   const id = 'att-' + Date.now();
-  const entry = { id, name: file.name, size: file.size, type: file.type, data: null };
+  const entry = { id, name: file.name, size: file.size, type: file.type, data: null, text: null, kind };
   chatAttachments.push(entry);
   renderAttachments();
-  // Read file content as base64
-  const reader = new FileReader();
-  reader.onload = () => {
-    entry.data = reader.result.split(',')[1]; // strip data:...;base64, prefix
-  };
-  reader.readAsDataURL(file);
+
+  if (kind === 'text') {
+    // Read as plain text
+    const reader = new FileReader();
+    reader.onload = () => { entry.text = reader.result; renderAttachments(); };
+    reader.readAsText(file);
+  } else if (kind === 'office') {
+    // Read as base64, then POST to server for text extraction
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result.split(',')[1];
+      try {
+        const resp = await api('POST', '/api/extract-text', { data: base64, name: file.name });
+        entry.text = resp.text;
+      } catch (e) {
+        const proj = state.projects.find(p => p.id === state.activeProjectId);
+        showToast(proj?.name || '', `Failed to extract text from ${file.name}: ${e.message}`, 'attention');
+        // Remove failed attachment
+        const idx = chatAttachments.findIndex(a => a.id === id);
+        if (idx >= 0) chatAttachments.splice(idx, 1);
+      }
+      renderAttachments();
+    };
+    reader.readAsDataURL(file);
+  } else {
+    // Image or PDF — read as base64
+    const reader = new FileReader();
+    reader.onload = () => {
+      entry.data = reader.result.split(',')[1]; // strip data:...;base64, prefix
+    };
+    reader.readAsDataURL(file);
+  }
 }
 
 function removeAttachment(id) {
@@ -3377,8 +3865,9 @@ function renderAttachments() {
   container.classList.add('has-items');
   container.innerHTML = chatAttachments.map(att => {
     const size = att.size < 1024 ? att.size + ' B' : att.size < 1048576 ? (att.size / 1024).toFixed(1) + ' KB' : (att.size / 1048576).toFixed(1) + ' MB';
+    const icon = getAttachIcon(att.kind || 'image');
     return `<div class="chat-attach-chip">
-      <span class="chat-attach-chip-icon">📎</span>
+      <span class="chat-attach-chip-icon">${icon}</span>
       <span class="chat-attach-chip-name">${att.name}</span>
       <span class="chat-attach-chip-size">${size}</span>
       <span class="chat-attach-chip-remove" onclick="removeAttachment('${att.id}')">×</span>
@@ -3614,6 +4103,10 @@ function filterProjects(type) {
   } else if (type === 'active') {
     const first = state.projects.find(p => p.sessions.some(s => s.status === 'running' || s.status === 'waiting'));
     if (first) selectProject(first.id);
+  } else if (type === 'chats') {
+    const first = state.projects.find(p => p.sessions.some(s => s.status === 'running' || s.status === 'waiting'));
+    if (first) selectProject(first.id);
+    else showOverview();
   } else {
     showOverview();
   }
@@ -3655,8 +4148,19 @@ const mdToggleState = {};
 function toggleMd(uuid) {
   const cur = mdToggleState[uuid] || 'md';
   mdToggleState[uuid] = cur === 'md' ? 'txt' : cur === 'txt' ? 'raw' : 'md';
+  // Re-render just the affected message element
   const proj = state.projects.find(p => p.id === state.activeProjectId);
-  if (proj) renderChat(proj);
+  if (!proj) return;
+  const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+  const session = activeSessions[proj.activeSessionIdx || 0];
+  if (!session || !session._filteredMessages) return;
+  const area = document.getElementById('chat-area');
+  const fi = session._filteredMessages.findIndex(m => (m._eventUuid || '') === uuid);
+  if (fi >= 0 && area.children[fi]) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderOneMessage(session._filteredMessages[fi], fi, session);
+    if (tmp.firstElementChild) area.children[fi].replaceWith(tmp.firstElementChild);
+  }
 }
 
 function copyBubble(el) {
@@ -3968,6 +4472,7 @@ function gatherProjectSettings() {
     preview_visible: state.previewVisible,
     preview_tabs: previewState.tabs,
     preview_active_idx: previewState.activeIdx,
+    preview_mode: previewState.mode,
   };
 }
 
@@ -4022,8 +4527,24 @@ function applyProjectSettings(settings) {
   if (settings.preview_visible !== undefined) state.previewVisible = settings.preview_visible;
   if (settings.preview_tabs) previewState.tabs = settings.preview_tabs;
   if (settings.preview_active_idx !== undefined) previewState.activeIdx = settings.preview_active_idx;
-  if (settings.preview_tabs || settings.preview_active_idx !== undefined) {
-    if (state.previewVisible) renderPreview();
+  if (settings.preview_mode) previewState.mode = settings.preview_mode;
+  // Ensure at least one tab always exists
+  if (previewState.tabs.length === 0) previewState.tabs.push({ id: 'pv-' + Date.now() + '-default', url: '', label: 'New tab' });
+  if (previewState.activeIdx >= previewState.tabs.length) previewState.activeIdx = 0;
+  // Update mode button
+  const modeBtn = document.getElementById('preview-mode-btn');
+  if (modeBtn) {
+    modeBtn.textContent = previewState.mode === 'browser' ? 'B' : 'S';
+    modeBtn.title = previewState.mode === 'browser'
+      ? 'Browser mode: URL is loaded directly by your browser.\nClick to switch to Server mode.'
+      : 'Server mode: localhost URLs are rewritten to\n{port}.port.on.{host}.nip.io and proxied through the server,\nso you can reach services running on the remote machine.\nClick to switch to Browser mode.';
+  }
+  if (state.previewVisible) {
+    const workspace = document.getElementById('workspace');
+    const preview = document.getElementById('preview-panel');
+    workspace.className = 'workspace layout-wide';
+    preview.classList.remove('hidden');
+    renderPreview();
   }
 }
 
@@ -4067,6 +4588,12 @@ document.addEventListener('keydown', (e) => {
       }
     }
   }
+  if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'Space') {
+    e.preventDefault();
+    const chatArea = document.getElementById('chat-area');
+    if (chatArea && !chatArea.classList.contains('hidden')) toggleSpeech();
+    return;
+  }
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
   if (!selectedFilePath || !state.activeProjectId) return;
   if (e.key === 'F2') { e.preventDefault(); ctxRename(selectedFilePath, selectedFileType); }
@@ -4088,10 +4615,10 @@ Object.assign(window, {
   addRemote, removeRemote, editRemote,
   gitRevertAll, gitStashAll, gitCommit, gitPush, applyStash, dropStash,
   switchToSession, switchToTerminal, newSession, resumeSession, addTerminal,
-  setSessionView, toggleVerbose, sendMessage, sendTuiMessage,
-  handleChatKey, handleTuiKey, handleFileAttach, handleChatPaste, removeAttachment,
+  setSessionView, toggleVerbose, sendMessage,
+  handleChatKey, handleFileAttach, handleChatPaste, removeAttachment,
   setEditorView, switchEditorTab, closeEditorTab, openFileInEditor,
-  togglePreviewPanel, addPreviewTab, closePreviewTab, switchPreviewTab, loadPreview, openPreviewExternal,
+  togglePreviewPanel, togglePreviewMode, addPreviewTab, closePreviewTab, switchPreviewTab, loadPreview, openPreviewExternal,
   toggleSessionsPanel, closeModal, addNewProject, openExistingProject,
   toggleRemoteUrl, toggleFolderBrowser, loadFolderBrowser, selectBrowsePath,
   expandCollapsed, showRawEvent, toggleMd, copyBubble, copyCode, selectCommit, copyHash, toggleCommitExpand,
