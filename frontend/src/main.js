@@ -3983,6 +3983,9 @@ function applyProjectSettings(settings) {
   if (settings.preview_visible !== undefined) state.previewVisible = settings.preview_visible;
   if (settings.preview_tabs) previewState.tabs = settings.preview_tabs;
   if (settings.preview_active_idx !== undefined) previewState.activeIdx = settings.preview_active_idx;
+  if (settings.preview_tabs || settings.preview_active_idx !== undefined) {
+    if (state.previewVisible) renderPreview();
+  }
 }
 
 // Settings WebSocket for real-time sync
@@ -4062,6 +4065,10 @@ Object.assign(window, {
   createEnvironmentFromStart, createEnvironmentFromDropdown,
   // Router
   navigate,
+});
+
+document.getElementById('preview-url').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); loadPreview(); }
 });
 
 // ═══════════════════════════════════════════════════════

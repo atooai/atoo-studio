@@ -15,6 +15,7 @@ import { projectsRouter } from '../handlers/projects.js';
 import { environmentsRouter, setBroadcastSettingsChange } from '../handlers/environments.js';
 import { isAgentWsUpgrade, handleAgentWsUpgrade } from '../ws/agent-ws.js';
 import { agentRegistry } from '../agents/registry.js';
+import { createPortProxy, portProxyMiddleware, isPortProxyUpgrade, handlePortProxyUpgrade } from './port-proxy.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -34,6 +35,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createWebServer(): http.Server {
   const app = express();
+
+  // Port-proxy: intercept before body parsing so proxied requests stream through
+  const portProxy = createPortProxy();
+  app.use(portProxyMiddleware(portProxy));
+
   app.use(express.json({ limit: '50mb' }));
 
   // API routes for the React frontend
@@ -689,6 +695,12 @@ export function createWebServer(): http.Server {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
+    // Port proxy WebSocket upgrades — check first
+    if (isPortProxyUpgrade(req)) {
+      handlePortProxyUpgrade(portProxy, req, socket, head);
+      return;
+    }
+
     const url = req.url || '';
 
     // /ws/agent/:sessionId — abstract agent WebSocket (new)
