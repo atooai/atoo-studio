@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { vccDb } from '../state/db.js';
 import * as gitOps from '../services/git-ops.js';
+import { watchProject } from '../services/project-watcher.js';
 
 export const environmentsRouter = Router();
 
@@ -50,6 +51,8 @@ environmentsRouter.get('/api/environments/:id/projects', (req, res) => {
   const withGit = projects.map(p => {
     let isGit = false;
     try { isGit = fs.existsSync(path.join(p.path, '.git')); } catch {}
+    // Start watching this project's directory
+    watchProject(p.id, p.path);
     return { ...p, isGit };
   });
   res.json(withGit);
@@ -83,6 +86,9 @@ environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
 
     let isGit = false;
     try { isGit = fs.existsSync(path.join(resolved, '.git')); } catch {}
+
+    // Start watching the new project
+    watchProject(project.id, resolved);
 
     res.json({ ...project, pe_id: peId, isGit });
   } catch (err: any) {

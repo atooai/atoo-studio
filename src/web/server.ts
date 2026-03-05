@@ -474,6 +474,18 @@ export function createWebServer(): http.Server {
     }
   });
 
+  app.post('/api/browse/mkdir', (req, res) => {
+    const { path: dirPath } = req.body;
+    if (!dirPath) return res.status(400).json({ error: 'path is required' });
+    try {
+      const resolved = path.resolve(dirPath);
+      fs.mkdirSync(resolved, { recursive: true });
+      res.json({ success: true, path: resolved });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   // Extract text from office documents (docx, xlsx, pptx)
   app.post('/api/extract-text', async (req, res) => {
     const { data, name } = req.body;

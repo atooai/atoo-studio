@@ -1,0 +1,241 @@
+import React, { useEffect, useRef } from 'react';
+import { useStore } from '../../state/store';
+import { api } from '../../api';
+import { getFileIcon, isRenderable, escapeHtml, getMonacoLang, renderMd } from '../../utils';
+import type { EditorFile } from '../../types';
+
+let monacoEditor: any = null;
+let monacoDiffEditor: any = null;
+let monacoInstance: any = null;
+
+function initMonaco() {
+  import('monaco-editor').then(monaco => {
+    monacoInstance = monaco;
+    monaco.editor.defineTheme('vcc-dark', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [],
+      colors: {
+        'editor.background': '#0a0b0f',
+        'editor.lineHighlightBackground': '#1a1b2580',
+        'editorLineNumber.foreground': '#3a3d52',
+        'editorGutter.background': '#0a0b0f',
+        'editor.selectionBackground': '#5b8af53a',
+        'editorWidget.background': '#12131a',
+        'input.background': '#1a1b25',
+      },
+    });
+    useStore.getState().setMonacoReady(true);
+  }).catch(() => {
+    console.warn('Monaco editor failed to load');
+  });
+}
+
+// Initialize Monaco on first import
+initMonaco();
+
+// Expose save for global Ctrl+S handler
+(window as any).saveCurrentFile = saveCurrentFile;
+
+function disposeEditors() {
+  if (monacoEditor) { monacoEditor.dispose(); monacoEditor = null; }
+  if (monacoDiffEditor) { monacoDiffEditor.dispose(); monacoDiffEditor = null; }
+}
+
+async function saveCurrentFile() {
+  const s = useStore.getState();
+  const file = s.activeFileIdx >= 0 ? s.openFiles[s.activeFileIdx] : null;
+  if (!file) return;
+  try {
+    await api('PUT', '/api/files', { path: file.fullPath, content: file.content });
+    const updated = s.openFiles.map((f, i) =>
+      i === s.activeFileIdx ? { ...f, originalContent: f.content, isModified: false } : f
+    );
+    useStore.getState().setOpenFiles(updated);
+  } catch (e: any) {
+    const proj = useStore.getState().getActiveProject();
+    useStore.getState().addToast(proj?.name || '', `Save failed: ${e.message}`, 'attention');
+  }
+}
+
+export function EditorArea() {
+  const { openFiles, activeFileIdx, setOpenFiles, setActiveFileIdx, monacoReady } = useStore();
+  const isOpen = openFiles.length > 0;
+
+  if (!isOpen) return <div className="editor-area" id="editor-area" style={{ height: 0 }}></div>;
+
+  const file = activeFileIdx >= 0 && activeFileIdx < openFiles.length ? openFiles[activeFileIdx] : null;
+
+  const closeTab = (idx: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const newFiles = openFiles.filter((_, i) => i !== idx);
+    let newIdx = activeFileIdx;
+    if (newIdx >= newFiles.length) newIdx = newFiles.length - 1;
+    if (newFiles.length === 0) {
+      newIdx = -1;
+      disposeEditors();
+    }
+    setOpenFiles(newFiles);
+    setActiveFileIdx(newIdx);
+  };
+
+  const setViewMode = (mode: 'source' | 'diff' | 'rendered') => {
+    if (!file) return;
+    const noDiff = !file.isModified || file._gitStatus === '??' || file._gitStatus === 'D';
+    if (mode === 'diff' && noDiff) return;
+    if (mode === 'rendered' && !isRenderable(file.path)) return;
+    const newFiles = openFiles.map((f, i) => i === activeFileIdx ? { ...f, viewMode: mode } : f);
+    setOpenFiles(newFiles);
+  };
+
+  return (
+    <div className="editor-area open" id="editor-area" style={{ height: '45%' }}>
+      <div className="editor-tabs">
+        {openFiles.map((f, i) => {
+          const name = f.path.split('/').pop() || '';
+          const icon = getFileIcon(name);
+          const isActive = i === activeFileIdx;
+          return (
+            <div key={f.path} className={`editor-tab ${isActive ? 'active' : ''}`} onClick={() => setActiveFileIdx(i)}>
+              <span className="editor-tab-icon">{icon}</span>
+              <span className="editor-tab-name">{name}</span>
+              {f.isModified && <span className="editor-tab-modified"></span>}
+              <span className="editor-tab-close" onClick={(e) => closeTab(i, e)}>×</span>
+            </div>
+          );
+        })}
+      </div>
+      {file && (
+        <>
+          <div className="editor-toolbar">
+            <div className="editor-view-group">
+              <button className={`ev-btn ${file.viewMode === 'source' ? 'active' : ''}`} onClick={() => setViewMode('source')}>Source</button>
+              <button className={`ev-btn ${file.viewMode === 'diff' ? 'active' : ''} ${(!file.isModified || file._gitStatus === '??' || file._gitStatus === 'D') ? 'disabled' : ''}`} onClick={() => setViewMode('diff')}>Diff</button>
+              <button className={`ev-btn ${file.viewMode === 'rendered' ? 'active' : ''} ${!isRenderable(file.path) ? 'disabled' : ''}`} onClick={() => setViewMode('rendered')}>Rendered</button>
+            </div>
+            <button
+              className={`ev-btn ${(file.isModified && file._gitStatus !== 'D') ? '' : 'disabled'}`}
+              onClick={() => saveCurrentFile()}
+              title="Save (Ctrl+S)"
+            >💾 Save</button>
+            <span className="editor-filepath">{file.path}</span>
+          </div>
+          <div className="editor-content">
+            {file.viewMode === 'diff' && file.isModified ? (
+              <DiffEditorView file={file} />
+            ) : file.viewMode === 'rendered' && isRenderable(file.path) ? (
+              <RenderedView file={file} />
+            ) : (
+              <SourceEditorView file={file} />
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+let editorUserEditing = false;
+
+function SourceEditorView({ file }: { file: EditorFile }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { monacoReady } = useStore();
+  const filePathRef = useRef(file.path);
+
+  // Create or switch editor model when file path changes
+  useEffect(() => {
+    if (!monacoReady || !monacoInstance || !containerRef.current) return;
+    if (monacoDiffEditor) { monacoDiffEditor.dispose(); monacoDiffEditor = null; }
+
+    filePathRef.current = file.path;
+
+    if (monacoEditor) {
+      monacoEditor.setModel(monacoInstance.editor.createModel(file.content, file.lang));
+    } else {
+      monacoEditor = monacoInstance.editor.create(containerRef.current, {
+        value: file.content, language: file.lang, theme: 'vcc-dark',
+        fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
+        minimap: { enabled: true, scale: 1 }, lineNumbers: 'on',
+        renderLineHighlight: 'all', scrollBeyondLastLine: false,
+        automaticLayout: true, padding: { top: 8 },
+      });
+    }
+
+    // Track content changes
+    const disposable = monacoEditor.onDidChangeModelContent(() => {
+      editorUserEditing = true;
+      const newContent = monacoEditor.getValue();
+      const s = useStore.getState();
+      const updated = s.openFiles.map((f, i) =>
+        i === s.activeFileIdx ? { ...f, content: newContent, isModified: newContent !== f.originalContent } : f
+      );
+      s.setOpenFiles(updated);
+      editorUserEditing = false;
+    });
+
+    // Ctrl+S save keybinding
+    monacoEditor.addAction({
+      id: 'save-file',
+      label: 'Save File',
+      keybindings: [monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyS],
+      run: () => saveCurrentFile(),
+    });
+
+    return () => {
+      disposable.dispose();
+    };
+  }, [file.path, monacoReady]);
+
+  // Update editor content from external changes (disk reload) without resetting cursor
+  useEffect(() => {
+    if (!monacoEditor || editorUserEditing) return;
+    const currentValue = monacoEditor.getValue();
+    if (file.content !== currentValue) {
+      const pos = monacoEditor.getPosition();
+      const scrollTop = monacoEditor.getScrollTop();
+      monacoEditor.setValue(file.content);
+      if (pos) monacoEditor.setPosition(pos);
+      monacoEditor.setScrollTop(scrollTop);
+    }
+  }, [file.content]);
+
+  if (!monacoReady) {
+    return <pre style={{ padding: 12, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', overflow: 'auto', height: '100%' }}>{escapeHtml(file.content)}</pre>;
+  }
+
+  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
+}
+
+function DiffEditorView({ file }: { file: EditorFile }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { monacoReady } = useStore();
+
+  useEffect(() => {
+    if (!monacoReady || !monacoInstance || !containerRef.current) return;
+    if (monacoEditor) { monacoEditor.dispose(); monacoEditor = null; }
+    if (monacoDiffEditor) { monacoDiffEditor.dispose(); }
+
+    monacoDiffEditor = monacoInstance.editor.createDiffEditor(containerRef.current, {
+      theme: 'vcc-dark', fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
+      renderSideBySide: true, automaticLayout: true, readOnly: true,
+      scrollBeyondLastLine: false, padding: { top: 8 },
+    });
+    monacoDiffEditor.setModel({
+      original: monacoInstance.editor.createModel(file.originalContent, file.lang),
+      modified: monacoInstance.editor.createModel(file.content, file.lang),
+    });
+  }, [file.path, monacoReady]);
+
+  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
+}
+
+function RenderedView({ file }: { file: EditorFile }) {
+  const ext = file.path.split('.').pop()?.toLowerCase() || '';
+  if (ext === 'md') {
+    return <div className="editor-rendered" style={{ display: 'block' }}><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMd(file.content) }} /></div>;
+  }
+  if (ext === 'html' || ext === 'astro') {
+    return <div className="editor-rendered" style={{ display: 'block' }}><iframe className="html-frame" srcDoc={file.content} sandbox="" style={{ width: '100%', height: '100%', border: 'none' }} /></div>;
+  }
+  return <div className="editor-rendered" style={{ display: 'block' }}><pre style={{ padding: 16, whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{escapeHtml(file.content)}</pre></div>;
+}

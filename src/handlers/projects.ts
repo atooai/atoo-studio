@@ -66,7 +66,8 @@ projectsRouter.get('/api/projects/:id/files', (req, res) => {
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
   try {
-    const tree = getFileTree(project.path);
+    const rootPath = (req.query.rootPath as string) || project.path;
+    const tree = getFileTree(rootPath);
     res.json(tree);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -83,6 +84,20 @@ projectsRouter.get('/api/files', (req, res) => {
     res.json({ content, lang, path: resolved });
   } catch (err: any) {
     res.status(404).json({ error: err.message });
+  }
+});
+
+projectsRouter.put('/api/files', (req, res) => {
+  const { path: filePath, content } = req.body;
+  if (!filePath || typeof content !== 'string') {
+    return res.status(400).json({ error: 'path and content are required' });
+  }
+  try {
+    const resolved = path.resolve(filePath);
+    fs.writeFileSync(resolved, content, 'utf-8');
+    res.json({ success: true, path: resolved });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -156,7 +171,7 @@ function getProjectCwd(req: any, res: any): string | null {
     res.status(404).json({ error: 'Project not found' });
     return null;
   }
-  return project.path;
+  return (req.query.cwd as string) || project.path;
 }
 
 projectsRouter.get('/api/projects/:id/git/status', async (req, res) => {
@@ -226,6 +241,20 @@ projectsRouter.get('/api/projects/:id/git/stash', async (req, res) => {
     res.json(stashes);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+projectsRouter.get('/api/projects/:id/git/show', async (req, res) => {
+  const cwd = getProjectCwd(req, res);
+  if (!cwd) return;
+  try {
+    const file = req.query.file as string;
+    const ref = (req.query.ref as string) || 'HEAD';
+    if (!file) return res.status(400).json({ error: 'file parameter required' });
+    const content = await gitOps.gitShowFile(cwd, file, ref);
+    res.json({ content });
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
   }
 });
 
@@ -421,6 +450,56 @@ projectsRouter.post('/api/projects/:id/git/stage', async (req, res) => {
     const { file } = req.body;
     if (!file) return res.status(400).json({ error: 'file is required' });
     await gitOps.gitStageFile(cwd, file);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+projectsRouter.post('/api/projects/:id/git/unstage', async (req, res) => {
+  const cwd = getProjectCwd(req, res);
+  if (!cwd) return;
+  try {
+    const { file } = req.body;
+    if (!file) return res.status(400).json({ error: 'file is required' });
+    await gitOps.gitUnstageFile(cwd, file);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+projectsRouter.get('/api/projects/:id/git/worktrees', async (req, res) => {
+  const cwd = getProjectCwd(req, res);
+  if (!cwd) return;
+  try {
+    const worktrees = await gitOps.gitWorktreeList(cwd);
+    res.json(worktrees);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+projectsRouter.post('/api/projects/:id/git/worktrees', async (req, res) => {
+  const cwd = getProjectCwd(req, res);
+  if (!cwd) return;
+  try {
+    const { path, branch, newBranch } = req.body;
+    if (!path) return res.status(400).json({ error: 'path is required' });
+    await gitOps.gitWorktreeAdd(cwd, path, branch, newBranch);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+projectsRouter.delete('/api/projects/:id/git/worktrees', async (req, res) => {
+  const cwd = getProjectCwd(req, res);
+  if (!cwd) return;
+  try {
+    const worktreePath = req.query.path as string;
+    if (!worktreePath) return res.status(400).json({ error: 'path query parameter required' });
+    await gitOps.gitWorktreeRemove(cwd, worktreePath);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

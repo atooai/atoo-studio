@@ -32,8 +32,6 @@ export function getFileTree(dirPath: string, depth: number = 0): FileNode[] {
 
   for (const entry of entries) {
     if (count >= MAX_ENTRIES) break;
-    if (entry.name.startsWith('.') && depth === 0 && entry.name !== '.env') continue;
-
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const children = getFileTree(path.join(dirPath, entry.name), depth + 1);

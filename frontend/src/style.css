@@ -719,10 +719,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   transition: background var(--transition-fast);
   font-size: 12px;
   position: relative;
+  user-select: none;
 }
 .file-tree-item:hover { background: var(--bg-surface-3); }
 .file-tree-item.selected { background: var(--bg-hover); }
-.file-tree-icon { width: 14px; text-align: center; color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+.file-tree-icon { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 0; }
+.file-tree-icon svg { width: 16px; height: 16px; }
+.file-tree-arrow { width: 14px; font-size: 17px; text-align: center; color: var(--text-muted); flex-shrink: 0; line-height: 1; }
 .file-tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
 .file-tree-name.folder { font-weight: 500; }
 .file-tree-name.file { color: var(--text-secondary); }
@@ -744,7 +747,29 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
 .file-git-badge.M { color: var(--accent-amber); background: var(--accent-amber-dim); }
 .file-git-badge.A { color: var(--accent-green); background: var(--accent-green-dim); }
 .file-git-badge.D { color: var(--accent-red); background: var(--accent-red-dim); }
+.file-git-badge.R { color: var(--accent-purple); background: var(--accent-purple-dim); }
 .file-git-badge.U { color: var(--accent-cyan); background: rgba(34, 211, 238, 0.15); }
+.file-git-badge.staged { color: var(--accent-cyan); background: rgba(34, 211, 238, 0.15); }
+.file-git-badge.untracked { color: var(--accent-green); background: var(--accent-green-dim); }
+.file-git-badge.ignored { color: var(--text-muted); background: rgba(128, 128, 128, 0.15); }
+
+/* Dirty directory indicator (contains modified files) */
+.file-tree-item.dir-dirty > .file-tree-name { color: var(--accent-amber); }
+.dir-dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-amber);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Deleted file styling */
+.file-git-badge.D ~ .file-tree-name,
+.file-tree-item:has(.file-git-badge.D) .file-tree-name {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
 
 /* Flat list mode — show full path */
 .file-flat-item {
@@ -755,6 +780,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   cursor: pointer;
   transition: background var(--transition-fast);
   font-size: 12px;
+  user-select: none;
 }
 .file-flat-item:hover { background: var(--bg-surface-3); }
 .file-flat-path {
@@ -941,6 +967,50 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   transition: all var(--transition-fast);
 }
 .gh-branch-btn:hover { background: var(--bg-surface-3); color: var(--text-primary); }
+.gh-branch-btn.active { color: var(--accent-blue); background: rgba(91, 138, 245, 0.1); }
+.gh-branch-sep { width: 1px; height: 14px; background: var(--border); flex-shrink: 0; }
+
+.gh-branch-bar { flex-wrap: wrap; position: relative; }
+.gh-worktree-list {
+  width: 100%;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+.gh-worktree-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+.gh-worktree-item.current { background: rgba(91, 138, 245, 0.08); }
+.gh-worktree-item.current .gh-worktree-branch { color: var(--accent-blue); }
+.gh-worktree-branch { font-family: var(--font-mono); font-weight: 500; color: var(--text-primary); }
+.gh-worktree-path { color: var(--text-muted); font-family: var(--font-mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-worktree-remove {
+  width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); color: var(--text-muted); font-size: 14px;
+  transition: all var(--transition-fast); flex-shrink: 0;
+}
+.gh-worktree-remove:hover { color: var(--accent-red); background: var(--accent-red-dim); }
+.gh-worktree-item.clickable { cursor: pointer; }
+.gh-worktree-item.clickable:hover { background: rgba(91, 138, 245, 0.12); }
+
+/* Worktree mode header */
+.gh-worktree-mode { background: rgba(166, 127, 230, 0.08); }
+.gh-worktree-caption {
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gh-worktree-caption strong { color: var(--accent-purple, #a67fe6); font-weight: 600; }
+.gh-close-worktree { color: var(--accent-purple, #a67fe6) !important; font-size: 11px !important; gap: 3px; }
+.gh-close-worktree:hover { background: rgba(166, 127, 230, 0.15) !important; }
+
+/* Worktree active tabs */
+.center-tabs.worktree-active { background: rgba(166, 127, 230, 0.06); border-bottom-color: rgba(166, 127, 230, 0.25); }
+.center-tabs.worktree-active .center-tab.active { border-bottom-color: var(--accent-purple, #a67fe6); }
 
 /* Commit list */
 .gh-commit-list {
@@ -3402,6 +3472,95 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   to { opacity: 1; }
 }
 
+/* Confirm dialog */
+.confirm-dialog {
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 20px 24px;
+  min-width: 340px;
+  max-width: 440px;
+}
+.confirm-dialog-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.confirm-dialog-message {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm-dialog-btn {
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  transition: background 0.15s;
+}
+.confirm-dialog-btn.cancel {
+  background: var(--bg-surface-3);
+  color: var(--text-secondary);
+}
+.confirm-dialog-btn.cancel:hover { background: var(--bg-surface-4); }
+.confirm-dialog-btn.danger {
+  background: var(--accent-red);
+  color: #fff;
+  border-color: var(--accent-red);
+}
+.confirm-dialog-btn.danger:hover { opacity: 0.85; }
+.confirm-dialog-btn.primary {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+.confirm-dialog-btn.primary:hover { opacity: 0.85; }
+.confirm-dialog-btn:disabled { opacity: 0.4; cursor: default; }
+
+.input-dialog-input {
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  outline: none;
+}
+.input-dialog-input:focus { border-color: var(--accent-blue); }
+.input-dialog-textarea {
+  resize: vertical;
+  min-height: 60px;
+  max-height: 200px;
+  line-height: 1.5;
+}
+
+.worktree-form { margin-bottom: 16px; }
+.worktree-label { display: block; }
+.worktree-label-text { display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.worktree-toggle { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.worktree-toggle-btn { flex: 1; padding: 5px 12px; font-size: 12px; background: var(--bg-surface); color: var(--text-secondary); border: none; cursor: pointer; transition: all 0.15s; }
+.worktree-toggle-btn.active { background: var(--accent-blue); color: #fff; }
+.worktree-toggle-btn:not(.active):hover { background: var(--bg-surface-3); }
+.worktree-default-path {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+  padding: 6px 10px; background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); margin-bottom: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* Session loading overlay */
 .session-loading-overlay {
   position: absolute;
@@ -3751,6 +3910,20 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   text-align: center;
   font-size: 11px;
   color: var(--text-muted);
+}
+.folder-browser-new { font-size: 14px; font-weight: 700; }
+.folder-browser-new-row {
+  display: flex; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border-subtle);
+}
+.folder-browser-new-input {
+  flex: 1; padding: 4px 8px; font-size: 11px; font-family: var(--font-mono);
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-primary); outline: none;
+}
+.folder-browser-new-input:focus { border-color: var(--accent-blue); }
+.folder-browser-new-ok {
+  padding: 4px 10px; font-size: 11px; background: var(--accent-blue); color: #fff;
+  border-radius: var(--radius-sm); border: none; cursor: pointer;
 }
 .modal-path-row {
   display: flex;

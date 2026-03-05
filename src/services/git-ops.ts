@@ -19,11 +19,25 @@ export async function gitInit(cwd: string) {
 }
 
 export async function gitStatus(cwd: string) {
-  const output = await git(['status', '--porcelain', '-uall'], cwd);
+  const output = await git(['status', '--porcelain', '-uall', '-M'], cwd);
   return output.split('\n').filter(Boolean).map(line => {
-    const status = line.substring(0, 2).trim();
-    const file = line.substring(3);
-    return { status, file };
+    const x = line[0]; // index (staged) status
+    const y = line[1]; // working tree status
+    const rest = line.substring(3);
+    // Handle renames: "R100 new_path\told_path" or "R  new_path -> old_path"
+    let file = rest;
+    let oldPath: string | undefined;
+    if (x === 'R' || y === 'R') {
+      // Porcelain format uses NUL or " -> " for rename paths
+      const arrowIdx = rest.indexOf(' -> ');
+      if (arrowIdx >= 0) {
+        file = rest.substring(0, arrowIdx);
+        oldPath = rest.substring(arrowIdx + 4);
+      }
+    }
+    let status = (x + y).trim() || '?';
+    const staged = x !== ' ' && x !== '?' && x !== '!';
+    return { status, file, staged, indexStatus: x, workTreeStatus: y, oldPath };
   });
 }
 
@@ -159,8 +173,16 @@ export async function gitRevert(cwd: string, file?: string) {
   }
 }
 
+export async function gitUnstageFile(cwd: string, file: string) {
+  await git(['reset', 'HEAD', '--', file], cwd);
+}
+
 export async function gitStageFile(cwd: string, file: string) {
   await git(['add', file], cwd);
+}
+
+export async function gitShowFile(cwd: string, file: string, ref: string = 'HEAD') {
+  return await git(['show', `${ref}:${file}`], cwd);
 }
 
 export async function gitBlame(cwd: string, file: string) {
@@ -174,4 +196,42 @@ export async function gitFileLog(cwd: string, file: string) {
     const [hash, author, date, ...msgParts] = line.split('|');
     return { hash, author, date, msg: msgParts.join('|') };
   });
+}
+
+export async function gitWorktreeList(cwd: string) {
+  const output = await git(['worktree', 'list', '--porcelain'], cwd);
+  const worktrees: { path: string; head: string; branch: string; bare?: boolean }[] = [];
+  let current: any = {};
+  for (const line of output.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      if (current.path) worktrees.push(current);
+      current = { path: line.substring(9) };
+    } else if (line.startsWith('HEAD ')) {
+      current.head = line.substring(5);
+    } else if (line.startsWith('branch ')) {
+      current.branch = line.substring(7).replace('refs/heads/', '');
+    } else if (line === 'bare') {
+      current.bare = true;
+    } else if (line === 'detached') {
+      current.branch = '(detached)';
+    }
+  }
+  if (current.path) worktrees.push(current);
+  return worktrees;
+}
+
+export async function gitWorktreeAdd(cwd: string, path: string, branch?: string, newBranch?: boolean) {
+  const args = ['worktree', 'add'];
+  if (newBranch && branch) {
+    args.push('-b', branch, path);
+  } else if (branch) {
+    args.push(path, branch);
+  } else {
+    args.push(path);
+  }
+  await git(args, cwd);
+}
+
+export async function gitWorktreeRemove(cwd: string, worktreePath: string) {
+  await git(['worktree', 'remove', worktreePath], cwd);
 }
