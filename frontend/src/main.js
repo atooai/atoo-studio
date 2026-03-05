@@ -611,6 +611,7 @@ function getProjectStatus(proj) {
 
 function renderSidebarProjects() {
   const list = document.getElementById('project-list');
+  if (!list) return;
   list.innerHTML = state.projects.map(p => {
     const status = getProjectStatus(p);
     const isActive = p.id === state.activeProjectId;
@@ -766,6 +767,15 @@ async function selectProject(projectId, peId, fromRouter = false) {
   }
 
   state.activeProjectId = projectId;
+  
+  // Cancel any pending chat render and reset state for new project
+  if (_renderChatTimer) {
+    cancelAnimationFrame(_renderChatTimer);
+    _renderChatTimer = null;
+  }
+  _chatSessionId = null;
+  _chatRenderedCount = 0;
+  
   // Resolve pe_id: use explicit param, or look up from projects array
   if (peId) {
     state.activeProjectEnvironmentId = peId;
@@ -814,6 +824,7 @@ async function selectProject(projectId, peId, fromRouter = false) {
   }
 
   // Lazy-load git data
+  console.log('[selectProject] Git check - isGit:', proj.isGit, '_gitLoaded:', proj._gitLoaded, 'gitLog:', proj.gitLog);
   if (proj.isGit && !proj._gitLoaded) {
     try {
       const [status, branches, stashes, remotes] = await Promise.all([
@@ -904,6 +915,23 @@ async function selectProject(projectId, peId, fromRouter = false) {
   // Dispose current editors before switching (they belong to the previous project)
   disposeEditors();
 
+  // Reset indices to valid values for this project
+  const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+  console.log('[selectProject] projectId:', projectId, 'sessions:', proj.sessions.length, 'activeSessions:', activeSessions.length, 'activeSessionIdx:', proj.activeSessionIdx);
+  if (proj.activeSessionIdx >= activeSessions.length) {
+    proj.activeSessionIdx = 0;
+  }
+  const terminals = proj.terminals || [];
+  if (proj.activeTerminalIdx >= terminals.length) {
+    proj.activeTerminalIdx = 0;
+  }
+
+  // Force full chat rebuild right before rendering
+  console.log('[selectProject] Resetting chat state, _chatSessionId:', _chatSessionId, '_chatRenderedCount:', _chatRenderedCount);
+  _chatSessionId = null;
+  _chatRenderedCount = 0;
+
+  console.log('[selectProject] Calling render functions...');
   renderSidebarProjects();
   renderFileTree(proj);
   renderGitHistory(proj);
@@ -912,6 +940,7 @@ async function selectProject(projectId, peId, fromRouter = false) {
   renderSessions(proj);
   renderEditorTabs();
   renderEditorContent();
+  console.log('[selectProject] Render functions complete, _chatSessionId:', _chatSessionId, '_chatRenderedCount:', _chatRenderedCount);
 
   // Update stash button state
   const stashBtn = document.getElementById('tb-stash-toggle');
@@ -992,17 +1021,20 @@ function renderStashPanel(proj) {
 
 function renderFileTree(proj) {
   const panel = document.getElementById('files-panel');
+  const countEl = document.getElementById('lp-change-count');
+  if (!panel) return;
   const gitMap = {};
   (proj.gitChanges || []).forEach(c => { gitMap[c.file] = c.status; });
 
   // Update change count
   const changeCount = Object.keys(gitMap).length;
-  const countEl = document.getElementById('lp-change-count');
-  if (changeCount > 0) {
-    countEl.style.display = '';
-    countEl.textContent = changeCount;
-  } else {
-    countEl.style.display = 'none';
+  if (countEl) {
+    if (changeCount > 0) {
+      countEl.style.display = '';
+      countEl.textContent = changeCount;
+    } else {
+      countEl.style.display = 'none';
+    }
   }
 
   if (state.fileFilter === 'changed') {
@@ -1114,21 +1146,43 @@ function toggleDir(el) {
 // GIT HISTORY PANEL
 // ═══════════════════════════════════════════════════════
 function renderGitHistory(proj) {
+  const gitPanel = document.getElementById('git-history-panel');
+  if (!gitPanel) return;
+  
+  console.log('[renderGitHistory] isGit:', proj.isGit, 'gitLog:', proj.gitLog, 'commits:', proj.gitLog?.commits?.length);
   if (!proj.isGit || !proj.gitLog) {
-    document.getElementById('git-history-panel').innerHTML = '<div class="gh-empty"><span class="gh-empty-icon">⊘</span><span class="gh-empty-title">Not a git repository</span></div>';
+    console.log('[renderGitHistory] Showing "Not a git repository"');
+    gitPanel.innerHTML = '<div class="gh-empty"><span class="gh-empty-icon">⊘</span><span class="gh-empty-title">Not a git repository</span></div>';
     return;
   }
 
+  // Rebuild the full git panel structure (in case it was replaced by "Not a git repository")
+  gitPanel.innerHTML = `
+    <div class="gh-branch-bar" id="gh-branch-bar">
+      <span class="gh-branch-icon">⑂</span>
+      <select class="gh-branch-select" id="gh-branch-select" onchange="switchGitBranch(this.value)"></select>
+      <div class="gh-branch-actions">
+        <button class="gh-branch-btn" onclick="createBranch()" title="New branch">+</button>
+        <button class="gh-branch-btn" onclick="fetchRemote()" title="Fetch">↓</button>
+        <button class="gh-branch-btn" onclick="openRemoteManager()" title="Manage remotes">⇄</button>
+      </div>
+    </div>
+    <div class="gh-commit-list" id="gh-commit-list"></div>
+  `;
+
   // Branches
   const select = document.getElementById('gh-branch-select');
-  select.innerHTML = (proj.gitLog.branches || []).map(b => {
-    const isRemote = b.startsWith('remotes/');
-    const display = isRemote ? b.replace('remotes/', '') : b;
-    return `<option value="${b}" ${b === proj.gitLog.currentBranch ? 'selected' : ''}>${display}</option>`;
-  }).join('');
+  if (select) {
+    select.innerHTML = (proj.gitLog.branches || []).map(b => {
+      const isRemote = b.startsWith('remotes/');
+      const display = isRemote ? b.replace('remotes/', '') : b;
+      return `<option value="${b}" ${b === proj.gitLog.currentBranch ? 'selected' : ''}>${display}</option>`;
+    }).join('');
+  }
 
   // Commits
   const list = document.getElementById('gh-commit-list');
+  if (!list) return;
   const commits = proj.gitLog.commits || [];
   list.innerHTML = commits.map((c, i) => {
     const isHead = (c.refs || []).some(r => r.type === 'head');
@@ -1769,6 +1823,7 @@ function disposeEditors() {
 // ═══════════════════════════════════════════════════════
 function renderCenterTabs(proj) {
   const tabs = document.getElementById('center-tabs');
+  if (!tabs) return;
   const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
 
   let html = activeSessions.map((s, i) => {
@@ -1800,6 +1855,7 @@ function renderCenterTabs(proj) {
 }
 
 function renderCenterContent(proj) {
+  console.log('[renderCenterContent] proj.id:', proj.id, 'activeTabType:', state.activeTabType, 'activeSessionIdx:', proj.activeSessionIdx);
   const chatArea = document.getElementById('chat-area');
   const chatInputBar = document.getElementById('chat-input-bar');
   const chatStatusBar = document.getElementById('chat-status-bar');
@@ -1807,6 +1863,11 @@ function renderCenterContent(proj) {
   const tuiView = document.getElementById('tui-view');
   const tuiInputBar = document.getElementById('tui-input-bar');
   const viewToggle = document.getElementById('session-view-toggle');
+
+  if (!chatArea || !chatInputBar || !chatStatusBar || !termOutput || !tuiView || !tuiInputBar || !viewToggle) {
+    console.log('[renderCenterContent] One or more DOM elements not found');
+    return;
+  }
 
   chatArea.classList.add('hidden');
   chatInputBar.classList.add('hidden');
@@ -1832,6 +1893,7 @@ function renderCenterContent(proj) {
 
   const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
   const session = activeSessions[proj.activeSessionIdx || 0];
+  console.log('[renderCenterContent] activeSessions:', activeSessions.length, 'session:', session?.id, 'session.title:', session?.title);
   if (!session) {
     chatArea.classList.remove('hidden');
     chatArea.innerHTML = '<div class="empty-state"><div class="empty-state-icon">◉</div><div class="empty-state-title">No active session</div><div class="empty-state-desc">Start a new Claude Code session</div></div>';
@@ -2057,9 +2119,11 @@ function getStatusHtml(session) {
 }
 
 function _renderChatImmediate(proj) {
+  console.log('[_renderChatImmediate] proj.id:', proj.id, '_chatSessionId:', _chatSessionId, '_chatRenderedCount:', _chatRenderedCount);
   const area = document.getElementById('chat-area');
   const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
   const session = activeSessions[proj.activeSessionIdx || 0];
+  console.log('[_renderChatImmediate] activeSessions:', activeSessions.length, 'session.id:', session?.id, 'session.title:', session?.title);
   if (!session) {
     area.innerHTML = '<div class="empty-state"><div class="empty-state-icon">◉</div><div class="empty-state-title">No active session</div></div>';
     _chatSessionId = null;
@@ -2074,6 +2138,8 @@ function _renderChatImmediate(proj) {
     session.id !== _chatSessionId ||
     showVerbose !== _chatRenderedVerbose ||
     filtered.length < _chatRenderedCount;
+
+  console.log('[_renderChatImmediate] needFullRebuild:', needFullRebuild, 'session.id:', session.id, '_chatSessionId:', _chatSessionId);
 
   if (needFullRebuild) {
     // Full rebuild — session switched, verbose toggled, or messages shrank (collapse/rewind)
@@ -2159,7 +2225,7 @@ function renderUserQuestion(m, session, input, isResponded) {
 
   if (isResponded) {
     const saved = questionAnswers[uuid];
-    return `<div class="chat-question-answered">${questions.map(q => {
+    return `<div class="chat-question-answered" data-question-uuid="${escAttr(uuid)}">${questions.map(q => {
       const header = q.header || 'Q';
       const answer = saved?.[q.question] || 'Answered';
       return `<span><span class="chat-question-answered-header">${escHtml(header)}: </span><span class="chat-question-answered-value">${escHtml(answer)}</span></span>`;
@@ -2169,7 +2235,7 @@ function renderUserQuestion(m, session, input, isResponded) {
   // Init answer state for this question
   if (!questionAnswers[uuid]) questionAnswers[uuid] = {};
 
-  let html = '<div class="chat-question-panel">';
+  let html = `<div class="chat-question-panel" data-question-uuid="${escAttr(uuid)}">`;
   questions.forEach((q, qi) => {
     const qKey = q.question;
     if (q.header) {
@@ -2178,9 +2244,16 @@ function renderUserQuestion(m, session, input, isResponded) {
     html += `<div class="chat-question-text">${escHtml(q.question)}</div>`;
     html += '<div class="chat-question-options">';
 
+    // Use escJs (not escAttr) for JS strings inside onclick="" attributes.
+    // HTML entity decoding reverses escAttr before JS evaluation, breaking strings with quotes.
+    const jUuid = escJs(uuid);
+    const jQKey = escJs(qKey);
+    const jSessId = escJs(session.id);
+
     (q.options || []).forEach((opt, oi) => {
       const selected = questionAnswers[uuid]?.[qKey] === opt.label && !questionAnswers[uuid]?.['_custom_' + qKey];
-      html += `<div class="chat-question-option ${selected ? 'selected' : ''}" onclick="selectQuestionOption('${uuid}','${escAttr(qKey)}','${escAttr(opt.label)}','${session.id}')">
+      const jLabel = escJs(opt.label);
+      html += `<div class="chat-question-option ${selected ? 'selected' : ''}" onclick="selectQuestionOption('${jUuid}','${jQKey}','${jLabel}','${jSessId}')">
         <div class="chat-question-radio"><div class="chat-question-radio-inner"></div></div>
         <div>
           <div class="chat-question-option-label">${escHtml(opt.label)}</div>
@@ -2192,12 +2265,12 @@ function renderUserQuestion(m, session, input, isResponded) {
     // "Other" option
     const isCustom = !!questionAnswers[uuid]?.['_custom_' + qKey];
     const customText = questionAnswers[uuid]?.['_customText_' + qKey] || '';
-    html += `<div class="chat-question-option ${isCustom ? 'selected' : ''}" onclick="selectQuestionCustom('${uuid}','${escAttr(qKey)}','${session.id}')">
+    html += `<div class="chat-question-option ${isCustom ? 'selected' : ''}" onclick="selectQuestionCustom('${jUuid}','${jQKey}','${jSessId}')">
       <div style="display:flex;align-items:center;gap:10px;width:100%">
         <div class="chat-question-radio"><div class="chat-question-radio-inner"></div></div>
         <div class="chat-question-option-label">Other</div>
       </div>
-      ${isCustom ? `<input type="text" class="chat-question-custom-input" placeholder="Type your answer..." value="${escAttr(customText)}" onclick="event.stopPropagation()" oninput="updateQuestionCustom('${uuid}','${escAttr(qKey)}',this.value,'${session.id}')" autofocus>` : ''}
+      ${isCustom ? `<input type="text" class="chat-question-custom-input" placeholder="Type your answer..." value="${escAttr(customText)}" onclick="event.stopPropagation()" oninput="updateQuestionCustom('${jUuid}','${jQKey}',this.value,'${jSessId}')" autofocus>` : ''}
     </div>`;
 
     html += '</div>';
@@ -2205,8 +2278,8 @@ function renderUserQuestion(m, session, input, isResponded) {
 
   const allAnswered = questions.every(q => questionAnswers[uuid]?.[q.question]);
   html += `<div class="chat-question-buttons">
-    <button class="chat-question-submit" ${allAnswered ? '' : 'disabled'} onclick="submitQuestion('${uuid}','${session.id}')">Submit</button>
-    <button class="chat-question-skip" onclick="skipQuestion('${uuid}','${session.id}')">Skip</button>
+    <button class="chat-question-submit" ${allAnswered ? '' : 'disabled'} onclick="submitQuestion('${escJs(uuid)}','${escJs(session.id)}')">Submit</button>
+    <button class="chat-question-skip" onclick="skipQuestion('${escJs(uuid)}','${escJs(session.id)}')">Skip</button>
   </div>`;
   html += '</div>';
   return html;
@@ -2225,8 +2298,8 @@ function renderPlanApproval(m, session, plan, isResponded) {
   html += '<div class="chat-plan-header">Plan Approval</div>';
   html += `<div class="chat-plan-content">${renderMd(plan)}</div>`;
   html += `<div class="chat-plan-buttons">
-    <button class="chat-plan-approve" onclick="approveControl('${session.id}')">Approve Plan</button>
-    <button class="chat-plan-deny" onclick="denyControl('${session.id}')">Deny</button>
+    <button class="chat-plan-approve" onclick="approveControl('${escJs(session.id)}')">Approve Plan</button>
+    <button class="chat-plan-deny" onclick="denyControl('${escJs(session.id)}')">Deny</button>
   </div>`;
   html += '</div>';
   return html;
@@ -2283,8 +2356,8 @@ function renderToolApproval(m, session, toolName, input) {
   }
 
   html += `<div class="chat-tool-approval-buttons">
-    <button class="chat-tool-approval-allow" onclick="approveControl('${session.id}')">Allow</button>
-    <button class="chat-tool-approval-deny" onclick="denyControl('${session.id}')">Deny</button>
+    <button class="chat-tool-approval-allow" onclick="approveControl('${escJs(session.id)}')">Allow</button>
+    <button class="chat-tool-approval-deny" onclick="denyControl('${escJs(session.id)}')">Deny</button>
   </div>`;
   html += '</div>';
   return html;
@@ -2294,24 +2367,76 @@ function escAttr(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+// Escape for JavaScript string inside an HTML onclick="..." attribute.
+// Uses hex escapes so HTML entity decoding doesn't reverse the escaping.
+function escJs(s) {
+  return String(s || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, '\\x27')
+    .replace(/"/g, '\\x22')
+    .replace(/</g, '\\x3c')
+    .replace(/>/g, '\\x3e')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
+}
+
+function rerenderQuestionPanel(uuid) {
+  const el = document.querySelector(`[data-question-uuid="${CSS.escape(uuid)}"]`);
+  if (!el) return;
+  const proj = state.projects.find(p => p.id === state.activeProjectId);
+  if (!proj) return;
+  const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+  const session = activeSessions[proj.activeSessionIdx || 0];
+  if (!session) return;
+  const msg = session.messages.find(m => m._eventUuid === uuid);
+  if (!msg || msg.role !== 'control_request') return;
+  const req = msg.content;
+  const input = req?.tool_use?.input || req?.input || req?.request?.input || req?.tool_use || {};
+  const newHtml = renderUserQuestion(msg, session, input, msg._responded);
+  const tmp = document.createElement('div');
+  tmp.innerHTML = newHtml;
+  if (tmp.firstElementChild) {
+    el.replaceWith(tmp.firstElementChild);
+  }
+}
+
 function selectQuestionOption(uuid, question, label, sessionId) {
   if (!questionAnswers[uuid]) questionAnswers[uuid] = {};
   questionAnswers[uuid][question] = label;
   delete questionAnswers[uuid]['_custom_' + question];
-  rerenderChat();
+  rerenderQuestionPanel(uuid);
 }
 
 function selectQuestionCustom(uuid, question, sessionId) {
   if (!questionAnswers[uuid]) questionAnswers[uuid] = {};
   questionAnswers[uuid]['_custom_' + question] = true;
   questionAnswers[uuid][question] = questionAnswers[uuid]['_customText_' + question] || '';
-  rerenderChat();
+  rerenderQuestionPanel(uuid);
 }
 
 function updateQuestionCustom(uuid, question, value, sessionId) {
   if (!questionAnswers[uuid]) questionAnswers[uuid] = {};
   questionAnswers[uuid]['_customText_' + question] = value;
   questionAnswers[uuid][question] = value;
+  updateQuestionSubmitButton(uuid);
+}
+
+function updateQuestionSubmitButton(uuid) {
+  const panel = document.querySelector(`[data-question-uuid="${CSS.escape(uuid)}"]`);
+  if (!panel) return;
+  const proj = state.projects.find(p => p.id === state.activeProjectId);
+  if (!proj) return;
+  const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
+  const session = activeSessions[proj.activeSessionIdx || 0];
+  if (!session) return;
+  const msg = session.messages.find(m => m._eventUuid === uuid);
+  if (!msg || msg.role !== 'control_request') return;
+  const req = msg.content;
+  const input = req?.tool_use?.input || req?.input || req?.request?.input || req?.tool_use || {};
+  const questions = input.questions || [];
+  const allAnswered = questions.every(q => questionAnswers[uuid]?.[q.question]);
+  const btn = panel.querySelector('.chat-question-submit');
+  if (btn) btn.disabled = !allAnswered;
 }
 
 async function submitQuestion(uuid, sessionId) {
@@ -2430,6 +2555,7 @@ function markControlResponded(sessionId, uuid) {
 }
 
 function rerenderChat() {
+  _chatRenderedCount = 0;
   const proj = state.projects.find(p => p.id === state.activeProjectId);
   if (proj) renderChat(proj);
 }
@@ -3068,7 +3194,12 @@ function switchToTerminal(projId, idx) {
 }
 
 function renderSessions(proj) {
+  console.log('[renderSessions] proj.id:', proj.id, 'sessions:', proj.sessions.length, 'historical:', (proj.historicalSessions || []).length);
   const list = document.getElementById('session-list');
+  if (!list) {
+    console.log('[renderSessions] session-list element not found');
+    return;
+  }
 
   // Active/live sessions
   const activeHtml = proj.sessions.map(s =>
