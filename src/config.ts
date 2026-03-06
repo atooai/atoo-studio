@@ -1,4 +1,4 @@
-export const PROXY_PORT = 8080;
+export const PROXY_PORT = 8081;
 export const INTERNAL_PORT = 0; // random port for internal Express app
 export const WEB_PORT = 3001;
 export const ANTHROPIC_HOST = 'api.anthropic.com';

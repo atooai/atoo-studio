@@ -569,7 +569,7 @@ export function spawnRemoteCliProcess(options: {
     if (skipPermissions) args.push('--dangerously-skip-permissions');
     args.push('/remote-control');
 
-    const cmd = `HTTPS_PROXY=http://localhost:8080 NODE_EXTRA_CA_CERTS=~/.ccproxy/ca.pem claude ${args.join(' ')}`;
+    const cmd = `HTTPS_PROXY=http://localhost:${PROXY_PORT} NODE_EXTRA_CA_CERTS=~/.ccproxy/ca.pem claude ${args.join(' ')}`;
 
     try {
       const channel = await sshManager.execPty(sshConnectionId, cmd, {

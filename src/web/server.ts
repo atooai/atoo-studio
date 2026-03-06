@@ -742,7 +742,9 @@ export function createWebServer(): http.Server {
   });
 
   // Serve frontend static files (production)
-  const frontendDist = path.join(__dirname, '..', '..', '..', 'frontend', 'dist');
+  // Works for both tsx (src/web/) and compiled (dist/web/) by finding the project root
+  const projectRoot = path.resolve(__dirname, __dirname.includes('/src/') ? '../..' : '../../..');
+  const frontendDist = path.join(projectRoot, 'frontend', 'dist');
   app.use(express.static(frontendDist));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/ws/')) return next();
