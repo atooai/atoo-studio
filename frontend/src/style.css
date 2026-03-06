@@ -206,7 +206,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
 }
 
 /* ── Collapsed sidebar state ─────────────────────────── */
-#sidebar.collapsed { min-width: 0; }
+#app.sidebar-collapsed {
+  grid-template-columns: auto 0 1fr;
+}
+#app.sidebar-collapsed .sidebar-vsplit { display: none; }
+#sidebar.collapsed { min-width: 0; width: 56px; }
 #sidebar.collapsed .sidebar-header {
   padding: 10px 4px;
   flex-direction: column;
@@ -226,8 +230,6 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
 }
 #sidebar.collapsed .sidebar-collapsed-label { display: flex; }
 
-/* Hide the vertical splitter when sidebar is collapsed */
-#sidebar.collapsed ~ .sidebar-vsplit { display: none; }
 
 /* Stats go vertical in collapsed mode */
 #sidebar.collapsed .global-status {
@@ -3070,6 +3072,16 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   background: var(--bg-surface);
   overflow: hidden;
 }
+/* Collapsed right panel: shrink grid column */
+.workspace.rp-collapsed.layout-default {
+  grid-template-columns: var(--lp-width) 5px 1fr 0 auto;
+}
+.workspace.rp-collapsed.layout-wide {
+  grid-template-columns: var(--lp-width) 5px 1fr 0 auto 5px var(--pp-width);
+}
+.workspace.rp-collapsed .panel-vsplit-right { display: none; }
+
+.right-panel.collapsed { width: 32px; }
 .right-panel.collapsed .session-list { display: none; }
 .right-panel.collapsed .rp-header-title { display: none; }
 .right-panel.collapsed .rp-collapse-btn {

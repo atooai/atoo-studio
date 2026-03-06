@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useStore } from '../../state/store';
 import { FileTree } from '../FileTree/FileTree';
 import { GitHistory } from '../Git/GitHistory';
@@ -9,15 +9,18 @@ import { PreviewPanel } from '../Preview/Preview';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
 
 export function Workspace() {
-  const { activeProjectId, projects, activeTabType, previewVisible } = useStore();
+  const { activeProjectId, projects, activeTabType, previewVisible, rightPanelCollapsed } = useStore();
   const proj = projects.find(p => p.id === activeProjectId);
   if (!proj) return null;
 
   const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
   const session = activeSessions[proj.activeSessionIdx || 0];
 
+  const layoutClass = previewVisible ? 'layout-wide' : 'layout-default';
+  const rpClass = rightPanelCollapsed ? 'rp-collapsed' : '';
+
   return (
-    <div className={`workspace ${previewVisible ? 'layout-wide' : 'layout-default'}`} id="workspace">
+    <div className={`workspace ${layoutClass} ${rpClass}`} id="workspace">
       {/* Left panel: file tree + git */}
       <div className="left-panel">
         <FileTree />
@@ -145,7 +148,7 @@ function TuiArea({ session }: { session: any }) {
 }
 
 function RightPanel({ proj }: { proj: any }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const { rightPanelCollapsed: collapsed, setRightPanelCollapsed: setCollapsed } = useStore();
 
   return (
     <div className={`right-panel ${collapsed ? 'collapsed' : ''}`} id="right-panel">

@@ -41,12 +41,13 @@ export function App() {
 
   const showStart = !activeEnvironmentId;
   const showOverview = activeEnvironmentId && !activeProjectId;
+  const sidebarCollapsed = useStore(s => s.sidebarCollapsed);
   const showWorkspace = activeEnvironmentId && activeProjectId;
 
   return (
     <>
       {showStart && <StartPage />}
-      <div id="app" style={{ display: showStart ? 'none' : '' }}>
+      <div id="app" className={sidebarCollapsed ? 'sidebar-collapsed' : ''} style={{ display: showStart ? 'none' : '' }}>
         <Sidebar />
         <div className="sidebar-vsplit" id="sidebar-vsplit" onMouseDown={(e) => (window as any).startSidebarSplitDrag(e.nativeEvent)}></div>
         <TopBar />
