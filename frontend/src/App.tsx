@@ -11,7 +11,7 @@ import { ToastContainer } from './components/Layout/Toast';
 import { ModalContainer } from './components/Modals/ModalContainer';
 import { ContextMenu } from './components/Modals/ContextMenu';
 import { SessionLoadingOverlay } from './components/Modals/SessionLoadingOverlay';
-import { getMonacoLang, debounce, getServerIp } from './utils';
+import { getMonacoLang, debounce, getServerIp, isRenderable, isImageFile } from './utils';
 
 export function App() {
   const {
@@ -575,21 +575,61 @@ function registerGlobalFunctions() {
     store.updateProject(projId, p => ({ ...p, activeTerminalIdx: idx }));
   };
 
+  win.closeTerminal = async (projId: string, idx: number) => {
+    const store = useStore.getState();
+    const proj = store.projects.find(p => p.id === projId);
+    if (!proj) return;
+    const term = proj.terminals[idx];
+    if (!term) return;
+    // Kill backend process
+    if (term.shellId) {
+      try { await api('DELETE', `/api/terminals/${term.shellId}`); } catch {}
+    }
+    // Cleanup frontend xterm instance
+    destroyTerminal(term.id);
+    // The WebSocket 'terminal_exited' event will remove it from the store
+  };
+
+  win.closeSession = async (projId: string, idx: number) => {
+    const store = useStore.getState();
+    const proj = store.projects.find(p => p.id === projId);
+    if (!proj) return;
+    const activeSessions = proj.sessions.filter((s: any) => s.status !== 'ended');
+    const session = activeSessions[idx];
+    if (!session) return;
+    // Kill the CLI process on the backend
+    try { await api('DELETE', `/api/sessions/${session.id}`); } catch {}
+    // Mark session as ended in the store (removes from active tabs)
+    store.updateProject(projId, p => ({
+      ...p,
+      sessions: p.sessions.map((s: any) => s.id === session.id ? { ...s, status: 'ended' } : s),
+      activeSessionIdx: Math.max(0, idx - 1),
+    }));
+    // Cleanup frontend xterm instance for TUI
+    destroyTerminal(`tui-${session.id}`);
+  };
+
   win.addTerminal = async () => {
     const store = useStore.getState();
     if (!store.activeProjectId) return;
     const proj = store.projects.find(p => p.id === store.activeProjectId);
     if (!proj) return;
     try {
+      // Just create via API — the WebSocket 'terminal_created' event handles adding to store
       const result = await api('POST', '/api/terminals', { cwd: proj.worktreePath || proj.path });
-      const termId = `shell-${result.id}`;
-      if (proj.terminals.find(x => x.shellId === result.id)) return;
-      store.updateProject(proj.id, p => ({
-        ...p,
-        terminals: [...p.terminals, { id: termId, name: `bash-${p.terminals.length}`, shellId: result.id }],
-        activeTerminalIdx: p.terminals.length,
-      }));
+      // Set active tab to terminal and select the new terminal once it appears
       store.setActiveTabType('terminal');
+      // Wait briefly for the WebSocket event to add the terminal, then set the active index
+      const waitForTerminal = () => {
+        const p = useStore.getState().projects.find(x => x.id === proj.id);
+        const idx = p?.terminals.findIndex(x => x.shellId === result.id);
+        if (idx !== undefined && idx >= 0) {
+          useStore.getState().updateProject(proj.id, pp => ({ ...pp, activeTerminalIdx: idx }));
+        } else {
+          setTimeout(waitForTerminal, 50);
+        }
+      };
+      waitForTerminal();
     } catch (e: any) {
       store.addToast(proj.name, `Failed to create terminal: ${e.message}`, 'attention');
     }
@@ -840,6 +880,8 @@ function registerGlobalFunctions() {
         let content: string;
         let originalContent: string;
         let lang: string;
+        let isBinary = false;
+        let fileSize: number | undefined;
 
         if (isDeleted && proj.isGit) {
           // Deleted file: fetch content from last commit
@@ -852,9 +894,11 @@ function registerGlobalFunctions() {
           content = data.content;
           originalContent = data.content;
           lang = data.lang || getMonacoLang(filePath);
+          isBinary = !!data.isBinary;
+          fileSize = data.size;
 
           // For git-modified files (not untracked), fetch HEAD version for diff
-          if (isGitModified && proj.isGit) {
+          if (!isBinary && isGitModified && proj.isGit) {
             try {
               const headData = await api('GET', `/api/projects/${proj.id}/git/show?file=${encodeURIComponent(filePath)}`);
               originalContent = headData.content;
@@ -862,10 +906,16 @@ function registerGlobalFunctions() {
           }
         }
 
+        // For binary files: default to rendered if renderable (image), else hex
+        let defaultViewMode: 'source' | 'diff' | 'rendered' | 'hex' = 'source';
+        if (isBinary) {
+          defaultViewMode = isRenderable(filePath) ? 'rendered' : 'hex';
+        }
+
         files.push({
           path: filePath, fullPath, content, originalContent,
-          isModified: isGitModified, lang, viewMode: 'source',
-          _gitStatus: gitStatus || undefined,
+          isModified: isGitModified, lang, viewMode: defaultViewMode,
+          _gitStatus: gitStatus || undefined, isBinary, fileSize,
         });
         idx = files.length - 1;
         store.setOpenFiles(files);
@@ -1302,6 +1352,7 @@ async function loadXterm() {
   const [xterm, fit] = await Promise.all([
     import('@xterm/xterm'),
     import('@xterm/addon-fit'),
+    import('@xterm/xterm/css/xterm.css'),
   ]);
   xtermModule = xterm;
   fitAddonModule = fit;
@@ -1338,6 +1389,23 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
         white: '#e0e0e0', brightWhite: '#ffffff', yellow: '#d4a843', brightYellow: '#f0c060',
       },
       fontFamily: 'JetBrains Mono, monospace', fontSize: 13, cursorBlink: true,
+    });
+
+    // Windows Terminal-style Ctrl+C: copy when text is selected, interrupt otherwise.
+    // Ctrl+V: block xterm from sending ^V, let browser paste event handle it.
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.type !== 'keydown') return true;
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+        if (e.key === 'c' && term.hasSelection()) {
+          navigator.clipboard.writeText(term.getSelection());
+          term.clearSelection();
+          return false;
+        }
+        if (e.key === 'v') {
+          return false;
+        }
+      }
+      return true;
     });
 
     const fitAddon = new FitAddon();

@@ -82,7 +82,7 @@ function CenterTabs({ proj }: { proj: any }) {
           <div key={s.id} className={`center-tab ${isActive ? 'active' : ''}`} onClick={() => (window as any).switchToSession(proj.id, i)}>
             <span className={`tab-dot ${s.status}`}></span>
             <span>{s.title && s.title.length > 10 ? s.title.substring(0, 10) + '…' : (s.title || 'New session')}</span>{warn}
-            <span className="tab-close" onClick={(e) => e.stopPropagation()}>×</span>
+            <span className="tab-close" onClick={(e) => { e.stopPropagation(); (window as any).closeSession(proj.id, i); }}>×</span>
           </div>
         );
       })}
@@ -94,7 +94,7 @@ function CenterTabs({ proj }: { proj: any }) {
           <div key={t.id} className={`center-tab terminal-type ${isActive ? 'active' : ''}`} onClick={() => (window as any).switchToTerminal(proj.id, i)}>
             <span className="tab-term-icon">›_</span>
             <span>{t.name || 'bash'}</span>
-            <span className="tab-close" onClick={(e) => e.stopPropagation()}>×</span>
+            <span className="tab-close" onClick={(e) => { e.stopPropagation(); (window as any).closeTerminal(proj.id, i); }}>×</span>
           </div>
         );
       })}

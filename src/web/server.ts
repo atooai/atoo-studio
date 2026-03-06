@@ -1,6 +1,7 @@
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
+import https from 'https';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
-import { spawnCliProcess, spawnForkedCliProcess, spawnRemoteCliProcess, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback } from '../spawner.js';
+import { spawnCliProcess, spawnForkedCliProcess, spawnRemoteCliProcess, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback, killCliProcess } from '../spawner.js';
 import { vccDb } from '../state/db.js';
 import { fsMonitor } from '../fs-monitor.js';
 import { changesRouter } from '../handlers/changes.js';
@@ -36,7 +37,7 @@ const shellClients = new Map<string, TermBroadcast>();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function createWebServer(): http.Server {
+export function createWebServer(tlsOptions?: { key: string; cert: string }): https.Server | http.Server {
   const app = express();
 
   // Port-proxy: intercept before body parsing so proxied requests stream through
@@ -343,6 +344,21 @@ export function createWebServer(): http.Server {
     res.json({ success: true });
   });
 
+  // Stop a session — kills the CLI process
+  app.delete('/api/sessions/:id', (req, res) => {
+    const sessionId = req.params.id;
+    let envId = getEnvIdForSession(sessionId);
+    if (!envId) {
+      const agent = agentRegistry.getAgent(sessionId);
+      if (agent) envId = (agent as any).envId;
+    }
+    if (envId) {
+      killCliProcess(envId);
+    }
+    store.sessions.delete(sessionId);
+    res.json({ success: true });
+  });
+
   // Trigger /context + /rewind for token usage update
   app.post('/api/sessions/:id/refresh-context', (req, res) => {
     const session = store.sessions.get(req.params.id);
@@ -641,6 +657,14 @@ export function createWebServer(): http.Server {
     }
   });
 
+  // Kill a shell terminal
+  app.delete('/api/terminals/:id', (req, res) => {
+    const entry = shellTerminals.get(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'Terminal not found' });
+    entry.pty.kill();
+    res.json({ success: true });
+  });
+
   // Server LAN IP for nip.io reverse proxy URLs
   app.get('/api/server-ip', (req, res) => {
     // If the client connected via IP already, return that
@@ -768,7 +792,9 @@ export function createWebServer(): http.Server {
     });
   });
 
-  const server = http.createServer(app);
+  const server = tlsOptions
+    ? https.createServer(tlsOptions, app)
+    : http.createServer(app);
 
   // Broadcast file change events to session subscribers
   fsMonitor.onChangeEvent((change) => {

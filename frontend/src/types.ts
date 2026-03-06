@@ -178,8 +178,10 @@ export interface EditorFile {
   originalContent: string;
   isModified: boolean;
   lang: string;
-  viewMode: 'source' | 'diff' | 'rendered';
+  viewMode: 'source' | 'diff' | 'rendered' | 'hex';
   _gitStatus?: string;
+  isBinary?: boolean;
+  fileSize?: number;
 }
 
 export interface PreviewTab {

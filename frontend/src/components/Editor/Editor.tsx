@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { useStore } from '../../state/store';
 import { api } from '../../api';
-import { getFileIcon, isRenderable, escapeHtml, getMonacoLang, renderMd } from '../../utils';
+import { getFileIcon, isRenderable, isImageFile, escapeHtml, getMonacoLang, renderMd } from '../../utils';
+import { HexViewer } from './HexViewer';
 import type { EditorFile } from '../../types';
 
 let monacoEditor: any = null;
@@ -79,10 +80,11 @@ export function EditorArea() {
     setActiveFileIdx(newIdx);
   };
 
-  const setViewMode = (mode: 'source' | 'diff' | 'rendered') => {
+  const setViewMode = (mode: 'source' | 'diff' | 'rendered' | 'hex') => {
     if (!file) return;
     const noDiff = !file.isModified || file._gitStatus === '??' || file._gitStatus === 'D';
-    if (mode === 'diff' && noDiff) return;
+    if (mode === 'source' && file.isBinary) return;
+    if (mode === 'diff' && (noDiff || file.isBinary)) return;
     if (mode === 'rendered' && !isRenderable(file.path)) return;
     const newFiles = openFiles.map((f, i) => i === activeFileIdx ? { ...f, viewMode: mode } : f);
     setOpenFiles(newFiles);
@@ -109,22 +111,27 @@ export function EditorArea() {
         <>
           <div className="editor-toolbar">
             <div className="editor-view-group">
-              <button className={`ev-btn ${file.viewMode === 'source' ? 'active' : ''}`} onClick={() => setViewMode('source')}>Source</button>
-              <button className={`ev-btn ${file.viewMode === 'diff' ? 'active' : ''} ${(!file.isModified || file._gitStatus === '??' || file._gitStatus === 'D') ? 'disabled' : ''}`} onClick={() => setViewMode('diff')}>Diff</button>
+              <button className={`ev-btn ${file.viewMode === 'source' ? 'active' : ''} ${file.isBinary ? 'disabled' : ''}`} onClick={() => setViewMode('source')}>Source</button>
+              <button className={`ev-btn ${file.viewMode === 'diff' ? 'active' : ''} ${(!file.isModified || file._gitStatus === '??' || file._gitStatus === 'D' || file.isBinary) ? 'disabled' : ''}`} onClick={() => setViewMode('diff')}>Diff</button>
               <button className={`ev-btn ${file.viewMode === 'rendered' ? 'active' : ''} ${!isRenderable(file.path) ? 'disabled' : ''}`} onClick={() => setViewMode('rendered')}>Rendered</button>
+              <button className={`ev-btn ${file.viewMode === 'hex' ? 'active' : ''}`} onClick={() => setViewMode('hex')}>Hex</button>
             </div>
-            <button
+            {!file.isBinary && <button
               className={`ev-btn ${(file.isModified && file._gitStatus !== 'D') ? '' : 'disabled'}`}
               onClick={() => saveCurrentFile()}
               title="Save (Ctrl+S)"
-            >💾 Save</button>
+            >Save</button>}
             <span className="editor-filepath">{file.path}</span>
           </div>
           <div className="editor-content">
-            {file.viewMode === 'diff' && file.isModified ? (
+            {file.viewMode === 'hex' ? (
+              <HexViewer file={file} />
+            ) : file.viewMode === 'diff' && file.isModified && !file.isBinary ? (
               <DiffEditorView file={file} />
             ) : file.viewMode === 'rendered' && isRenderable(file.path) ? (
               <RenderedView file={file} />
+            ) : file.isBinary ? (
+              <BinaryPlaceholder file={file} onSwitchView={setViewMode} />
             ) : (
               <SourceEditorView file={file} />
             )}
@@ -229,6 +236,27 @@ function DiffEditorView({ file }: { file: EditorFile }) {
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
 }
 
+function BinaryPlaceholder({ file, onSwitchView }: { file: EditorFile; onSwitchView: (mode: 'hex') => void }) {
+  const sizeLabel = file.fileSize
+    ? file.fileSize >= 1024 * 1024
+      ? (file.fileSize / 1024 / 1024).toFixed(1) + ' MB'
+      : file.fileSize >= 1024
+      ? (file.fileSize / 1024).toFixed(1) + ' KB'
+      : file.fileSize + ' B'
+    : 'unknown size';
+  const ext = file.path.split('.').pop()?.toUpperCase() || 'BINARY';
+
+  return (
+    <div className="binary-placeholder">
+      <div className="binary-placeholder-icon">&#x2B22;</div>
+      <div className="binary-placeholder-title">Binary file</div>
+      <div className="binary-placeholder-info">{ext} &middot; {sizeLabel}</div>
+      <div className="binary-placeholder-msg">This file cannot be displayed as text.</div>
+      <button className="ev-btn" onClick={() => onSwitchView('hex')}>Open in Hex Viewer</button>
+    </div>
+  );
+}
+
 function RenderedView({ file }: { file: EditorFile }) {
   const ext = file.path.split('.').pop()?.toLowerCase() || '';
   if (ext === 'md') {
@@ -236,6 +264,18 @@ function RenderedView({ file }: { file: EditorFile }) {
   }
   if (ext === 'html' || ext === 'astro') {
     return <div className="editor-rendered" style={{ display: 'block' }}><iframe className="html-frame" srcDoc={file.content} sandbox="" style={{ width: '100%', height: '100%', border: 'none' }} /></div>;
+  }
+  // Binary images: use raw endpoint
+  if (isImageFile(file.path)) {
+    const imgUrl = `/api/files/raw?path=${encodeURIComponent(file.fullPath)}`;
+    if (ext === 'svg' && !file.isBinary) {
+      return <div className="editor-rendered" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#12131a' }}><img src={imgUrl} alt={file.path} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /></div>;
+    }
+    return (
+      <div className="editor-rendered" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#12131a' }}>
+        <img src={imgUrl} alt={file.path} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+      </div>
+    );
   }
   return <div className="editor-rendered" style={{ display: 'block' }}><pre style={{ padding: 16, whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{escapeHtml(file.content)}</pre></div>;
 }

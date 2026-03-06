@@ -6,3 +6,5 @@ export const ANTHROPIC_ORIGIN = `https://${ANTHROPIC_HOST}`;
 export const CERTS_DIR = new URL('../certs/', import.meta.url).pathname;
 export const CA_CERT_PATH = `${CERTS_DIR}ca.pem`;
 export const CA_KEY_PATH = `${CERTS_DIR}ca-key.pem`;
+export const WEB_CERT_PATH = `${CERTS_DIR}web-cert.pem`;
+export const WEB_KEY_PATH = `${CERTS_DIR}web-key.pem`;

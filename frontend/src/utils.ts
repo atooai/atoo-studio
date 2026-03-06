@@ -31,7 +31,27 @@ export function getMonacoLang(path: string): string {
 }
 
 export function isRenderable(path: string): boolean {
-  return /\.(md|html|astro|png|jpg|jpeg|gif|svg|webp)$/i.test(path);
+  return /\.(md|html|astro|png|jpg|jpeg|gif|svg|webp|bmp|ico|avif)$/i.test(path);
+}
+
+export function isImageFile(path: string): boolean {
+  return /\.(png|jpg|jpeg|gif|svg|webp|bmp|ico|avif|tiff|tif)$/i.test(path);
+}
+
+export function isBinaryExtension(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const binaryExts = new Set([
+    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'tiff', 'tif', 'psd', 'avif',
+    'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma',
+    'mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm',
+    'zip', 'tar', 'gz', 'bz2', '7z', 'rar', 'xz', 'zst',
+    'exe', 'dll', 'so', 'dylib', 'bin', 'msi', 'deb', 'rpm', 'appimage',
+    'woff', 'woff2', 'ttf', 'otf', 'eot',
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+    'class', 'pyc', 'pyo', 'o', 'obj', 'wasm', 'a', 'lib',
+    'sqlite', 'db', 'sqlite3',
+  ]);
+  return binaryExts.has(ext);
 }
 
 export function classifyFile(file: File): string {

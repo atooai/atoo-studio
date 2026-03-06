@@ -2,7 +2,8 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { vccDb } from '../state/db.js';
-import { getFileTree, readFileContent } from '../services/fs-browser.js';
+import { getFileTree, readFileContent, isBinaryFile } from '../services/fs-browser.js';
+import mime from 'mime-types';
 import { getRemoteFileTree, readRemoteFileContent } from '../services/remote-fs-browser.js';
 import * as gitOps from '../services/git-ops.js';
 import * as remoteGitOps from '../services/remote-git-ops.js';
@@ -111,11 +112,42 @@ projectsRouter.get('/api/files', async (req, res) => {
       res.json({ content, lang, path: filePath });
     } else {
       const resolved = path.resolve(filePath);
-      const { content, lang } = readFileContent(resolved);
-      res.json({ content, lang, path: resolved });
+      const result = readFileContent(resolved);
+      res.json({ content: result.content, lang: result.lang, path: resolved, isBinary: result.isBinary, size: result.size });
     }
   } catch (err: any) {
     res.status(404).json({ error: err.message });
+  }
+});
+
+// Serve raw file bytes (for images, hex view, etc.)
+projectsRouter.get('/api/files/raw', (req, res) => {
+  const filePath = req.query.path as string;
+  if (!filePath) return res.status(400).json({ error: 'path required' });
+  try {
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'not found' });
+    const stat = fs.statSync(resolved);
+
+    // For hex view: support range requests for chunked loading
+    const offset = parseInt(req.query.offset as string) || 0;
+    const length = parseInt(req.query.length as string) || 0;
+    if (length > 0) {
+      // Return a chunk as base64 for hex viewer
+      const fd = fs.openSync(resolved, 'r');
+      const buf = Buffer.alloc(Math.min(length, 1024 * 1024)); // cap at 1MB per chunk
+      const bytesRead = fs.readSync(fd, buf, 0, buf.length, offset);
+      fs.closeSync(fd);
+      return res.json({ data: buf.subarray(0, bytesRead).toString('base64'), size: stat.size, bytesRead });
+    }
+
+    // Stream full file with correct content type
+    const ct = mime.lookup(resolved) || 'application/octet-stream';
+    res.setHeader('Content-Type', ct);
+    res.setHeader('Content-Length', stat.size);
+    fs.createReadStream(resolved).pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -216,6 +248,55 @@ projectsRouter.post('/api/files/move', async (req, res) => {
       fs.renameSync(path.resolve(from), path.resolve(to));
     }
     res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Binary file save (for screenshots etc.)
+projectsRouter.post('/api/files/binary', async (req, res) => {
+  const { path: filePath, data, ssh_connection_id } = req.body;
+  if (!filePath || !data) {
+    return res.status(400).json({ error: 'path and data (base64) are required' });
+  }
+  try {
+    const buf = Buffer.from(data, 'base64');
+    if (ssh_connection_id) {
+      await sshManager.sftpWriteFile(ssh_connection_id, filePath, buf.toString('binary'));
+    } else {
+      const resolved = path.resolve(filePath);
+      fs.mkdirSync(path.dirname(resolved), { recursive: true });
+      fs.writeFileSync(resolved, buf);
+    }
+    res.json({ success: true, path: filePath });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Screenshot via Puppeteer
+let screenshotBrowser: any = null;
+
+projectsRouter.post('/api/screenshot', async (req, res) => {
+  const { url, width = 1280, height = 720, fullPage = false } = req.body;
+  if (!url) return res.status(400).json({ error: 'url is required' });
+
+  try {
+    const puppeteer = await import('puppeteer');
+    if (!screenshotBrowser) {
+      screenshotBrowser = await puppeteer.default.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+    }
+
+    const page = await screenshotBrowser.newPage();
+    await page.setViewport({ width, height, deviceScaleFactor: 1 });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
+    const image = await page.screenshot({ fullPage, encoding: 'base64', type: 'png' }) as string;
+    await page.close();
+
+    res.json({ image, width, height });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -56,10 +56,44 @@ const EXT_LANG_MAP: Record<string, string> = {
   astro: 'html', vue: 'html', svelte: 'html',
 };
 
-export function readFileContent(filePath: string): { content: string; lang: string } {
-  const content = fs.readFileSync(filePath, 'utf-8');
+const BINARY_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'tiff', 'tif', 'psd', 'avif',
+  'mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma',
+  'mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm',
+  'zip', 'tar', 'gz', 'bz2', '7z', 'rar', 'xz', 'zst',
+  'exe', 'dll', 'so', 'dylib', 'bin', 'msi', 'deb', 'rpm', 'appimage',
+  'woff', 'woff2', 'ttf', 'otf', 'eot',
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+  'class', 'pyc', 'pyo', 'o', 'obj', 'wasm', 'a', 'lib',
+  'sqlite', 'db', 'sqlite3',
+]);
+
+export function isBinaryFile(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase().replace('.', '');
+  if (BINARY_EXTENSIONS.has(ext)) return true;
+  // Check first 8KB for null bytes
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(8192);
+    const bytesRead = fs.readSync(fd, buf, 0, 8192, 0);
+    fs.closeSync(fd);
+    for (let i = 0; i < bytesRead; i++) {
+      if (buf[i] === 0) return true;
+    }
+  } catch {}
+  return false;
+}
+
+export function readFileContent(filePath: string): { content: string; lang: string; isBinary?: boolean; size?: number } {
   const ext = path.extname(filePath).toLowerCase().replace('.', '');
   const basename = path.basename(filePath).toLowerCase();
   const lang = EXT_LANG_MAP[ext] || EXT_LANG_MAP[basename] || 'plaintext';
+
+  if (isBinaryFile(filePath)) {
+    const stat = fs.statSync(filePath);
+    return { content: '', lang, isBinary: true, size: stat.size };
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
   return { content, lang };
 }
