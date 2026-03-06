@@ -216,11 +216,18 @@ function handleStatusMessage(msg: any) {
       const httpServices = msg.services.filter((s: any) =>
         ['http', 'https', 'ws', 'wss'].includes(s.protocol)
       );
+      const getTabPort = (url: string): string | null => {
+        try {
+          const u = new URL(url);
+          // Reverse proxy format: {port}.port.on.{host}.nip.io
+          const portMatch = u.hostname.match(/^(\d+)\.port\.on\./);
+          if (portMatch) return portMatch[1];
+          return u.port || null;
+        } catch { return null; }
+      };
       for (const s of httpServices) {
         const port = String(s.port);
-        const existingIdx = store.previewTabs.findIndex((t) => {
-          try { return new URL(t.url).port === port; } catch { return false; }
-        });
+        const existingIdx = store.previewTabs.findIndex((t) => getTabPort(t.url) === port);
         if (existingIdx >= 0) {
           // Refresh existing tab by appending cache-buster
           const tabs = store.previewTabs.map((t, i) => {
@@ -230,9 +237,9 @@ function handleStatusMessage(msg: any) {
           });
           useStore.setState({ previewTabs: tabs, previewActiveIdx: existingIdx });
         } else {
-          // Add new tab
-          const proto = s.protocol === 'https' ? 'https' : 'http';
-          const url = `${proto}://localhost:${s.port}`;
+          // Add new tab using reverse proxy URL
+          const host = location.hostname;
+          const url = `${location.protocol}//${s.port}.port.on.${host}.nip.io:${location.port}/`;
           const id = 'pv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
           const label = `${s.name} :${s.port}`;
           const newTabs = [...store.previewTabs, { id, url, label }];
