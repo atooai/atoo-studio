@@ -95,6 +95,30 @@ export function normalizePreviewUrl(url: string): string {
   return url;
 }
 
+// Cached server IP for nip.io URLs (fetched once, lazy)
+let _serverIp: string | null = null;
+let _serverIpPromise: Promise<string> | null = null;
+
+export function getServerIp(): string {
+  // If location.hostname is already an IP, use it directly
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(location.hostname)) {
+    _serverIp = location.hostname;
+  }
+  // Kick off async fetch if not resolved yet
+  if (!_serverIp && !_serverIpPromise) {
+    _serverIpPromise = fetch('/api/server-ip')
+      .then(r => r.json())
+      .then(d => { _serverIp = d.ip; return d.ip; })
+      .catch(() => { _serverIp = '127.0.0.1'; return '127.0.0.1'; });
+  }
+  return _serverIp || location.hostname;
+}
+
+export function buildPortProxyUrl(port: number | string): string {
+  const ip = getServerIp();
+  return `${location.protocol}//${port}.port.on.${ip}.nip.io:${location.port}/`;
+}
+
 export function resolvePreviewSrc(url: string, mode: string): string {
   if (!url) return 'about:blank';
   url = normalizePreviewUrl(url);
@@ -103,8 +127,8 @@ export function resolvePreviewSrc(url: string, mode: string): string {
       const u = new URL(url);
       if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
         const port = u.port || (u.protocol === 'https:' ? '443' : '80');
-        const host = location.hostname;
-        return location.protocol + '//' + port + '.port.on.' + host + '.nip.io:' + location.port + (u.pathname || '/') + u.search + u.hash;
+        const ip = getServerIp();
+        return location.protocol + '//' + port + '.port.on.' + ip + '.nip.io:' + location.port + (u.pathname || '/') + u.search + u.hash;
       }
     } catch {}
   }

@@ -641,6 +641,25 @@ export function createWebServer(): http.Server {
     }
   });
 
+  // Server LAN IP for nip.io reverse proxy URLs
+  app.get('/api/server-ip', (req, res) => {
+    // If the client connected via IP already, return that
+    const host = req.hostname;
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      return res.json({ ip: host });
+    }
+    // Otherwise find first non-internal IPv4 address
+    const nets = os.networkInterfaces();
+    for (const ifaces of Object.values(nets)) {
+      for (const iface of ifaces || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          return res.json({ ip: iface.address });
+        }
+      }
+    }
+    res.json({ ip: '127.0.0.1' });
+  });
+
   // Proxy status
   app.get('/api/status', (_req, res) => {
     res.json({

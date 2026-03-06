@@ -11,7 +11,7 @@ import { ToastContainer } from './components/Layout/Toast';
 import { ModalContainer } from './components/Modals/ModalContainer';
 import { ContextMenu } from './components/Modals/ContextMenu';
 import { SessionLoadingOverlay } from './components/Modals/SessionLoadingOverlay';
-import { getMonacoLang, debounce } from './utils';
+import { getMonacoLang, debounce, getServerIp } from './utils';
 
 export function App() {
   const {
@@ -88,7 +88,10 @@ async function init() {
   // 3. Route handling
   await handleRoute();
 
-  // 4. Connect WebSockets
+  // 4. Resolve server IP for nip.io URLs (async, cached)
+  getServerIp();
+
+  // 5. Connect WebSockets
   connectStatusWs();
   connectSettingsWs();
 

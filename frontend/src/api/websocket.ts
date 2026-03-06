@@ -1,5 +1,6 @@
 import { useStore } from '../state/store';
 import { api } from './index';
+import { buildPortProxyUrl } from '../utils';
 import type { Project, EditorFile } from '../types';
 
 // WebSocket instances
@@ -238,8 +239,7 @@ function handleStatusMessage(msg: any) {
           useStore.setState({ previewTabs: tabs, previewActiveIdx: existingIdx });
         } else {
           // Add new tab using reverse proxy URL
-          const host = location.hostname;
-          const url = `${location.protocol}//${s.port}.port.on.${host}.nip.io:${location.port}/`;
+          const url = buildPortProxyUrl(s.port);
           const id = 'pv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
           const label = `${s.name} :${s.port}`;
           const newTabs = [...store.previewTabs, { id, url, label }];
