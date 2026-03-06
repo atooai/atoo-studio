@@ -2,8 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { vccDb } from '../state/db.js';
-import { getFileTree, readFileContent, isBinaryFile } from '../services/fs-browser.js';
-import mime from 'mime-types';
+import { getFileTree, readFileContent } from '../services/fs-browser.js';
 import { getRemoteFileTree, readRemoteFileContent } from '../services/remote-fs-browser.js';
 import * as gitOps from '../services/git-ops.js';
 import * as remoteGitOps from '../services/remote-git-ops.js';
@@ -142,10 +141,77 @@ projectsRouter.get('/api/files/raw', (req, res) => {
     }
 
     // Stream full file with correct content type
-    const ct = mime.lookup(resolved) || 'application/octet-stream';
+    const ext = path.extname(resolved).toLowerCase().replace('.', '');
+    const mimeMap: Record<string, string> = {
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+      webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
+      avif: 'image/avif', tiff: 'image/tiff', tif: 'image/tiff',
+      pdf: 'application/pdf', zip: 'application/zip', gz: 'application/gzip',
+      mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
+      mp4: 'video/mp4', webm: 'video/webm',
+      woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
+      json: 'application/json', xml: 'application/xml',
+      html: 'text/html', css: 'text/css', js: 'text/javascript', txt: 'text/plain',
+    };
+    const ct = mimeMap[ext] || 'application/octet-stream';
     res.setHeader('Content-Type', ct);
     res.setHeader('Content-Length', stat.size);
     fs.createReadStream(resolved).pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Write bytes at specific offsets (hex editor save)
+projectsRouter.patch('/api/files/raw', (req, res) => {
+  const { path: filePath, edits } = req.body;
+  if (!filePath || !Array.isArray(edits)) return res.status(400).json({ error: 'path and edits[] required' });
+  try {
+    const resolved = path.resolve(filePath);
+    const fd = fs.openSync(resolved, 'r+');
+    for (const edit of edits) {
+      const buf = Buffer.from([edit.value & 0xFF]);
+      fs.writeSync(fd, buf, 0, 1, edit.offset);
+    }
+    fs.closeSync(fd);
+    const stat = fs.statSync(resolved);
+    res.json({ success: true, size: stat.size });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Search bytes in file (hex editor search)
+projectsRouter.post('/api/files/raw/search', (req, res) => {
+  const { path: filePath, pattern, fromOffset = 0, maxResults = 100 } = req.body;
+  if (!filePath || !pattern) return res.status(400).json({ error: 'path and pattern required' });
+  try {
+    const resolved = path.resolve(filePath);
+    const needle = Buffer.from(pattern, 'base64');
+    if (needle.length === 0) return res.json({ matches: [] });
+
+    const stat = fs.statSync(resolved);
+    const fd = fs.openSync(resolved, 'r');
+    const matches: number[] = [];
+    const scanChunk = 256 * 1024;
+    let pos = fromOffset;
+
+    while (pos < stat.size && matches.length < maxResults) {
+      const readLen = Math.min(scanChunk + needle.length - 1, stat.size - pos);
+      const buf = Buffer.alloc(readLen);
+      const bytesRead = fs.readSync(fd, buf, 0, readLen, pos);
+      const data = buf.subarray(0, bytesRead);
+      let idx = 0;
+      while (idx <= data.length - needle.length && matches.length < maxResults) {
+        const found = data.indexOf(needle, idx);
+        if (found === -1) break;
+        matches.push(pos + found);
+        idx = found + 1;
+      }
+      pos += scanChunk;
+    }
+    fs.closeSync(fd);
+    res.json({ matches, size: stat.size });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
