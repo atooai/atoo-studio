@@ -19,6 +19,8 @@ import { sshRouter } from '../handlers/ssh.js';
 import { isAgentWsUpgrade, handleAgentWsUpgrade } from '../ws/agent-ws.js';
 import { agentRegistry } from '../agents/registry.js';
 import { createPortProxy, portProxyMiddleware, isPortProxyUpgrade, handlePortProxyUpgrade } from './port-proxy.js';
+import { isPreviewWsUpgrade, handlePreviewWsUpgrade } from './preview-ws.js';
+import { devtoolsProxyMiddleware, isDevtoolsWsUpgrade, handleDevtoolsWsUpgrade } from './devtools-proxy.js';
 import { sendContextAndRewind } from '../agents/claude-code/pty-actions.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
@@ -609,6 +611,9 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   // Mount SSH API routes
   app.use(sshRouter);
 
+  // Mount DevTools proxy
+  app.use(devtoolsProxyMiddleware());
+
   // List running shell terminals
   app.get('/api/terminals', (_req, res) => {
     const terminals = [];
@@ -766,8 +771,8 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   });
 
   // Serve frontend static files (production)
-  // Works for both tsx (src/web/) and compiled (dist/web/) by finding the project root
-  const projectRoot = path.resolve(__dirname, __dirname.includes('/src/') ? '../..' : '../../..');
+  // Works for both tsx (src/web/) and compiled (dist/src/web/) by finding the project root
+  const projectRoot = path.resolve(__dirname, __dirname.includes('/dist/src/') ? '../../..' : '../..');
   const frontendDist = path.join(projectRoot, 'frontend', 'dist');
   app.use(express.static(frontendDist));
   app.get('*', (req, res, next) => {
@@ -843,6 +848,18 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     // /ws/agent/:sessionId — abstract agent WebSocket (new)
     if (isAgentWsUpgrade(url)) {
       handleAgentWsUpgrade(wss, req, socket, head);
+      return;
+    }
+
+    // /ws/preview/:projectId/:tabId — remote browser streaming
+    if (isPreviewWsUpgrade(url)) {
+      handlePreviewWsUpgrade(wss, req, socket, head);
+      return;
+    }
+
+    // /ws/devtools/:projectId/:tabId/* — DevTools WebSocket proxy
+    if (isDevtoolsWsUpgrade(url)) {
+      handleDevtoolsWsUpgrade(wss, req, socket, head);
       return;
     }
 

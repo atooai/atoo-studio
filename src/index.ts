@@ -14,6 +14,7 @@ import { vccDb } from './state/db.js';
 import { agentRegistry } from './agents/registry.js';
 import { ClaudeCodeAgentFactory } from './agents/claude-code/index.js';
 import { sshManager } from './services/ssh-manager.js';
+import { previewManager } from './services/preview-manager.js';
 
 async function main() {
   console.log('=== CCProxy ===');
@@ -69,8 +70,9 @@ async function main() {
   }
 
   // Graceful shutdown
-  process.on('SIGINT', () => {
+  process.on('SIGINT', async () => {
     console.log('\n[shutdown] Stopping...');
+    await previewManager.shutdown();
     fsMonitor.disconnect();
     sshManager.disconnectAll();
     killAllCliProcesses();
@@ -80,7 +82,8 @@ async function main() {
     process.exit(0);
   });
 
-  process.on('SIGTERM', () => {
+  process.on('SIGTERM', async () => {
+    await previewManager.shutdown();
     fsMonitor.disconnect();
     sshManager.disconnectAll();
     killAllCliProcesses();

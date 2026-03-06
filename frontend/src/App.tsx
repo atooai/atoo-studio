@@ -359,7 +359,7 @@ function applyProjectSettings(settings: any, proj: any) {
   if (settings.preview_visible !== undefined) store.setPreviewVisible(settings.preview_visible);
   if (settings.preview_tabs) store.setPreviewTabs(settings.preview_tabs);
   if (settings.preview_active_idx !== undefined) store.setPreviewActiveIdx(settings.preview_active_idx);
-  if (settings.preview_mode) store.setPreviewMode(settings.preview_mode);
+  // previewMode removed (streaming only, no iframe)
 
   // Apply DOM-level layout settings
   setTimeout(() => {
@@ -405,7 +405,6 @@ function gatherProjectSettings(): Record<string, any> {
     preview_visible: store.previewVisible,
     preview_tabs: store.previewTabs,
     preview_active_idx: store.previewActiveIdx,
-    preview_mode: store.previewMode,
   };
 }
 
@@ -1113,7 +1112,7 @@ function registerGlobalFunctions() {
     const newVisible = !store.previewVisible;
     store.setPreviewVisible(newVisible);
     if (newVisible && store.previewTabs.length === 0) {
-      store.setPreviewTabs([{ id: 'pv-' + Date.now(), url: '', label: 'New tab' }]);
+      store.setPreviewTabs([{ id: 'pv-' + Date.now(), label: 'New tab' }]);
     }
   };
 

@@ -1,6 +1,5 @@
 import { useStore } from '../state/store';
 import { api } from './index';
-import { buildPortProxyUrl } from '../utils';
 import type { Project, EditorFile } from '../types';
 
 // WebSocket instances
@@ -217,32 +216,18 @@ function handleStatusMessage(msg: any) {
       const httpServices = msg.services.filter((s: any) =>
         ['http', 'https', 'ws', 'wss'].includes(s.protocol)
       );
-      const getTabPort = (url: string): string | null => {
-        try {
-          const u = new URL(url);
-          // Reverse proxy format: {port}.port.on.{host}.nip.io
-          const portMatch = u.hostname.match(/^(\d+)\.port\.on\./);
-          if (portMatch) return portMatch[1];
-          return u.port || null;
-        } catch { return null; }
-      };
       for (const s of httpServices) {
-        const port = String(s.port);
-        const existingIdx = store.previewTabs.findIndex((t) => getTabPort(t.url) === port);
+        const port = s.port;
+        const existingIdx = store.previewTabs.findIndex((t) => t.targetPort === port);
         if (existingIdx >= 0) {
-          // Refresh existing tab by appending cache-buster
-          const tabs = store.previewTabs.map((t, i) => {
-            if (i !== existingIdx) return t;
-            const base = t.url.replace(/#.*$/, '');
-            return { ...t, url: `${base}#_r=${Date.now()}` };
-          });
-          useStore.setState({ previewTabs: tabs, previewActiveIdx: existingIdx });
+          // Already have a tab for this port, just activate it
+          useStore.setState({ previewActiveIdx: existingIdx });
         } else {
-          // Add new tab using reverse proxy URL
-          const url = buildPortProxyUrl(s.port);
+          // Add new streaming tab
           const id = 'pv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
           const label = `${s.name} :${s.port}`;
-          const newTabs = [...store.previewTabs, { id, url, label }];
+          const protocol = (s.protocol === 'https' || s.protocol === 'wss') ? 'https' as const : 'http' as const;
+          const newTabs = [...store.previewTabs, { id, targetPort: port, protocol, label }];
           useStore.setState({ previewTabs: newTabs, previewActiveIdx: newTabs.length - 1 });
         }
       }

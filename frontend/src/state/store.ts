@@ -29,12 +29,14 @@ export interface AppState {
   // Preview state
   previewTabs: PreviewTab[];
   previewActiveIdx: number;
-  previewMode: 'browser' | 'server';
   previewResponsive: boolean;
   previewViewportWidth: number;
   previewViewportHeight: number;
   previewDevicePreset: string;
   previewZoom: number;
+  previewDpr: number;
+  previewIsMobile: boolean;
+  previewHasTouch: boolean;
 
   // Chat attachments
   chatAttachments: ChatAttachment[];
@@ -80,11 +82,13 @@ export interface AppState {
   setMonacoReady: (v: boolean) => void;
   setPreviewTabs: (tabs: PreviewTab[]) => void;
   setPreviewActiveIdx: (idx: number) => void;
-  setPreviewMode: (m: 'browser' | 'server') => void;
   setPreviewResponsive: (v: boolean) => void;
   setPreviewViewport: (w: number, h: number) => void;
   setPreviewDevicePreset: (id: string) => void;
   setPreviewZoom: (z: number) => void;
+  setPreviewDpr: (d: number) => void;
+  setPreviewIsMobile: (v: boolean) => void;
+  setPreviewHasTouch: (v: boolean) => void;
   setChatAttachments: (a: ChatAttachment[]) => void;
   addChatAttachment: (a: ChatAttachment) => void;
   removeChatAttachment: (id: string) => void;
@@ -123,12 +127,14 @@ export const useStore = create<AppState>((set, get) => ({
   monacoReady: false,
   previewTabs: [],
   previewActiveIdx: 0,
-  previewMode: 'browser',
   previewResponsive: false,
   previewViewportWidth: 375,
   previewViewportHeight: 667,
   previewDevicePreset: 'iphone-se',
   previewZoom: 100,
+  previewDpr: 1,
+  previewIsMobile: false,
+  previewHasTouch: false,
   chatAttachments: [],
   mdToggleState: {},
   questionAnswers: {},
@@ -159,11 +165,30 @@ export const useStore = create<AppState>((set, get) => ({
   setMonacoReady: (v) => set({ monacoReady: v }),
   setPreviewTabs: (tabs) => set({ previewTabs: tabs }),
   setPreviewActiveIdx: (idx) => set({ previewActiveIdx: idx }),
-  setPreviewMode: (m) => set({ previewMode: m }),
   setPreviewResponsive: (v) => set({ previewResponsive: v }),
   setPreviewViewport: (w, h) => set({ previewViewportWidth: w, previewViewportHeight: h, previewDevicePreset: 'custom' }),
-  setPreviewDevicePreset: (id) => set({ previewDevicePreset: id }),
+  setPreviewDevicePreset: (id) => {
+    // Import device presets dynamically to set dpr/mobile/touch along with dimensions
+    import('../data/device-presets').then(({ DEVICE_PRESETS }) => {
+      const preset = DEVICE_PRESETS.find(p => p.id === id);
+      if (preset) {
+        set({
+          previewDevicePreset: id,
+          previewViewportWidth: preset.width,
+          previewViewportHeight: preset.height,
+          previewDpr: preset.dpr,
+          previewIsMobile: preset.isMobile,
+          previewHasTouch: preset.hasTouch,
+        });
+      } else {
+        set({ previewDevicePreset: id });
+      }
+    });
+  },
   setPreviewZoom: (z) => set({ previewZoom: z }),
+  setPreviewDpr: (d) => set({ previewDpr: d }),
+  setPreviewIsMobile: (v) => set({ previewIsMobile: v }),
+  setPreviewHasTouch: (v) => set({ previewHasTouch: v }),
   setChatAttachments: (a) => set({ chatAttachments: a }),
   addChatAttachment: (a) => set((s) => ({ chatAttachments: [...s.chatAttachments, a] })),
   removeChatAttachment: (id) => set((s) => ({

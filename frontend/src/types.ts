@@ -186,6 +186,12 @@ export interface EditorFile {
 
 export interface PreviewTab {
   id: string;
-  url: string;
   label: string;
+  // Streaming mode (new)
+  targetPort?: number;
+  headerHost?: string;
+  protocol?: 'http' | 'https';
+  quality?: number;
+  // Legacy iframe mode (backward compat)
+  url?: string;
 }

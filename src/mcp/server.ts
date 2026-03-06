@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 const WEB_PORT = process.env.CCPROXY_WEB_PORT || '3001';
+const WEB_PROTO = process.env.CCPROXY_WEB_PROTO || 'https';
 
 const PROTOCOLS = [
   'http', 'https', 'ws', 'wss', 'tcp', 'grpc', 'smtp', 'imap', 'ftp', 'other',
@@ -26,7 +27,7 @@ server.tool(
   },
   async ({ services }) => {
     try {
-      const res = await fetch(`http://localhost:${WEB_PORT}/api/mcp/report-services`, {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/report-services`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ services, cwd: process.cwd() }),

@@ -155,6 +155,35 @@ export function resolvePreviewSrc(url: string, mode: string): string {
   return url;
 }
 
+export function buildPreviewWsUrl(
+  projectId: string,
+  tabId: string,
+  params: {
+    targetPort: number;
+    host?: string;
+    protocol?: string;
+    quality?: number;
+    width?: number;
+    height?: number;
+    dpr?: number;
+    isMobile?: boolean;
+    hasTouch?: boolean;
+  },
+): string {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const qs = new URLSearchParams();
+  qs.set('target_port', String(params.targetPort));
+  if (params.host) qs.set('host', params.host);
+  if (params.protocol) qs.set('protocol', params.protocol);
+  if (params.quality) qs.set('quality', String(params.quality));
+  if (params.width) qs.set('width', String(params.width));
+  if (params.height) qs.set('height', String(params.height));
+  if (params.dpr) qs.set('dpr', String(params.dpr));
+  if (params.isMobile !== undefined) qs.set('isMobile', String(params.isMobile));
+  if (params.hasTouch !== undefined) qs.set('hasTouch', String(params.hasTouch));
+  return `${proto}//${location.host}/ws/preview/${encodeURIComponent(projectId)}/${encodeURIComponent(tabId)}?${qs.toString()}`;
+}
+
 export function filterMessages(messages: any[], showVerbose: boolean) {
   if (showVerbose) return messages.map((m, i) => ({ ...m, _idx: i, _collapsed: false }));
   const result: any[] = [];

@@ -28,7 +28,11 @@ export function getMcpConfigPath(): string {
       ccproxy: {
         command: 'node',
         args: [serverScript],
-        env: { CCPROXY_WEB_PORT: String(WEB_PORT) },
+        env: {
+          CCPROXY_WEB_PORT: String(WEB_PORT),
+          CCPROXY_WEB_PROTO: 'https',
+          NODE_TLS_REJECT_UNAUTHORIZED: '0',
+        },
       },
     },
   };
