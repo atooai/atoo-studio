@@ -1186,18 +1186,21 @@ function registerGlobalFunctions() {
 }
 
 // Splitter functions (imperative, kept as-is for performance)
+function dragStart() { document.body.classList.add('dragging'); }
+function dragEnd() { document.body.classList.remove('dragging'); }
+
 function startLpSplitterDrag(e: MouseEvent) {
   e.preventDefault();
   const splitter = document.getElementById('lp-splitter');
   const historyPanel = document.getElementById('git-history-panel');
   const leftPanel = historyPanel?.closest('.left-panel');
   if (!splitter || !historyPanel || !leftPanel) return;
-  splitter.classList.add('dragging');
+  dragStart(); splitter.classList.add('dragging');
   const startY = e.clientY;
   const startH = historyPanel.offsetHeight;
   const totalH = (leftPanel as HTMLElement).offsetHeight;
   const onMove = (ev: MouseEvent) => { historyPanel.style.height = Math.max(80, Math.min(totalH - 150, startH + (startY - ev.clientY))) + 'px'; };
-  const onUp = () => { splitter.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  const onUp = () => { dragEnd(); splitter.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
@@ -1208,12 +1211,12 @@ function startEditorSplitterDrag(e: MouseEvent) {
   const editorArea = document.getElementById('editor-area');
   const centerPanel = editorArea?.closest('.center-panel');
   if (!splitter || !editorArea || !centerPanel) return;
-  splitter.classList.add('dragging');
+  dragStart(); splitter.classList.add('dragging');
   const startY = e.clientY;
   const startH = editorArea.offsetHeight;
   const totalH = (centerPanel as HTMLElement).offsetHeight;
   const onMove = (ev: MouseEvent) => { editorArea.style.height = Math.max(80, Math.min(totalH - 120, startH + (ev.clientY - startY))) + 'px'; };
-  const onUp = () => { splitter.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  const onUp = () => { dragEnd(); splitter.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
@@ -1223,10 +1226,11 @@ function startSidebarSplitDrag(e: MouseEvent) {
   const app = document.getElementById('app');
   const sidebar = document.getElementById('sidebar');
   if (!app || !sidebar) return;
+  dragStart();
   const startX = e.clientX;
   const startW = sidebar.offsetWidth;
   const onMove = (ev: MouseEvent) => { app.style.setProperty('--sidebar-w', Math.max(160, Math.min(400, startW + (ev.clientX - startX))) + 'px'); };
-  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  const onUp = () => { dragEnd(); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
@@ -1235,26 +1239,27 @@ function startVSplitDrag(e: MouseEvent, side: string) {
   e.preventDefault();
   const workspace = document.getElementById('workspace');
   if (!workspace) return;
+  dragStart();
 
   if (side === 'left') {
     const lp = workspace.querySelector('.left-panel') as HTMLElement;
     const startX = e.clientX, startW = lp.offsetWidth;
     const onMove = (ev: MouseEvent) => { workspace.style.setProperty('--lp-width', Math.max(140, Math.min(500, startW + (ev.clientX - startX))) + 'px'); };
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    const onUp = () => { dragEnd(); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   } else if (side === 'right') {
     const rp = document.getElementById('right-panel');
     if (!rp || rp.classList.contains('collapsed')) return;
     const startX = e.clientX, startW = rp.offsetWidth;
     const onMove = (ev: MouseEvent) => { workspace.style.setProperty('--rp-width', Math.max(140, Math.min(500, startW + (startX - ev.clientX))) + 'px'); };
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    const onUp = () => { dragEnd(); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   } else {
     const pp = document.getElementById('preview-panel');
     if (!pp) return;
     const startX = e.clientX, startW = pp.offsetWidth;
     const onMove = (ev: MouseEvent) => { const maxW = workspace.offsetWidth - 200; workspace.style.setProperty('--pp-width', Math.max(200, Math.min(maxW, startW + (startX - ev.clientX))) + 'px'); };
-    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    const onUp = () => { dragEnd(); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   }
 }

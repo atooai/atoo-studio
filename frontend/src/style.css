@@ -44,6 +44,8 @@ body {
   line-height: 1.5;
 }
 
+body.dragging iframe { pointer-events: none; }
+
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -3223,19 +3225,35 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 
 .preview-frame-container {
   flex: 1;
-  background: #fff;
   position: relative;
   overflow: hidden;
+  padding: 8px;
 }
 
 .preview-iframe {
   width: 100%;
   height: 100%;
   border: none;
+  border-radius: var(--radius-md);
   position: absolute;
-  top: 0; left: 0;
+  top: 8px; left: 8px;
+  width: calc(100% - 16px);
+  height: calc(100% - 16px);
 }
 .preview-iframe.hidden { display: none; }
+
+.preview-placeholder {
+  width: 100%;
+  height: 100%;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
 
 /* Preview bottom bar: URL + tabs */
 .preview-bottom-bar {

@@ -18,6 +18,16 @@ export async function gitInit(cwd: string) {
   await git(['init'], cwd);
 }
 
+export async function gitClone(url: string, dest: string): Promise<void> {
+  const { execFile } = await import('child_process');
+  return new Promise((resolve, reject) => {
+    execFile('git', ['clone', url, dest], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (err, _stdout, stderr) => {
+      if (err) reject(new Error(stderr?.trim() || err.message));
+      else resolve();
+    });
+  });
+}
+
 export async function gitStatus(cwd: string) {
   const output = await git(['status', '--porcelain', '-uall', '-M'], cwd);
   return output.split('\n').filter(Boolean).map(line => {

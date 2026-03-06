@@ -42,6 +42,14 @@ projectsRouter.delete('/api/projects/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// Get environments a project is linked to
+projectsRouter.get('/api/projects/:id/environments', (req, res) => {
+  const project = vccDb.getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const envs = vccDb.getEnvironmentsForProject(req.params.id);
+  res.json(envs);
+});
+
 // Sessions filtered by project cwd
 projectsRouter.get('/api/projects/:id/sessions', (req, res) => {
   const project = vccDb.getProject(req.params.id);

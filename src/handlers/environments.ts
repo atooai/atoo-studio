@@ -78,18 +78,20 @@ environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
       const { sshManager } = await import('../services/ssh-manager.js');
       const remoteGit = await import('../services/remote-git-ops.js');
 
-      // Ensure remote directory exists
-      try {
-        await sshManager.exec(ssh_connection_id, `mkdir -p '${projectPath.replace(/'/g, "'\\''")}'`);
-      } catch {}
-
-      if (initGit) {
+      if (initGit && remoteUrl) {
         try {
-          await remoteGit.gitInit(ssh_connection_id, projectPath);
-          if (remoteUrl) {
-            await remoteGit.gitAddRemote(ssh_connection_id, projectPath, 'origin', remoteUrl);
-          }
+          await remoteGit.gitClone(ssh_connection_id, remoteUrl, projectPath);
         } catch {}
+      } else {
+        // Ensure remote directory exists
+        try {
+          await sshManager.exec(ssh_connection_id, `mkdir -p '${projectPath.replace(/'/g, "'\\''")}'`);
+        } catch {}
+        if (initGit) {
+          try {
+            await remoteGit.gitInit(ssh_connection_id, projectPath);
+          } catch {}
+        }
       }
 
       const project = vccDb.createProject(name, projectPath, {
@@ -108,14 +110,15 @@ environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
     } else {
       // Local project
       const resolved = path.resolve(projectPath);
-      if (!fs.existsSync(resolved)) {
-        fs.mkdirSync(resolved, { recursive: true });
-      }
-
-      if (initGit && !fs.existsSync(path.join(resolved, '.git'))) {
-        await gitOps.gitInit(resolved);
-        if (remoteUrl) {
-          await gitOps.gitAddRemote(resolved, 'origin', remoteUrl);
+      if (initGit && remoteUrl && !fs.existsSync(path.join(resolved, '.git'))) {
+        // Clone into target directory (git clone creates it if needed)
+        await gitOps.gitClone(remoteUrl, resolved);
+      } else {
+        if (!fs.existsSync(resolved)) {
+          fs.mkdirSync(resolved, { recursive: true });
+        }
+        if (initGit && !fs.existsSync(path.join(resolved, '.git'))) {
+          await gitOps.gitInit(resolved);
         }
       }
 
@@ -152,8 +155,31 @@ environmentsRouter.post('/api/environments/:id/connect-project', (req, res) => {
 
 // Unlink project from environment by PE ID
 environmentsRouter.delete('/api/project-links/:peId', (req, res) => {
+  const pe = vccDb.getProjectEnvironment(req.params.peId);
+  if (!pe) return res.status(404).json({ error: 'Link not found' });
+
+  const deleteProject = req.query.deleteProject === 'true';
+  const deleteFiles = req.query.deleteFiles === 'true';
+
   vccDb.unlinkProject(req.params.peId);
-  res.json({ success: true });
+
+  // Check remaining links
+  const remainingEnvs = vccDb.getEnvironmentsForProject(pe.project_id);
+
+  if (remainingEnvs.length === 0 && deleteProject) {
+    // Delete working directory if requested
+    if (deleteFiles) {
+      const project = vccDb.getProject(pe.project_id);
+      if (project && !project.ssh_connection_id) {
+        try {
+          fs.rmSync(project.path, { recursive: true, force: true });
+        } catch {}
+      }
+    }
+    vccDb.deleteProject(pe.project_id);
+  }
+
+  res.json({ success: true, remainingLinks: remainingEnvs.length });
 });
 
 // Resolve a project-environment link (for URL-based routing)

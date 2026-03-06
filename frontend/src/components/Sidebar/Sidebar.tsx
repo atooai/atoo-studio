@@ -1,5 +1,6 @@
 import React from 'react';
 import { useStore } from '../../state/store';
+import { api } from '../../api';
 import { escapeHtml } from '../../utils';
 
 function getProjectStatus(proj: any): string {
@@ -81,10 +82,56 @@ function StatusChip({ type, count, label, filter }: { type: string; count: numbe
 }
 
 function ProjectItem({ projectId, peId, name, path, initials, status, isActive, hasAttention, waitingCount, activeCount, openChats, sshConnectionId }: any) {
+  const { projects, setProjects, setModal, setCtxMenu, addToast } = useStore();
+
+  const handleRemove = async () => {
+    let linkCount = 1;
+    try {
+      const envs = await api('GET', `/api/projects/${projectId}/environments`);
+      linkCount = Array.isArray(envs) ? envs.length : 1;
+    } catch {}
+
+    const isLastLink = linkCount <= 1;
+
+    setModal({
+      type: 'remove-project',
+      props: {
+        projectName: name,
+        isLastLink,
+        onRemove: async (deleteFiles: boolean) => {
+          try {
+            const params = isLastLink
+              ? `?deleteProject=true${deleteFiles ? '&deleteFiles=true' : ''}`
+              : '';
+            await api('DELETE', `/api/project-links/${peId}${params}`);
+            const current = useStore.getState().projects;
+            setProjects(current.filter(p => p.id !== projectId));
+            addToast(name, deleteFiles ? 'Project removed and files deleted' : 'Project removed', 'success');
+            setModal(null);
+          } catch (e: any) {
+            addToast(name, `Failed: ${e.message}`, 'attention');
+          }
+        },
+      },
+    });
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setCtxMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: 'Remove Project', icon: '✕', danger: true, action: handleRemove },
+      ],
+    });
+  };
+
   return (
     <div
       className={`project-item ${isActive ? 'active' : ''} ${hasAttention ? 'has-attention' : ''}`}
       onClick={() => (window as any).selectProject(projectId, peId || '')}
+      onContextMenu={handleContextMenu}
       title={name}
     >
       <div className="project-square-icon">

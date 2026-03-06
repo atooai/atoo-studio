@@ -13,6 +13,10 @@ export async function gitInit(connId: string, cwd: string) {
   await git(connId, ['init'], cwd);
 }
 
+export async function gitClone(connId: string, url: string, dest: string): Promise<void> {
+  await sshManager.exec(connId, `git clone ${shellEscape(url)} ${shellEscape(dest)}`);
+}
+
 export async function gitStatus(connId: string, cwd: string) {
   const output = await git(connId, ['status', '--porcelain', '-uall', '-M'], cwd);
   return output.split('\n').filter(Boolean).map(line => {

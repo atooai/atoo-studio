@@ -9,6 +9,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { InputDialog } from './InputDialog';
 import { WorktreeModal } from './WorktreeModal';
 import { SshProjectModal } from './SshProjectModal';
+import { RemoveProjectModal } from './RemoveProjectModal';
 
 export function ModalContainer() {
   const { modal, setModal } = useStore();
@@ -27,6 +28,7 @@ export function ModalContainer() {
       {modal.type === 'input' && <InputDialog {...modal.props} onClose={close} />}
       {modal.type === 'worktree' && <WorktreeModal {...modal.props} onClose={close} />}
       {modal.type === 'ssh-project' && <SshProjectModal onClose={close} />}
+      {modal.type === 'remove-project' && <RemoveProjectModal {...modal.props} onClose={close} />}
     </div>
   );
 }

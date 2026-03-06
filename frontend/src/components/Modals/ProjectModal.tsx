@@ -11,6 +11,8 @@ interface Props {
 export function ProjectModal({ mode, onClose }: Props) {
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
+  const [initGit, setInitGit] = useState(true);
+  const [remoteUrl, setRemoteUrl] = useState('');
   const [browsing, setBrowsing] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const { activeEnvironmentId, projects, setProjects, addToast } = useStore();
@@ -26,7 +28,8 @@ export function ProjectModal({ mode, onClose }: Props) {
       const project = await api('POST', `/api/environments/${activeEnvironmentId}/projects`, {
         name: name.trim(),
         path: path.trim(),
-        initGit: isNew,
+        initGit: isNew ? initGit : false,
+        remoteUrl: isNew && initGit && remoteUrl.trim() ? remoteUrl.trim() : undefined,
       });
       setProjects([...projects, {
         ...project,
@@ -77,6 +80,33 @@ export function ProjectModal({ mode, onClose }: Props) {
         </div>
         {browsing && <FolderBrowser startPath={path} onSelect={(p) => { setPath(p); setBrowsing(false); }} />}
       </div>
+      {isNew && (
+        <div className="modal-field">
+          <div className="git-toggle-row">
+            <div className="git-toggle-label-group">
+              <span className="git-toggle-main">Initialize Git Repository</span>
+              <span className="git-toggle-sub">Run git init in project folder</span>
+            </div>
+            <label className="toggle-switch">
+              <input type="checkbox" checked={initGit} onChange={(e) => setInitGit(e.target.checked)} />
+              <span className="toggle-track"></span>
+              <span className="toggle-thumb"></span>
+            </label>
+          </div>
+          {initGit && (
+            <div className="remote-url-field visible">
+              <label className="modal-label">Remote URL <span style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
+              <input
+                type="text"
+                value={remoteUrl}
+                onChange={(e) => setRemoteUrl(e.target.value)}
+                placeholder="https://github.com/user/repo.git"
+                style={{ width: '100%', padding: '8px 12px' }}
+              />
+            </div>
+          )}
+        </div>
+      )}
       <div className="modal-actions">
         <button className="modal-btn cancel" onClick={onClose}>Cancel</button>
         <button className="modal-btn confirm" onClick={submit}>{isNew ? 'Create Project' : 'Open Project'}</button>
