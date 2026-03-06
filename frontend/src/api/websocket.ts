@@ -227,7 +227,7 @@ function handleStatusMessage(msg: any) {
           const id = 'pv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
           const label = `${s.name} :${s.port}`;
           const protocol = (s.protocol === 'https' || s.protocol === 'wss') ? 'https' as const : 'http' as const;
-          const newTabs = [...store.previewTabs, { id, targetPort: port, protocol, label }];
+          const newTabs = [...store.previewTabs, { id, targetPort: port, protocol, label, headerHost: s.host || undefined }];
           useStore.setState({ previewTabs: newTabs, previewActiveIdx: newTabs.length - 1 });
         }
       }

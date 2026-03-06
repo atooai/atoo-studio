@@ -23,6 +23,7 @@ server.tool(
       description: z.string().describe('Brief description of what this service does'),
       port: z.number().int().min(1).max(65535).describe('TCP port the service is listening on'),
       protocol: z.enum(PROTOCOLS).describe('Communication protocol used by the service'),
+      host: z.string().optional().describe('Custom hostname for the Host header in the preview browser (e.g. "myapp.local"). If set, the preview will send this as the Host header to the service.'),
     })).min(1).describe('Array of services that were just started'),
   },
   async ({ services }) => {
@@ -38,6 +39,36 @@ server.tool(
       return { content: [{ type: 'text' as const, text: `Reported ${services.length} service(s) to ccproxy UI.` }] };
     } catch (err: any) {
       return { content: [{ type: 'text' as const, text: `Warning: could not reach ccproxy (${err.message}). Services may not appear in UI.` }] };
+    }
+  },
+);
+
+server.tool(
+  'generate_certificate',
+  `Generate TLS certificate files signed by the ccproxy CA. Use this when you need to start an HTTPS server — the generated cert will be trusted by the preview browser. Writes cert.pem, key.pem, and ca.pem to the specified directory.`,
+  {
+    hostnames: z.array(z.string()).min(1).describe('Hostnames/domains for the certificate SAN (e.g. ["localhost", "myapp.local"])'),
+    output_dir: z.string().describe('Absolute path to the directory where cert.pem, key.pem, and ca.pem will be written'),
+  },
+  async ({ hostnames, output_dir }) => {
+    try {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/generate-cert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostnames, output_dir }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        return { content: [{ type: 'text' as const, text: `Failed to generate certificate: ${err.error}` }] };
+      }
+      const data = await res.json() as { cert_path: string; key_path: string; ca_path: string };
+      return {
+        content: [
+          { type: 'text' as const, text: `Certificate generated for: ${hostnames.join(', ')}\n\nFiles written:\n  cert: ${data.cert_path}\n  key:  ${data.key_path}\n  ca:   ${data.ca_path}` },
+        ],
+      };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Failed to generate certificate: ${err.message}` }] };
     }
   },
 );

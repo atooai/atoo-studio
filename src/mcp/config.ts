@@ -16,6 +16,9 @@ export const MCP_SYSTEM_PROMPT = [
   '(dev servers, databases, API servers, preview servers, etc.), you MUST immediately discover',
   'and call the mcp__ccproxy__report_tcp_services tool to report it. Search your deferred tools',
   'for "ccproxy" or "report_tcp" to find it. Never skip this step.',
+  'When you need to start an HTTPS server, use mcp__ccproxy__generate_certificate to generate',
+  'TLS cert files signed by the proxy CA. Specify the output directory and hostnames — the tool',
+  'writes cert.pem, key.pem, and ca.pem there. The preview browser trusts this CA.',
 ].join(' ');
 
 export function getMcpConfigPath(): string {

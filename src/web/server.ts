@@ -22,6 +22,8 @@ import { createPortProxy, portProxyMiddleware, isPortProxyUpgrade, handlePortPro
 import { isPreviewWsUpgrade, handlePreviewWsUpgrade } from './preview-ws.js';
 import { devtoolsProxyMiddleware, isDevtoolsWsUpgrade, handleDevtoolsWsUpgrade } from './devtools-proxy.js';
 import { sendContextAndRewind } from '../agents/claude-code/pty-actions.js';
+import forge from 'node-forge';
+import { CA_CERT_PATH, CA_KEY_PATH } from '../config.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -597,6 +599,53 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
       if (ws.readyState === 1) ws.send(msg);
     }
     res.json({ success: true });
+  });
+
+  // MCP callback: generate a certificate signed by the proxy CA and write to disk
+  app.post('/api/mcp/generate-cert', (req, res) => {
+    const { hostnames, output_dir } = req.body;
+    if (!Array.isArray(hostnames) || !hostnames.length) {
+      return res.status(400).json({ error: 'hostnames array is required' });
+    }
+    if (!output_dir || typeof output_dir !== 'string') {
+      return res.status(400).json({ error: 'output_dir is required' });
+    }
+    try {
+      const caCertPem = fs.readFileSync(CA_CERT_PATH, 'utf-8');
+      const caKeyPem = fs.readFileSync(CA_KEY_PATH, 'utf-8');
+      const caCert = forge.pki.certificateFromPem(caCertPem);
+      const caKey = forge.pki.privateKeyFromPem(caKeyPem);
+
+      const keys = forge.pki.rsa.generateKeyPair(2048);
+      const cert = forge.pki.createCertificate();
+      cert.publicKey = keys.publicKey;
+      cert.serialNumber = Date.now().toString(16);
+      cert.validity.notBefore = new Date();
+      cert.validity.notAfter = new Date();
+      cert.validity.notAfter.setFullYear(cert.validity.notAfter.getFullYear() + 1);
+      cert.setSubject([{ name: 'commonName', value: hostnames[0] }]);
+      cert.setIssuer(caCert.subject.attributes);
+      cert.setExtensions([
+        { name: 'basicConstraints', cA: false },
+        { name: 'subjectAltName', altNames: hostnames.map((h: string) => ({ type: 2, value: h })) },
+        { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
+        { name: 'extKeyUsage', serverAuth: true },
+      ]);
+      cert.sign(caKey, forge.md.sha256.create());
+
+      fs.mkdirSync(output_dir, { recursive: true });
+      const certPath = path.join(output_dir, 'cert.pem');
+      const keyPath = path.join(output_dir, 'key.pem');
+      const caPath = path.join(output_dir, 'ca.pem');
+      fs.writeFileSync(certPath, forge.pki.certificateToPem(cert));
+      fs.writeFileSync(keyPath, forge.pki.privateKeyToPem(keys.privateKey));
+      fs.writeFileSync(caPath, caCertPem);
+
+      console.log(`[mcp] Generated certificate for ${hostnames.join(', ')} → ${output_dir}`);
+      res.json({ cert_path: certPath, key_path: keyPath, ca_path: caPath });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Mount changes API routes
