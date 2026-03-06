@@ -1134,6 +1134,7 @@ function registerGlobalFunctions() {
   win.showNewProjectModal = () => useStore.getState().setModal({ type: 'new-project' });
   win.showOpenProjectModal = () => useStore.getState().setModal({ type: 'open-project' });
   win.showConnectProjectModal = () => useStore.getState().setModal({ type: 'connect-project' });
+  win.showSshProjectModal = () => useStore.getState().setModal({ type: 'ssh-project' });
   win.createEnvironmentFromStart = createEnvironmentFromStart;
   win.createEnvironmentFromDropdown = createEnvironmentFromDropdown;
   win.showCtxMenu = buildFileCtxMenu;

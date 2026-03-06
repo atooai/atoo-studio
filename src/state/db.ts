@@ -21,6 +21,22 @@ export interface Project {
   path: string;
   created_at: string;
   isGit?: boolean;
+  ssh_connection_id?: string;
+  remote_path?: string;
+}
+
+export interface SshConnection {
+  id: string;
+  label: string;
+  host: string;
+  port: number;
+  username: string;
+  auth_method: 'password' | 'privatekey' | 'systemkey';
+  password_obfuscated?: string;
+  private_key_obfuscated?: string;
+  passphrase_obfuscated?: string;
+  system_key_path?: string;
+  created_at: string;
 }
 
 export interface EnvironmentSettings {
@@ -47,6 +63,7 @@ class VccDatabase {
     this.db.pragma('busy_timeout = 5000');
 
     this.initSchema();
+    this.migrateProjectsSshColumns();
     this.migrate();
   }
 
@@ -83,6 +100,20 @@ class VccDatabase {
         pe_id TEXT PRIMARY KEY REFERENCES project_environment(id) ON DELETE CASCADE,
         settings_json TEXT NOT NULL DEFAULT '{}',
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS ssh_connections (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL DEFAULT 22,
+        username TEXT NOT NULL,
+        auth_method TEXT NOT NULL,
+        password_obfuscated TEXT,
+        private_key_obfuscated TEXT,
+        passphrase_obfuscated TEXT,
+        system_key_path TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
   }
@@ -128,6 +159,17 @@ class VccDatabase {
     } catch (err) {
       console.error('[db] Migration failed:', err);
     }
+  }
+
+  private migrateProjectsSshColumns(): void {
+    const columns = this.db.prepare("PRAGMA table_info(projects)").all() as any[];
+    const hasSshCol = columns.some((c: any) => c.name === 'ssh_connection_id');
+    if (hasSshCol || columns.length === 0) return;
+    this.db.exec(`
+      ALTER TABLE projects ADD COLUMN ssh_connection_id TEXT REFERENCES ssh_connections(id);
+      ALTER TABLE projects ADD COLUMN remote_path TEXT;
+    `);
+    console.log('[db] Added ssh_connection_id and remote_path columns to projects');
   }
 
   private migrateProjectEnvironmentSchema(): void {
@@ -232,19 +274,20 @@ class VccDatabase {
   // ═══════════════════════════════════════════════════
 
   getProject(id: string): Project | undefined {
-    return this.db.prepare('SELECT id, name, path, created_at FROM projects WHERE id = ?')
+    return this.db.prepare('SELECT id, name, path, created_at, ssh_connection_id, remote_path FROM projects WHERE id = ?')
       .get(id) as Project | undefined;
   }
 
   listAllProjects(): Project[] {
-    return this.db.prepare('SELECT id, name, path, created_at FROM projects ORDER BY created_at')
+    return this.db.prepare('SELECT id, name, path, created_at, ssh_connection_id, remote_path FROM projects ORDER BY created_at')
       .all() as Project[];
   }
 
-  createProject(name: string, projectPath: string): Project {
+  createProject(name: string, projectPath: string, opts?: { sshConnectionId?: string; remotePath?: string }): Project {
     const id = uuidv4();
-    const resolved = path.resolve(projectPath);
-    this.db.prepare('INSERT INTO projects (id, name, path) VALUES (?, ?, ?)').run(id, name, resolved);
+    const resolved = opts?.sshConnectionId ? projectPath : path.resolve(projectPath);
+    this.db.prepare('INSERT INTO projects (id, name, path, ssh_connection_id, remote_path) VALUES (?, ?, ?, ?, ?)')
+      .run(id, name, resolved, opts?.sshConnectionId || null, opts?.remotePath || null);
     return this.getProject(id)!;
   }
 
@@ -259,7 +302,7 @@ class VccDatabase {
 
   getProjectsForEnvironment(envId: string): (Project & { pe_id: string })[] {
     return this.db.prepare(`
-      SELECT p.id, p.name, p.path, p.created_at, pe.id as pe_id
+      SELECT p.id, p.name, p.path, p.created_at, p.ssh_connection_id, p.remote_path, pe.id as pe_id
       FROM projects p
       JOIN project_environment pe ON pe.project_id = p.id
       WHERE pe.environment_id = ?
@@ -358,6 +401,37 @@ class VccDatabase {
         settings_json = excluded.settings_json,
         updated_at = excluded.updated_at
     `).run(peId, json);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // SSH CONNECTIONS
+  // ═══════════════════════════════════════════════════
+
+  createSshConnection(config: Omit<SshConnection, 'id' | 'created_at'>): SshConnection {
+    const id = uuidv4();
+    this.db.prepare(`
+      INSERT INTO ssh_connections (id, label, host, port, username, auth_method,
+        password_obfuscated, private_key_obfuscated, passphrase_obfuscated, system_key_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, config.label, config.host, config.port, config.username, config.auth_method,
+      config.password_obfuscated || null, config.private_key_obfuscated || null,
+      config.passphrase_obfuscated || null, config.system_key_path || null);
+    return this.getSshConnection(id)!;
+  }
+
+  getSshConnection(id: string): SshConnection | undefined {
+    return this.db.prepare('SELECT * FROM ssh_connections WHERE id = ?')
+      .get(id) as SshConnection | undefined;
+  }
+
+  listSshConnections(): SshConnection[] {
+    return this.db.prepare('SELECT * FROM ssh_connections ORDER BY created_at')
+      .all() as SshConnection[];
+  }
+
+  deleteSshConnection(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM ssh_connections WHERE id = ?').run(id);
+    return result.changes > 0;
   }
 
   // ═══════════════════════════════════════════════════

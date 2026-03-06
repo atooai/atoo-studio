@@ -60,6 +60,7 @@ export function Sidebar() {
               waitingCount={waitingCount}
               activeCount={activeCount}
               openChats={openCh}
+              sshConnectionId={p.ssh_connection_id}
             />
           );
         })}
@@ -79,7 +80,7 @@ function StatusChip({ type, count, label, filter }: { type: string; count: numbe
   );
 }
 
-function ProjectItem({ projectId, peId, name, path, initials, status, isActive, hasAttention, waitingCount, activeCount, openChats }: any) {
+function ProjectItem({ projectId, peId, name, path, initials, status, isActive, hasAttention, waitingCount, activeCount, openChats, sshConnectionId }: any) {
   return (
     <div
       className={`project-item ${isActive ? 'active' : ''} ${hasAttention ? 'has-attention' : ''}`}
@@ -87,12 +88,12 @@ function ProjectItem({ projectId, peId, name, path, initials, status, isActive, 
       title={name}
     >
       <div className="project-square-icon">
-        {initials}
+        {sshConnectionId ? <span style={{ fontSize: '10px' }}>SSH</span> : initials}
         <span className={`project-square-notif ${status}`}></span>
       </div>
       <span className={`project-dot ${status}`}></span>
       <div className="project-info">
-        <div className="project-name">{name}</div>
+        <div className="project-name">{name}{sshConnectionId && <span className="ssh-badge" title="Remote (SSH)"> &#x26D3;</span>}</div>
         <div className="project-path">{path}</div>
       </div>
       <div className="project-badges">
@@ -134,6 +135,10 @@ function AddMenu() {
         <div className="add-menu-item" onClick={() => { setVisible(false); (window as any).showConnectProjectModal(); }}>
           <span className="add-menu-icon">⇄</span>
           <div><div className="add-menu-label">Connect</div><div className="add-menu-desc">From other environment</div></div>
+        </div>
+        <div className="add-menu-item" onClick={() => { setVisible(false); (window as any).showSshProjectModal(); }}>
+          <span className="add-menu-icon">&#x26D3;</span>
+          <div><div className="add-menu-label">Connect Remote (SSH)</div><div className="add-menu-desc">SSH into a remote machine</div></div>
         </div>
       </div>
     </div>

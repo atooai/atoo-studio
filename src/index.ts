@@ -10,6 +10,7 @@ import { fsMonitor } from './fs-monitor.js';
 import { vccDb } from './state/db.js';
 import { agentRegistry } from './agents/registry.js';
 import { ClaudeCodeAgentFactory } from './agents/claude-code/index.js';
+import { sshManager } from './services/ssh-manager.js';
 
 async function main() {
   console.log('=== CCProxy ===');
@@ -48,10 +49,21 @@ async function main() {
   console.log(`Web frontend (Windows): http://172.25.255.25:${WEB_PORT}`);
   console.log('');
 
+  // Auto-reconnect saved SSH connections
+  const savedSshConns = vccDb.listSshConnections();
+  for (const conn of savedSshConns) {
+    sshManager.connect(conn).then(() => {
+      console.log(`[init] SSH auto-reconnected: ${conn.label}`);
+    }).catch(err => {
+      console.warn(`[init] SSH auto-reconnect failed for ${conn.label}: ${err.message}`);
+    });
+  }
+
   // Graceful shutdown
   process.on('SIGINT', () => {
     console.log('\n[shutdown] Stopping...');
     fsMonitor.disconnect();
+    sshManager.disconnectAll();
     killAllCliProcesses();
     vccDb.close();
     proxyServer.close();
@@ -61,6 +73,7 @@ async function main() {
 
   process.on('SIGTERM', () => {
     fsMonitor.disconnect();
+    sshManager.disconnectAll();
     killAllCliProcesses();
     vccDb.close();
     proxyServer.close();

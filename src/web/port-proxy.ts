@@ -3,14 +3,18 @@ import httpProxy from 'http-proxy';
 import type { Request, Response, NextFunction } from 'express';
 import type { Duplex } from 'stream';
 import { WEB_PORT } from '../config.js';
+import { sshManager } from '../services/ssh-manager.js';
 
 interface ProxyTarget {
   port: number;
   path: string;
+  connectionId?: string;
 }
 
 const SUBDOMAIN_RE = /^(\d+)\.port\.on\./;
 const PATH_PREFIX_RE = /^\/at\/port\/(\d+)(\/.*)?$/;
+const REMOTE_PATH_PREFIX_RE = /^\/at\/remote\/([^/]+)\/port\/(\d+)(\/.*)?$/;
+const REMOTE_SUBDOMAIN_RE = /^(\d+)\.remote\.([^.]+)\.on\./;
 
 export function extractPortProxyTarget(req: http.IncomingMessage): ProxyTarget | null {
   const host = req.headers.host || '';
@@ -32,6 +36,26 @@ export function extractPortProxyTarget(req: http.IncomingMessage): ProxyTarget |
     const port = parseInt(pathMatch[1], 10);
     if (port > 0 && port <= 65535 && port !== WEB_PORT) {
       return { port, path: pathMatch[2] || '/' };
+    }
+  }
+
+  // Remote path format: /at/remote/{connId}/port/{portnr}[/rest]
+  const remotePathMatch = url.match(REMOTE_PATH_PREFIX_RE);
+  if (remotePathMatch) {
+    const connectionId = remotePathMatch[1];
+    const port = parseInt(remotePathMatch[2], 10);
+    if (port > 0 && port <= 65535) {
+      return { port, path: remotePathMatch[3] || '/', connectionId };
+    }
+  }
+
+  // Remote subdomain format: {port}.remote.{connId}.on.{domain}
+  const remoteSubMatch = hostWithoutPort.match(REMOTE_SUBDOMAIN_RE);
+  if (remoteSubMatch) {
+    const port = parseInt(remoteSubMatch[1], 10);
+    const connectionId = remoteSubMatch[2];
+    if (port > 0 && port <= 65535) {
+      return { port, path: req.url || '/', connectionId };
     }
   }
 
@@ -59,15 +83,28 @@ export function createPortProxy(): httpProxy {
 }
 
 export function portProxyMiddleware(proxy: httpProxy) {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const target = extractPortProxyTarget(req);
     if (!target) {
       next();
       return;
     }
     req.url = target.path;
-    console.log(`[port-proxy] HTTP ${req.method} -> localhost:${target.port}${target.path}`);
-    proxy.web(req, res, { target: `http://127.0.0.1:${target.port}` });
+
+    if (target.connectionId) {
+      // Remote proxy via SSH tunnel
+      try {
+        const localPort = await sshManager.getOrCreateForwardTunnel(target.connectionId, target.port);
+        console.log(`[port-proxy] HTTP ${req.method} -> SSH:${target.connectionId}:${target.port} (via local:${localPort})${target.path}`);
+        proxy.web(req, res, { target: `http://127.0.0.1:${localPort}` });
+      } catch (err: any) {
+        console.error(`[port-proxy] SSH tunnel error:`, err.message);
+        res.status(502).send(`SSH tunnel error: ${err.message}`);
+      }
+    } else {
+      console.log(`[port-proxy] HTTP ${req.method} -> localhost:${target.port}${target.path}`);
+      proxy.web(req, res, { target: `http://127.0.0.1:${target.port}` });
+    }
   };
 }
 
@@ -75,24 +112,38 @@ export function isPortProxyUpgrade(req: http.IncomingMessage): boolean {
   return extractPortProxyTarget(req) !== null;
 }
 
-export function handlePortProxyUpgrade(
+export async function handlePortProxyUpgrade(
   proxy: httpProxy,
   req: http.IncomingMessage,
   socket: Duplex,
   head: Buffer,
-): void {
+): Promise<void> {
   const target = extractPortProxyTarget(req);
   if (!target) {
     socket.destroy();
     return;
   }
   req.url = target.path;
-  console.log(`[port-proxy] WS upgrade -> localhost:${target.port}${target.path}`);
+
+  let localPort = target.port;
+  if (target.connectionId) {
+    try {
+      localPort = await sshManager.getOrCreateForwardTunnel(target.connectionId, target.port);
+      console.log(`[port-proxy] WS upgrade -> SSH:${target.connectionId}:${target.port} (via local:${localPort})${target.path}`);
+    } catch (err: any) {
+      console.error(`[port-proxy] SSH tunnel error for WS upgrade:`, err.message);
+      socket.destroy();
+      return;
+    }
+  } else {
+    console.log(`[port-proxy] WS upgrade -> localhost:${target.port}${target.path}`);
+  }
+
   proxy.ws(req, socket, head, {
-    target: `http://127.0.0.1:${target.port}`,
+    target: `http://127.0.0.1:${localPort}`,
   }, (err) => {
     if (err) {
-      console.error(`[port-proxy] WS upgrade error to localhost:${target.port}:`, err.message);
+      console.error(`[port-proxy] WS upgrade error to localhost:${localPort}:`, err.message);
       socket.destroy();
     }
   });

@@ -49,6 +49,10 @@ environmentsRouter.get('/api/environments/:id/projects', (req, res) => {
 
   const projects = vccDb.getProjectsForEnvironment(req.params.id);
   const withGit = projects.map(p => {
+    if (p.ssh_connection_id) {
+      // Remote project — skip local fs checks and watching
+      return { ...p, isGit: false };
+    }
     let isGit = false;
     try { isGit = fs.existsSync(path.join(p.path, '.git')); } catch {}
     // Start watching this project's directory
@@ -63,34 +67,69 @@ environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
   const env = vccDb.getEnvironment(req.params.id);
   if (!env) return res.status(404).json({ error: 'Environment not found' });
 
-  const { name, path: projectPath, initGit, remoteUrl } = req.body;
+  const { name, path: projectPath, initGit, remoteUrl, ssh_connection_id, remote_path } = req.body;
   if (!name || !projectPath) {
     return res.status(400).json({ error: 'name and path are required' });
   }
 
   try {
-    const resolved = path.resolve(projectPath);
-    if (!fs.existsSync(resolved)) {
-      fs.mkdirSync(resolved, { recursive: true });
-    }
+    if (ssh_connection_id) {
+      // Remote project — skip local fs checks
+      const { sshManager } = await import('../services/ssh-manager.js');
+      const remoteGit = await import('../services/remote-git-ops.js');
 
-    if (initGit && !fs.existsSync(path.join(resolved, '.git'))) {
-      await gitOps.gitInit(resolved);
-      if (remoteUrl) {
-        await gitOps.gitAddRemote(resolved, 'origin', remoteUrl);
+      // Ensure remote directory exists
+      try {
+        await sshManager.exec(ssh_connection_id, `mkdir -p '${projectPath.replace(/'/g, "'\\''")}'`);
+      } catch {}
+
+      if (initGit) {
+        try {
+          await remoteGit.gitInit(ssh_connection_id, projectPath);
+          if (remoteUrl) {
+            await remoteGit.gitAddRemote(ssh_connection_id, projectPath, 'origin', remoteUrl);
+          }
+        } catch {}
       }
+
+      const project = vccDb.createProject(name, projectPath, {
+        sshConnectionId: ssh_connection_id,
+        remotePath: remote_path || projectPath,
+      });
+      const peId = vccDb.linkProject(project.id, req.params.id);
+
+      let isGit = false;
+      try {
+        await sshManager.exec(ssh_connection_id, `test -d '${projectPath.replace(/'/g, "'\\''")}'/.git`);
+        isGit = true;
+      } catch {}
+
+      res.json({ ...project, pe_id: peId, isGit });
+    } else {
+      // Local project
+      const resolved = path.resolve(projectPath);
+      if (!fs.existsSync(resolved)) {
+        fs.mkdirSync(resolved, { recursive: true });
+      }
+
+      if (initGit && !fs.existsSync(path.join(resolved, '.git'))) {
+        await gitOps.gitInit(resolved);
+        if (remoteUrl) {
+          await gitOps.gitAddRemote(resolved, 'origin', remoteUrl);
+        }
+      }
+
+      const project = vccDb.createProject(name, projectPath);
+      const peId = vccDb.linkProject(project.id, req.params.id);
+
+      let isGit = false;
+      try { isGit = fs.existsSync(path.join(resolved, '.git')); } catch {}
+
+      // Start watching the new project
+      watchProject(project.id, resolved);
+
+      res.json({ ...project, pe_id: peId, isGit });
     }
-
-    const project = vccDb.createProject(name, projectPath);
-    const peId = vccDb.linkProject(project.id, req.params.id);
-
-    let isGit = false;
-    try { isGit = fs.existsSync(path.join(resolved, '.git')); } catch {}
-
-    // Start watching the new project
-    watchProject(project.id, resolved);
-
-    res.json({ ...project, pe_id: peId, isGit });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

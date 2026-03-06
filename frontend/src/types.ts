@@ -152,6 +152,8 @@ export interface Project {
   path: string;
   pe_id?: string;
   isGit?: boolean;
+  ssh_connection_id?: string;
+  remote_path?: string;
   sessions: Session[];
   files: FileNode[];
   gitChanges: GitChange[];

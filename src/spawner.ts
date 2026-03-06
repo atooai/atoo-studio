@@ -7,15 +7,45 @@ import { fileURLToPath } from 'url';
 import { PROXY_PORT, CA_CERT_PATH } from './config.js';
 import { store } from './state/store.js';
 import { writeSessionJsonl } from './session-writer.js';
+import { sshManager } from './services/ssh-manager.js';
 import type { Session } from './state/types.js';
+import type { ClientChannel } from 'ssh2';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PRELOAD_SO_PATH = path.join(__dirname, '..', 'preload', 'ccproxy-preload.so');
 const PRELOAD_SOCKET_PATH = path.join(os.homedir(), '.ccproxy', 'preload.sock');
 
+// Common terminal interface — abstracts local PTY and SSH channel
+export interface ITerminal {
+  write(data: string): void;
+  resize(cols: number, rows: number): void;
+  kill(): void;
+  onData(handler: (data: string) => void): { dispose(): void };
+  onExit(handler: (exit: { exitCode: number }) => void): { dispose(): void };
+  pid?: number;
+}
+
+class SshTerminalAdapter implements ITerminal {
+  pid = undefined;
+  constructor(private channel: ClientChannel) {}
+  write(data: string) { this.channel.write(data); }
+  resize(cols: number, rows: number) { this.channel.setWindow(rows, cols, rows * 16, cols * 8); }
+  kill() { this.channel.close(); }
+  onData(handler: (data: string) => void) {
+    const cb = (data: Buffer) => handler(data.toString());
+    this.channel.on('data', cb);
+    return { dispose: () => { this.channel.off('data', cb); } };
+  }
+  onExit(handler: (exit: { exitCode: number }) => void) {
+    const cb = (code: number | null) => handler({ exitCode: code ?? 1 });
+    this.channel.on('exit', cb);
+    return { dispose: () => {} };
+  }
+}
+
 interface SpawnedProcess {
-  pty: pty.IPty;
+  pty: ITerminal;
   envId: string;
   pid: number;
   preloadSessionId?: string;
@@ -517,6 +547,106 @@ export function spawnResumeCliProcess(options: {
 }
 
 /**
+ * Spawn a CLI process on a remote machine via SSH.
+ */
+export function spawnRemoteCliProcess(options: {
+  sshConnectionId: string;
+  skipPermissions?: boolean;
+  cwd: string;
+}): Promise<string> {
+  return new Promise(async (resolve, reject) => {
+    const { sshConnectionId, skipPermissions, cwd } = options;
+
+    if (!sshManager.isConnected(sshConnectionId)) {
+      return reject(new Error('SSH connection not active'));
+    }
+
+    const existingEnvIds = new Set(store.environments.keys());
+
+    // Build command for remote execution
+    const args: string[] = [];
+    if (skipPermissions) args.push('--dangerously-skip-permissions');
+    args.push('/remote-control');
+
+    const cmd = `HTTPS_PROXY=http://localhost:8080 NODE_EXTRA_CA_CERTS=~/.ccproxy/ca.pem claude ${args.join(' ')}`;
+
+    try {
+      const channel = await sshManager.execPty(sshConnectionId, cmd, {
+        cwd,
+        rows: 30,
+        cols: 120,
+      });
+
+      const term = new SshTerminalAdapter(channel);
+      console.log(`[spawner] Started remote claude via SSH: ${cmd}`);
+
+      let resolved = false;
+      let resolvedEnvId: string | null = null;
+      let earlyBuffer = '';
+
+      term.onData((data: string) => {
+        if (resolvedEnvId) {
+          let buf = spawnerScrollback.get(resolvedEnvId) || '';
+          buf += data;
+          if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
+          spawnerScrollback.set(resolvedEnvId, buf);
+        } else {
+          earlyBuffer += data;
+          if (earlyBuffer.length > MAX_SPAWNER_SCROLLBACK) earlyBuffer = earlyBuffer.slice(-MAX_SPAWNER_SCROLLBACK);
+        }
+        const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
+        if (stripped) console.log(`[spawner:ssh] ${stripped.substring(0, 200)}`);
+      });
+
+      term.onExit(({ exitCode }) => {
+        console.log(`[spawner] Remote claude exited with code ${exitCode}`);
+        for (const [envId, proc] of Array.from(spawnedProcesses.entries())) {
+          if (proc.pty === term) {
+            spawnedProcesses.delete(envId);
+            spawnerScrollback.delete(envId);
+            break;
+          }
+        }
+      });
+
+      // Poll for new environment registration
+      const maxWait = 60000;
+      const pollInterval = 500;
+      let elapsed = 0;
+
+      const timer = setInterval(() => {
+        elapsed += pollInterval;
+
+        for (const id of Array.from(store.environments.keys())) {
+          if (!existingEnvIds.has(id)) {
+            clearInterval(timer);
+            resolved = true;
+            resolvedEnvId = id;
+            spawnerScrollback.set(id, earlyBuffer);
+            earlyBuffer = '';
+            spawnedProcesses.set(id, { pty: term, envId: id, pid: 0 });
+            console.log(`[spawner] Remote CLI registered as environment ${id}`);
+            resolve(id);
+            return;
+          }
+        }
+
+        if (elapsed >= maxWait) {
+          clearInterval(timer);
+          if (!resolved) {
+            console.error(`[spawner] Timeout waiting for remote CLI to register`);
+            term.kill();
+            reject(new Error('Timeout waiting for remote CLI to register'));
+          }
+        }
+      }, pollInterval);
+    } catch (err: any) {
+      reject(err);
+    }
+  });
+}
+
+/**
  * Build a context summary from forked session events for injection into a fresh CLI.
  */
 export function buildContextSummary(session: Session): string {
@@ -569,7 +699,7 @@ export function killAllCliProcesses(): void {
   spawnedProcesses.clear();
 }
 
-export function getPty(envId: string): pty.IPty | undefined {
+export function getPty(envId: string): ITerminal | undefined {
   return spawnedProcesses.get(envId)?.pty;
 }
 

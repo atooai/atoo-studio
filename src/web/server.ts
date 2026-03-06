@@ -8,11 +8,13 @@ import { fileURLToPath } from 'url';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
-import { spawnCliProcess, spawnForkedCliProcess, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback } from '../spawner.js';
+import { spawnCliProcess, spawnForkedCliProcess, spawnRemoteCliProcess, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback } from '../spawner.js';
+import { vccDb } from '../state/db.js';
 import { fsMonitor } from '../fs-monitor.js';
 import { changesRouter } from '../handlers/changes.js';
 import { projectsRouter } from '../handlers/projects.js';
 import { environmentsRouter, setBroadcastSettingsChange } from '../handlers/environments.js';
+import { sshRouter } from '../handlers/ssh.js';
 import { isAgentWsUpgrade, handleAgentWsUpgrade } from '../ws/agent-ws.js';
 import { agentRegistry } from '../agents/registry.js';
 import { createPortProxy, portProxyMiddleware, isPortProxyUpgrade, handlePortProxyUpgrade } from './port-proxy.js';
@@ -103,15 +105,35 @@ export function createWebServer(): http.Server {
   // The CLI itself creates the session via /remote-control, so we just
   // spawn it, wait for the CLI's session to appear, and send the message there.
   app.post('/api/sessions', async (req, res) => {
-    const { message, skip_permissions, cwd } = req.body;
+    const { message, skip_permissions, cwd, ssh_connection_id } = req.body;
 
     try {
       // Track existing sessions so we can detect the new one from the CLI
       const existingSessionIds = new Set(store.sessions.keys());
 
-      // Spawn a new headless claude /remote-control process
-      console.log(`[web] Spawning headless CLI (skip_permissions=${!!skip_permissions}, cwd=${cwd || '~'})...`);
-      const envId = await spawnCliProcess({ skipPermissions: !!skip_permissions, cwd: cwd || undefined });
+      // Determine if this is a remote project by checking ssh_connection_id or looking up the project
+      let sshConnId = ssh_connection_id;
+      if (!sshConnId && cwd) {
+        // Check if any project with this path has an SSH connection
+        const allProjects = vccDb.listAllProjects();
+        const matchingProject = allProjects.find(p => p.ssh_connection_id && (p.path === cwd || p.remote_path === cwd));
+        if (matchingProject) sshConnId = matchingProject.ssh_connection_id;
+      }
+
+      let envId: string;
+      if (sshConnId) {
+        // Remote spawn via SSH
+        console.log(`[web] Spawning remote CLI via SSH ${sshConnId} (cwd=${cwd || '~'})...`);
+        envId = await spawnRemoteCliProcess({
+          sshConnectionId: sshConnId,
+          skipPermissions: !!skip_permissions,
+          cwd: cwd || '/home',
+        });
+      } else {
+        // Local spawn
+        console.log(`[web] Spawning headless CLI (skip_permissions=${!!skip_permissions}, cwd=${cwd || '~'})...`);
+        envId = await spawnCliProcess({ skipPermissions: !!skip_permissions, cwd: cwd || undefined });
+      }
       console.log(`[web] CLI registered as ${envId}`);
 
       // Wait for the CLI to create its own session (polls every 500ms, up to 15s)
@@ -553,6 +575,9 @@ export function createWebServer(): http.Server {
 
   // Mount environment API routes
   app.use(environmentsRouter);
+
+  // Mount SSH API routes
+  app.use(sshRouter);
 
   // List running shell terminals
   app.get('/api/terminals', (_req, res) => {

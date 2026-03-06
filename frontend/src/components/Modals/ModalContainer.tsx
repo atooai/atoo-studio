@@ -8,6 +8,7 @@ import { FolderBrowser } from './FolderBrowser';
 import { ConfirmDialog } from './ConfirmDialog';
 import { InputDialog } from './InputDialog';
 import { WorktreeModal } from './WorktreeModal';
+import { SshProjectModal } from './SshProjectModal';
 
 export function ModalContainer() {
   const { modal, setModal } = useStore();
@@ -25,6 +26,7 @@ export function ModalContainer() {
       {modal.type === 'confirm' && <ConfirmDialog {...modal.props} onClose={close} />}
       {modal.type === 'input' && <InputDialog {...modal.props} onClose={close} />}
       {modal.type === 'worktree' && <WorktreeModal {...modal.props} onClose={close} />}
+      {modal.type === 'ssh-project' && <SshProjectModal onClose={close} />}
     </div>
   );
 }
