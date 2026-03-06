@@ -8,6 +8,7 @@ import { PROXY_PORT, CA_CERT_PATH } from './config.js';
 import { store } from './state/store.js';
 import { writeSessionJsonl } from './session-writer.js';
 import { sshManager } from './services/ssh-manager.js';
+import { getMcpConfigPath, MCP_SYSTEM_PROMPT } from './mcp/config.js';
 import type { Session } from './state/types.js';
 import type { ClientChannel } from 'ssh2';
 
@@ -100,7 +101,7 @@ export function spawnCliProcess(options: {
     if (options.skipPermissions) {
       args.push('--dangerously-skip-permissions');
     }
-    args.push('/remote-control');
+    args.push('--append-system-prompt', MCP_SYSTEM_PROMPT, '--mcp-config', getMcpConfigPath(), '--', '/remote-control');
 
     const cwd = options.cwd || process.env.HOME || os.homedir();
 
@@ -243,7 +244,7 @@ export function spawnForkedCliProcess(options: {
     // Try --resume first, pass /remote-control as prompt arg
     const args: string[] = [];
     if (skipPermissions) args.push('--dangerously-skip-permissions');
-    args.push('--resume', sessionUuid, '/remote-control');
+    args.push('--append-system-prompt', MCP_SYSTEM_PROMPT, '--mcp-config', getMcpConfigPath(), '--resume', sessionUuid, '--', '/remote-control');
 
     const term = pty.spawn('claude', args, {
       name: 'xterm-256color',
@@ -346,7 +347,7 @@ function spawnFreshFallback(
     // Pass /remote-control as prompt arg
     const args: string[] = [];
     if (skipPermissions) args.push('--dangerously-skip-permissions');
-    args.push('/remote-control');
+    args.push('--append-system-prompt', MCP_SYSTEM_PROMPT, '--mcp-config', getMcpConfigPath(), '--', '/remote-control');
 
     // Generate a tracking UUID for preload session mapping
     const preloadSessionId = uuidv4();
@@ -471,7 +472,7 @@ export function spawnResumeCliProcess(options: {
     // Pass /remote-control as prompt arg after --resume
     const args: string[] = [];
     if (skipPermissions) args.push('--dangerously-skip-permissions');
-    args.push('--resume', uuid, '/remote-control');
+    args.push('--append-system-prompt', MCP_SYSTEM_PROMPT, '--mcp-config', getMcpConfigPath(), '--resume', uuid, '--', '/remote-control');
 
     const term = pty.spawn('claude', args, {
       name: 'xterm-256color',

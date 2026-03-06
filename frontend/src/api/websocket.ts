@@ -205,6 +205,12 @@ function handleStatusMessage(msg: any) {
       gitLog: msg.gitLog,
       stashes: msg.stashes,
     }));
+  } else if (msg.type === 'service_started' && msg.services) {
+    const proj = store.projects.find((p) => msg.cwd && msg.cwd.startsWith(p.path));
+    const projName = proj?.name || msg.cwd || 'Unknown';
+    for (const s of msg.services) {
+      store.addToast(projName, `Started ${s.protocol} service "${s.name}" on port ${s.port}`, 'info');
+    }
   }
 }
 

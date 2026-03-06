@@ -567,6 +567,20 @@ export function createWebServer(): http.Server {
     }
   });
 
+  // MCP callback: report started TCP services
+  app.post('/api/mcp/report-services', (req, res) => {
+    const { services, cwd } = req.body;
+    if (!Array.isArray(services) || !services.length) {
+      return res.status(400).json({ error: 'services array is required' });
+    }
+    console.log(`[mcp] report-services: ${services.length} service(s) from ${cwd}`);
+    const msg = JSON.stringify({ type: 'service_started', services, cwd });
+    for (const ws of store.statusClients) {
+      if (ws.readyState === 1) ws.send(msg);
+    }
+    res.json({ success: true });
+  });
+
   // Mount changes API routes
   app.use(changesRouter);
 
