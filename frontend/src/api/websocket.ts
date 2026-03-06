@@ -211,6 +211,35 @@ function handleStatusMessage(msg: any) {
     for (const s of msg.services) {
       store.addToast(projName, `Started ${s.protocol} service "${s.name}" on port ${s.port}`, 'info');
     }
+    // Auto-manage preview tabs for http/https/ws/wss services
+    if (store.previewVisible) {
+      const httpServices = msg.services.filter((s: any) =>
+        ['http', 'https', 'ws', 'wss'].includes(s.protocol)
+      );
+      for (const s of httpServices) {
+        const port = String(s.port);
+        const existingIdx = store.previewTabs.findIndex((t) => {
+          try { return new URL(t.url).port === port; } catch { return false; }
+        });
+        if (existingIdx >= 0) {
+          // Refresh existing tab by appending cache-buster
+          const tabs = store.previewTabs.map((t, i) => {
+            if (i !== existingIdx) return t;
+            const base = t.url.replace(/#.*$/, '');
+            return { ...t, url: `${base}#_r=${Date.now()}` };
+          });
+          useStore.setState({ previewTabs: tabs, previewActiveIdx: existingIdx });
+        } else {
+          // Add new tab
+          const proto = s.protocol === 'https' ? 'https' : 'http';
+          const url = `${proto}://localhost:${s.port}`;
+          const id = 'pv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+          const label = `${s.name} :${s.port}`;
+          const newTabs = [...store.previewTabs, { id, url, label }];
+          useStore.setState({ previewTabs: newTabs, previewActiveIdx: newTabs.length - 1 });
+        }
+      }
+    }
   }
 }
 
