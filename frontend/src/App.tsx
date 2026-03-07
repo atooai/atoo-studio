@@ -177,7 +177,7 @@ async function selectEnvironment(envId: string, fromRouter = false) {
   // Load projects
   try {
     const projects = await api('GET', `/api/environments/${envId}/projects`);
-    store.setProjects(projects.map((p: any) => ({
+    const mappedProjects = projects.map((p: any) => ({
       ...p,
       sessions: [],
       files: [],
@@ -190,7 +190,19 @@ async function selectEnvironment(envId: string, fromRouter = false) {
       _filesLoaded: false,
       _gitLoaded: false,
       _sessionsLoaded: false,
-    })));
+    }));
+    store.setProjects(mappedProjects);
+
+    // Fetch worktrees for git projects in background
+    for (const p of mappedProjects) {
+      if (p.isGit) {
+        api('GET', `/api/projects/${p.id}/git/worktrees`).then((wts: any[]) => {
+          if (wts && wts.length > 1) {
+            useStore.getState().updateProject(p.id, proj => ({ ...proj, worktrees: wts }));
+          }
+        }).catch(() => {});
+      }
+    }
   } catch (e) {
     console.error('Failed to load projects for environment:', e);
     store.setProjects([]);
@@ -815,6 +827,13 @@ function registerGlobalFunctions() {
     } catch (e: any) { store.addToast(proj.name, `Failed: ${e.message}`, 'attention'); }
   };
 
+  async function refreshWorktrees(projectId: string) {
+    try {
+      const wts = await api('GET', `/api/projects/${projectId}/git/worktrees`);
+      useStore.getState().updateProject(projectId, p => ({ ...p, worktrees: wts && wts.length > 1 ? wts : undefined }));
+    } catch {}
+  }
+
   win.getWorktrees = async () => {
     const store = useStore.getState();
     const proj = store.getActiveProject();
@@ -844,6 +863,7 @@ function registerGlobalFunctions() {
           try {
             await api('POST', `/api/projects/${proj.id}/git/worktrees`, { path: wtPath, branch, newBranch: isNewBranch });
             await refreshGitData(proj.id);
+            await refreshWorktrees(proj.id);
             store.addToast(proj.name, `Created worktree at ${wtPath}`, 'success');
           } catch (e: any) { store.addToast(proj.name, `Failed: ${e.message}`, 'attention'); }
         },
@@ -862,6 +882,7 @@ function registerGlobalFunctions() {
     try {
       await api('DELETE', `/api/projects/${proj.id}/git/worktrees?path=${encodeURIComponent(wtPath)}`);
       await refreshGitData(proj.id);
+      await refreshWorktrees(proj.id);
       // Reload files if we were in the removed worktree
       if (proj.worktreePath === wtPath) await selectProject(proj.id);
       store.addToast(proj.name, `Removed worktree`, 'info');

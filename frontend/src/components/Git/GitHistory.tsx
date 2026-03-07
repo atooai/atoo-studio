@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../../state/store';
 import { escapeHtml } from '../../utils';
 import { api } from '../../api';
@@ -36,20 +36,10 @@ export function GitHistory() {
 }
 
 function BranchBar({ proj }: { proj: any }) {
-  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const inWorktree = !!proj.worktreePath;
 
-  const refreshWorktrees = () => {
-    if (proj.isGit) {
-      (window as any).getWorktrees?.().then((wt: Worktree[]) => {
-        setWorktrees(wt && wt.length > 1 ? wt : []);
-      });
-    }
-  };
-
-  useEffect(() => {
-    refreshWorktrees();
-  }, [proj.id, proj.gitLog?.currentBranch, proj.worktreePath]);
+  // Use worktrees from the store (shared with sidebar)
+  const worktrees: Worktree[] = (proj.worktrees && proj.worktrees.length > 1) ? proj.worktrees : [];
 
   // Find worktree branches for disabling in selector
   const worktreeBranches = worktrees.map(wt => wt.branch).filter(Boolean);

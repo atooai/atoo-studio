@@ -47,22 +47,58 @@ export function Sidebar() {
           const openCh = p.sessions.filter(s => s.status !== 'ended').length;
           const hasAttention = waitingCount > 0;
 
+          // Non-main worktrees (exclude the main repo path)
+          const worktrees = (p.worktrees || []).filter(wt => wt.path !== p.path);
+
+          // If project is active and in a worktree, badges go on the worktree sub-item
+          const isInWorktree = isActive && !!p.worktreePath;
+
           return (
-            <ProjectItem
-              key={p.id}
-              projectId={p.id}
-              peId={p.pe_id}
-              name={p.name}
-              path={p.path}
-              initials={initials}
-              status={status}
-              isActive={isActive}
-              hasAttention={hasAttention}
-              waitingCount={waitingCount}
-              activeCount={activeCount}
-              openChats={openCh}
-              sshConnectionId={p.ssh_connection_id}
-            />
+            <React.Fragment key={p.id}>
+              <ProjectItem
+                projectId={p.id}
+                peId={p.pe_id}
+                name={p.name}
+                path={p.path}
+                initials={initials}
+                status={isInWorktree ? 'idle' : status}
+                isActive={isActive && !isInWorktree}
+                hasAttention={isInWorktree ? false : hasAttention}
+                waitingCount={isInWorktree ? 0 : waitingCount}
+                activeCount={isInWorktree ? 0 : activeCount}
+                openChats={isInWorktree ? 0 : openCh}
+                sshConnectionId={p.ssh_connection_id}
+                hasWorktrees={worktrees.length > 0}
+                onClick={() => {
+                  if (p.worktreePath) {
+                    // Close worktree to go back to main
+                    (window as any).closeWorktree();
+                  } else {
+                    (window as any).selectProject(p.id, p.pe_id || '');
+                  }
+                }}
+              />
+              {worktrees.map(wt => {
+                const isActiveWorktree = isActive && p.worktreePath === wt.path;
+                const wtName = wt.branch || wt.path.split('/').pop() || 'worktree';
+                return (
+                  <WorktreeSubItem
+                    key={wt.path}
+                    projectId={p.id}
+                    peId={p.pe_id}
+                    name={wtName}
+                    path={wt.path}
+                    branch={wt.branch}
+                    status={isActiveWorktree ? status : 'idle'}
+                    isActive={isActiveWorktree}
+                    hasAttention={isActiveWorktree ? hasAttention : false}
+                    waitingCount={isActiveWorktree ? waitingCount : 0}
+                    activeCount={isActiveWorktree ? activeCount : 0}
+                    openChats={isActiveWorktree ? openCh : 0}
+                  />
+                );
+              })}
+            </React.Fragment>
           );
         })}
       </div>
@@ -81,7 +117,7 @@ function StatusChip({ type, count, label, filter }: { type: string; count: numbe
   );
 }
 
-function ProjectItem({ projectId, peId, name, path, initials, status, isActive, hasAttention, waitingCount, activeCount, openChats, sshConnectionId }: any) {
+function ProjectItem({ projectId, peId, name, path, initials, status, isActive, hasAttention, waitingCount, activeCount, openChats, sshConnectionId, hasWorktrees, onClick }: any) {
   const { projects, setProjects, setModal, setCtxMenu, addToast } = useStore();
 
   const handleRemove = async () => {
@@ -130,7 +166,7 @@ function ProjectItem({ projectId, peId, name, path, initials, status, isActive, 
   return (
     <div
       className={`project-item ${isActive ? 'active' : ''} ${hasAttention ? 'has-attention' : ''}`}
-      onClick={() => (window as any).selectProject(projectId, peId || '')}
+      onClick={onClick}
       onContextMenu={handleContextMenu}
       title={name}
     >
@@ -142,6 +178,58 @@ function ProjectItem({ projectId, peId, name, path, initials, status, isActive, 
       <div className="project-info">
         <div className="project-name">{name}{sshConnectionId && <span className="ssh-badge" title="Remote (SSH)"> &#x26D3;</span>}</div>
         <div className="project-path">{path}</div>
+      </div>
+      <div className="project-badges">
+        <span className="badge badge-attention">{waitingCount}</span>
+        <span className="badge badge-active">{activeCount}</span>
+        <span className="badge badge-chats">{openChats}</span>
+      </div>
+    </div>
+  );
+}
+
+function WorktreeSubItem({ projectId, peId, name, path, branch, status, isActive, hasAttention, waitingCount, activeCount, openChats }: any) {
+  const { setCtxMenu } = useStore();
+
+  const handleClick = () => {
+    if (isActive) return; // already viewing this worktree
+    // First select the parent project, then switch to the worktree
+    (window as any).selectProject(projectId, peId || '');
+    setTimeout(() => {
+      (window as any).switchWorktree(path, branch);
+    }, 100);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setCtxMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: 'Remove Worktree', icon: '✕', danger: true, action: () => {
+          (window as any).selectProject(projectId, peId || '');
+          setTimeout(() => (window as any).removeWorktree(path), 100);
+        }},
+      ],
+    });
+  };
+
+  const dirName = path.split('/').pop() || path;
+
+  return (
+    <div
+      className={`project-item worktree-sub-item ${isActive ? 'active' : ''} ${hasAttention ? 'has-attention' : ''}`}
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
+      title={`Worktree: ${branch}\n${path}`}
+    >
+      <span className={`project-dot ${status}`}></span>
+      <div className="project-info">
+        <div className="project-name worktree-name">
+          <span className="worktree-icon">⑂</span>
+          {name}
+        </div>
+        <div className="project-path">{dirName}</div>
       </div>
       <div className="project-badges">
         <span className="badge badge-attention">{waitingCount}</span>

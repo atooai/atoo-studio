@@ -437,6 +437,42 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
 .badge-tui { background: var(--accent-purple-dim); color: var(--accent-purple); }
 .badge-git { background: var(--accent-blue-dim); color: var(--accent-blue); font-size: 10px; }
 
+/* Worktree sub-items */
+.worktree-sub-item {
+  padding-left: 30px !important;
+  padding-top: 5px !important;
+  padding-bottom: 5px !important;
+  margin-bottom: 0 !important;
+  border-left: 1px solid var(--border-dim);
+  margin-left: 18px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0 !important;
+}
+.worktree-sub-item .project-dot {
+  width: 6px;
+  height: 6px;
+}
+.worktree-sub-item .project-name {
+  font-size: 12px;
+  font-weight: 400;
+}
+.worktree-sub-item .project-path {
+  font-size: 9px;
+}
+.worktree-sub-item .badge {
+  font-size: 8px;
+  padding: 1px 4px;
+}
+.worktree-icon {
+  color: var(--text-muted);
+  margin-right: 4px;
+  font-size: 11px;
+}
+.worktree-sub-item.active .worktree-icon {
+  color: var(--accent-blue);
+}
+
+#sidebar.collapsed .worktree-sub-item { display: none; }
+
 /* ═══════════════════════════════════════════════════════
    TOP BAR — Project Context Bar
    ═══════════════════════════════════════════════════════ */

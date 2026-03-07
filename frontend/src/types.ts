@@ -176,6 +176,7 @@ export interface Project {
   historicalSessions?: HistoricalSession[];
   activeSessionIdx: number;
   activeTerminalIdx: number;
+  worktrees?: Array<{ path: string; branch: string; head?: string }>;
   worktreePath?: string | null;
   worktreeParentBranch?: string | null;
   _filesLoaded?: boolean;
