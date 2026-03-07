@@ -287,12 +287,13 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
     }
   }
 
-  // Lazy-load sessions + historical
-  if (!proj._sessionsLoaded) {
+  // Always reload sessions + historical on project switch (sessions are per-project)
+  {
     try {
-      const [sessions, historical] = await Promise.all([
+      const [sessions, historical, agentSessions] = await Promise.all([
         api('GET', `/api/projects/${proj.id}/sessions`),
         api('GET', '/api/historical-sessions').catch(() => []),
+        api('GET', '/api/agent-sessions').catch(() => []),
       ]);
       const mappedSessions = sessions.map((s: any) => ({
         id: s.id,
@@ -305,7 +306,28 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
         model: s.model || null,
         permissionMode: s.permission_mode || null,
       }));
-      const activeIds = new Set(mappedSessions.map((s: any) => s.id));
+
+      // Merge running agent sessions (e.g. claude-code-terminal) that match this project
+      const effectivePath = proj.worktreePath || proj.path;
+      const legacyIds = new Set(mappedSessions.map((s: any) => s.id));
+      const matchingAgentSessions = agentSessions
+        .filter((a: any) => a.cwd === effectivePath && !legacyIds.has(a.sessionId) && a.status !== 'exited')
+        .map((a: any) => ({
+          id: a.sessionId,
+          title: 'Terminal session',
+          status: a.status === 'active' ? 'running' as const : a.status === 'waiting' ? 'waiting' as const : 'idle' as const,
+          startedAt: new Date(a.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          messages: [],
+          lastMessage: '',
+          viewMode: a.agentMode === 'terminal' ? 'tui' as const : 'chat' as const,
+          agentType: a.agentType,
+          agentMode: a.agentMode,
+          model: a.model || null,
+          permissionMode: a.mode || null,
+          _capabilities: a.capabilities,
+        }));
+
+      const activeIds = new Set([...legacyIds, ...matchingAgentSessions.map((s: any) => s.id)]);
       const historicalSessions = historical
         .filter((h: any) => h.directory === proj.path && !activeIds.has(h.id))
         .map((h: any) => ({
@@ -319,10 +341,13 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
       for (const s of mappedSessions) {
         if (s.status !== 'ended') connectSessionWs(s.id);
       }
+      for (const s of matchingAgentSessions) {
+        connectAgentWs(s.id);
+      }
 
       useStore.getState().updateProject(proj.id, p => ({
         ...p,
-        sessions: mappedSessions,
+        sessions: [...mappedSessions, ...matchingAgentSessions],
         historicalSessions,
         _sessionsLoaded: true,
       }));
@@ -491,7 +516,8 @@ function registerGlobalFunctions() {
   };
 
   // Session management
-  win.newSession = async () => {
+  // Internal: create agent session with a specific agent type/mode
+  const createAgentSession = async (agentType: string, agentMode: string) => {
     const store = useStore.getState();
     if (!store.activeProjectId) return;
     const proj = store.projects.find(p => p.id === store.activeProjectId);
@@ -500,7 +526,7 @@ function registerGlobalFunctions() {
     try {
       setPendingAgentCreation(true);
       const result = await api('POST', '/api/agent-sessions', {
-        agentType: 'claude-code',
+        agentType,
         cwd: proj.worktreePath || proj.path,
         skipPermissions: true,
       });
@@ -512,6 +538,7 @@ function registerGlobalFunctions() {
         connectAgentWs(sessionId);
         return;
       }
+      const defaultViewMode = (agentMode === 'terminal') ? 'tui' : 'chat';
       const session = {
         id: sessionId,
         title: 'New session',
@@ -519,7 +546,9 @@ function registerGlobalFunctions() {
         startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         messages: [],
         lastMessage: '',
-        viewMode: 'chat' as const,
+        viewMode: defaultViewMode as 'chat' | 'tui',
+        agentType,
+        agentMode: agentMode as any,
         permissionMode: result.mode || 'bypassPermissions',
         model: result.model || null,
         _capabilities: result.capabilities,
@@ -544,7 +573,7 @@ function registerGlobalFunctions() {
           startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
           messages: [],
           lastMessage: '',
-          viewMode: 'chat' as const,
+          viewMode: 'chat' as 'chat' | 'tui',
           permissionMode: result.permission_mode || 'bypassPermissions',
           model: result.model || null,
         };
@@ -560,6 +589,21 @@ function registerGlobalFunctions() {
         store.addToast(proj.name, `Failed: ${e2.message}`, 'attention');
       }
     }
+  };
+
+  win.newSession = async () => {
+    const store = useStore.getState();
+    if (!store.activeProjectId) return;
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: (agent: any) => {
+          store.setModal(null);
+          createAgentSession(agent.agentType, agent.mode);
+        },
+      },
+    });
   };
 
   win.switchToSession = (projId: string, idx: number) => {
@@ -1424,7 +1468,9 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
 
     const resizeHandler = () => fitAddon.fit();
     window.addEventListener('resize', resizeHandler);
-    terminalInstances[termId] = { term, fitAddon, ws, el, container, resizeHandler };
+    const resizeObserver = new ResizeObserver(() => fitAddon.fit());
+    resizeObserver.observe(container);
+    terminalInstances[termId] = { term, fitAddon, ws, el, container, resizeHandler, resizeObserver };
     setTimeout(() => fitAddon.fit(), 100);
   }).catch((err: any) => {
     container.innerHTML = `<div style="color:var(--text-muted);padding:12px;font-size:12px">Failed to load terminal: ${err.message}</div>`;
@@ -1829,6 +1875,7 @@ function destroyTerminal(termId: string) {
   try { inst.ws?.close(); } catch {}
   try { inst.term?.dispose(); } catch {}
   window.removeEventListener('resize', inst.resizeHandler);
+  try { inst.resizeObserver?.disconnect(); } catch {}
   delete terminalInstances[termId];
 }
 

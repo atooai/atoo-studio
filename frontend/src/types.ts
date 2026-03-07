@@ -1,3 +1,12 @@
+export type AgentMode = 'terminal' | 'chat' | 'terminal+chat' | 'terminal+chatRO';
+
+export interface AgentDescriptor {
+  agentType: string;
+  name: string;
+  mode: AgentMode;
+  iconUrl: string;
+}
+
 export interface Environment {
   id: string;
   name: string;
@@ -12,6 +21,8 @@ export interface Session {
   messages: ChatMessage[];
   lastMessage: string;
   viewMode: 'chat' | 'tui';
+  agentType?: string;
+  agentMode?: AgentMode;
   permissionMode: string | null;
   model: string | null;
   showVerbose?: boolean;

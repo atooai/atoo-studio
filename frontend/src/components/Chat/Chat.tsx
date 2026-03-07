@@ -30,11 +30,13 @@ export function ChatArea() {
     return null; // Terminal view handled elsewhere
   }
 
+  const chatReadOnly = session.agentMode === 'terminal+chatRO';
+
   return (
     <>
       <ChatMessages session={session} />
-      <AttachmentsBar />
-      <ChatInputBar session={session} proj={proj} />
+      {!chatReadOnly && <AttachmentsBar />}
+      {!chatReadOnly && <ChatInputBar session={session} proj={proj} />}
       <ChatStatusBar session={session} />
     </>
   );

@@ -104,14 +104,28 @@ function CenterTabs({ proj }: { proj: any }) {
 }
 
 function ViewToggle({ session, proj }: { session: any; proj: any }) {
+  const mode = session.agentMode || 'terminal+chat';
+  const hasChat = mode === 'chat' || mode === 'terminal+chat' || mode === 'terminal+chatRO';
+  const hasTerminal = mode === 'terminal' || mode === 'terminal+chat' || mode === 'terminal+chatRO';
+  const chatReadOnly = mode === 'terminal+chatRO';
+  const hasVerbose = mode === 'terminal+chat' || mode === 'terminal+chatRO';
+
   return (
     <div className="session-view-toggle">
-      <button className={`svt-btn ${session.viewMode === 'chat' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('chat')}><span className="svt-icon">◉</span> Chat</button>
-      <button className={`svt-btn ${session.viewMode === 'tui' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('tui')}><span className="svt-icon">›_</span> Terminal</button>
+      {hasTerminal && (
+        <button className={`svt-btn ${session.viewMode === 'tui' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('tui')}><span className="svt-icon">›_</span> Terminal</button>
+      )}
+      {hasChat && (
+        <button className={`svt-btn ${session.viewMode === 'chat' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('chat')}>
+          <span className="svt-icon">◉</span> Chat{chatReadOnly ? ' readonly' : ''}
+        </button>
+      )}
       <div style={{ flex: 1 }}></div>
-      <button className={`svt-filter-btn ${session.showVerbose !== false ? 'active' : ''}`} onClick={() => (window as any).toggleVerbose()} title="Show/hide tool calls and intermediate messages">
-        <span className="svt-filter-icon">⚡</span> Verbose
-      </button>
+      {hasVerbose && (
+        <button className={`svt-filter-btn ${session.showVerbose !== false ? 'active' : ''}`} onClick={() => (window as any).toggleVerbose()} title="Show/hide tool calls and intermediate messages">
+          <span className="svt-filter-icon">⚡</span> Verbose
+        </button>
+      )}
     </div>
   );
 }

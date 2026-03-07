@@ -1,10 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { fileURLToPath } from 'url';
-import { WEB_PORT } from '../config.js';
+import { WEB_PORT, PROJECT_ROOT } from '../config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_DIR = path.join(os.homedir(), '.ccproxy');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config.json');
 
@@ -24,7 +22,8 @@ export const MCP_SYSTEM_PROMPT = [
 export function getMcpConfigPath(): string {
   if (cachedPath) return cachedPath;
 
-  const serverScript = path.resolve(__dirname, '..', 'mcp', 'server.js');
+  // Always point to the compiled MCP server
+  const serverScript = path.join(PROJECT_ROOT, 'dist', 'src', 'mcp', 'server.js');
 
   const config = {
     mcpServers: {

@@ -13,6 +13,7 @@ import { fsMonitor } from './fs-monitor.js';
 import { vccDb } from './state/db.js';
 import { agentRegistry } from './agents/registry.js';
 import { ClaudeCodeAgentFactory } from './agents/claude-code/index.js';
+import { ClaudeCodeTerminalAgentFactory } from './agents/claude-code-terminal/index.js';
 import { sshManager } from './services/ssh-manager.js';
 import { previewManager } from './services/preview-manager.js';
 
@@ -29,6 +30,7 @@ async function main() {
 
   // 2b. Register agent factories
   agentRegistry.registerFactory(new ClaudeCodeAgentFactory());
+  agentRegistry.registerFactory(new ClaudeCodeTerminalAgentFactory());
 
   // 3. Create the internal API app (handles decrypted Anthropic traffic)
   const apiApp = createApiApp();

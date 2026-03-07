@@ -1,6 +1,6 @@
 import type WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AbstractMessage, AgentStatus, HistoricalSession } from './types.js';
+import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AbstractMessage, AgentStatus, AgentDescriptor, HistoricalSession } from './types.js';
 import { store } from '../state/store.js';
 
 interface AgentEntry {
@@ -110,15 +110,30 @@ class AgentRegistry {
     entry.browserClients.delete(ws);
   }
 
+  getAvailableAgents(): AgentDescriptor[] {
+    const descriptors: AgentDescriptor[] = [];
+    for (const factory of this.factories.values()) {
+      descriptors.push(factory.getDescriptor());
+    }
+    return descriptors;
+  }
+
   async getHistoricalSessions(): Promise<HistoricalSession[]> {
     const allSessions: HistoricalSession[] = [];
     for (const factory of this.factories.values()) {
       const sessions = await factory.getHistoricalSessions();
       allSessions.push(...sessions);
     }
+    // Deduplicate by session ID (multiple factories may share the same scanner)
+    const seen = new Set<string>();
+    const unique = allSessions.filter(s => {
+      if (seen.has(s.id)) return false;
+      seen.add(s.id);
+      return true;
+    });
     // Sort by date descending (most recent first)
-    allSessions.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
-    return allSessions;
+    unique.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+    return unique;
   }
 
   async resumeAgent(sessionUuid: string, options: { cwd?: string; skipPermissions?: boolean } = {}): Promise<Agent> {

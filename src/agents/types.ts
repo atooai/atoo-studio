@@ -132,6 +132,23 @@ export type AbstractMessage =
 export type AgentStatus = 'initializing' | 'idle' | 'active' | 'waiting' | 'error' | 'exited';
 
 // ═══════════════════════════════════════════════════════
+// Agent UI Mode
+// ═══════════════════════════════════════════════════════
+
+export type AgentMode = 'terminal' | 'chat' | 'terminal+chat' | 'terminal+chatRO';
+
+// ═══════════════════════════════════════════════════════
+// Agent Descriptor (metadata exposed by factories)
+// ═══════════════════════════════════════════════════════
+
+export interface AgentDescriptor {
+  agentType: string;
+  name: string;
+  mode: AgentMode;
+  iconUrl: string;
+}
+
+// ═══════════════════════════════════════════════════════
 // Agent Capabilities
 // ═══════════════════════════════════════════════════════
 
@@ -154,6 +171,7 @@ export interface AgentCapabilities {
 export interface AgentSessionInfo {
   sessionId: string;
   agentType: string;
+  agentMode: AgentMode;
   status: AgentStatus;
   mode?: string;
   model?: string;
@@ -223,6 +241,7 @@ export interface HistoricalSession {
 export interface AgentFactory {
   agentType: string;
   create(sessionId: string): Agent;
+  getDescriptor(): AgentDescriptor;
   getHistoricalSessions(): Promise<HistoricalSession[]>;
   ownsSession(uuid: string): Promise<boolean>;
 }

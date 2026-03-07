@@ -9,7 +9,8 @@ import { fileURLToPath } from 'url';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
-import { spawnCliProcess, spawnForkedCliProcess, spawnRemoteCliProcess, getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback, killCliProcess } from '../spawner.js';
+import { getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback, killCliProcess } from '../spawner.js';
+import { spawnCliProcess, spawnForkedCliProcess, spawnRemoteCliProcess } from '../agents/claude-code/spawner.js';
 import { vccDb } from '../state/db.js';
 import { fsMonitor } from '../fs-monitor.js';
 import { changesRouter } from '../handlers/changes.js';
@@ -23,7 +24,7 @@ import { isPreviewWsUpgrade, handlePreviewWsUpgrade } from './preview-ws.js';
 import { devtoolsProxyMiddleware, isDevtoolsWsUpgrade, handleDevtoolsWsUpgrade } from './devtools-proxy.js';
 import { sendContextAndRewind } from '../agents/claude-code/pty-actions.js';
 import forge from 'node-forge';
-import { CA_CERT_PATH, CA_KEY_PATH } from '../config.js';
+import { CA_CERT_PATH, CA_KEY_PATH, PROJECT_ROOT } from '../config.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -790,6 +791,11 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     res.json(agentRegistry.listAgents());
   });
 
+  // Available agent types (for agent picker UI)
+  app.get('/api/available-agents', (_req, res) => {
+    res.json(agentRegistry.getAvailableAgents());
+  });
+
   // Historical sessions from all agent implementations
   app.get('/api/historical-sessions', async (_req, res) => {
     try {
@@ -820,8 +826,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   });
 
   // Serve frontend static files (production)
-  // Works for both tsx (src/web/) and compiled (dist/src/web/) by finding the project root
-  const projectRoot = path.resolve(__dirname, __dirname.includes('/dist/src/') ? '../../..' : '../..');
+  const projectRoot = PROJECT_ROOT;
   const frontendDist = path.join(projectRoot, 'frontend', 'dist');
   app.use(express.static(frontendDist));
   app.get('*', (req, res, next) => {

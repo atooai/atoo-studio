@@ -1,12 +1,13 @@
 import puppeteer, { Browser, Page, CDPSession } from 'puppeteer';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
+import net from 'net';
 import { CDP_PORT_START, CDP_PORT_END } from '../config.js';
 import { WebSocket } from 'ws';
 
 const CHROME_PATH = '/home/furti/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome';
 const FFMPEG_PATH = '/usr/bin/ffmpeg';
 const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-const CLEANUP_INTERVAL = 60 * 1000; // 60 seconds
+const CLEANUP_INTERVAL = 10 * 1000; // 10 seconds (also serves as screencast watchdog)
 
 export interface PreviewInstance {
   id: string;
@@ -30,6 +31,7 @@ export interface PreviewInstance {
   lastActivity: number;
   recording: boolean;
   recordedFrames: { data: Buffer; timestamp: number }[];
+  lastFrameTime: number;
 }
 
 export interface CreatePreviewOpts {
@@ -51,16 +53,44 @@ class PreviewManager {
 
   constructor() {
     this.cleanupTimer = setInterval(() => this.cleanupInactive(), CLEANUP_INTERVAL);
+    this.killOrphanedChromes();
   }
 
-  private allocateCdpPort(): number {
+  // Kill any Chrome processes from a previous ccproxy run that are still using our CDP port range
+  private killOrphanedChromes() {
     for (let port = CDP_PORT_START; port <= CDP_PORT_END; port++) {
-      if (!this.usedPorts.has(port)) {
+      try {
+        const result = execSync(
+          `lsof -ti tcp:${port} -s tcp:listen 2>/dev/null || true`,
+          { encoding: 'utf-8' }
+        ).trim();
+        if (result) {
+          for (const pid of result.split('\n').filter(Boolean)) {
+            console.log(`[preview] Killing orphaned process on CDP port ${port} (PID ${pid})`);
+            try { process.kill(parseInt(pid, 10), 'SIGKILL'); } catch {}
+          }
+        }
+      } catch {}
+    }
+  }
+
+  private async allocateCdpPort(): Promise<number> {
+    for (let port = CDP_PORT_START; port <= CDP_PORT_END; port++) {
+      if (!this.usedPorts.has(port) && await this.isPortFree(port)) {
         this.usedPorts.add(port);
         return port;
       }
     }
     throw new Error('No available CDP ports');
+  }
+
+  private isPortFree(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const server = net.createServer();
+      server.once('error', () => resolve(false));
+      server.once('listening', () => { server.close(() => resolve(true)); });
+      server.listen(port, '127.0.0.1');
+    });
   }
 
   private releaseCdpPort(port: number) {
@@ -83,7 +113,7 @@ class PreviewManager {
       await this.destroy(projectId, tabId);
     }
 
-    const cdpPort = this.allocateCdpPort();
+    const cdpPort = await this.allocateCdpPort();
     const width = opts.width || 1920;
     const height = opts.height || 1080;
     const dpr = opts.dpr || 1;
@@ -144,6 +174,7 @@ class PreviewManager {
         lastActivity: Date.now(),
         recording: false,
         recordedFrames: [],
+        lastFrameTime: Date.now(),
       };
 
       this.instances.set(key, instance);
@@ -193,9 +224,13 @@ class PreviewManager {
   private async startScreencast(instance: PreviewInstance) {
     if (instance.screencastActive) return;
 
+    // Remove any stale listeners before adding new one
+    instance.cdpSession.removeAllListeners('Page.screencastFrame');
+
     instance.cdpSession.on('Page.screencastFrame', (frame: any) => {
       instance.cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
       instance.lastActivity = Date.now();
+      instance.lastFrameTime = Date.now();
 
       // Send as binary: 0x01 prefix + raw JPEG bytes
       const jpegBuf = Buffer.from(frame.data, 'base64');
@@ -224,6 +259,7 @@ class PreviewManager {
     });
 
     instance.screencastActive = true;
+    instance.lastFrameTime = Date.now();
   }
 
   private async stopScreencast(instance: PreviewInstance) {
@@ -434,6 +470,12 @@ class PreviewManager {
         const [projectId, tabId] = key.split('/');
         console.log(`[preview] Cleaning up inactive instance ${key}`);
         this.destroy(projectId, tabId);
+        continue;
+      }
+      // Watchdog: restart screencast if no frames received for 5s and there are active clients
+      if (instance.wsClients.size > 0 && instance.screencastActive && now - instance.lastFrameTime > 5000) {
+        console.log(`[preview] Screencast stalled for ${key}, restarting...`);
+        this.stopScreencast(instance).then(() => this.startScreencast(instance)).catch(() => {});
       }
     }
   }
