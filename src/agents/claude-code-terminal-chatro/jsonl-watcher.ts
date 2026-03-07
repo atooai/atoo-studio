@@ -8,7 +8,7 @@ import path from 'path';
 import os from 'os';
 
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
-const DISCOVERY_TIMEOUT = 15_000;
+const DISCOVERY_TIMEOUT = 5_000;
 const DEBOUNCE_MS = 50;
 
 /**
@@ -40,14 +40,28 @@ export class JsonlWatcher extends EventEmitter {
     this.dirPath = path.join(CLAUDE_PROJECTS_DIR, cwdToDirHash(this.cwd));
   }
 
+  /**
+   * Phase 1: Snapshot existing JSONL files BEFORE the CLI is spawned.
+   * Must be called before the PTY spawn to avoid a race where the CLI
+   * creates its file before we record what was already there.
+   */
+  snapshot(): void {
+    if (this.resumeUuid) return; // resume doesn't need a snapshot
+    this.snapshotExisting();
+    console.log(`[jsonl-watcher] Snapshot: ${this.preExistingFiles.size} existing JSONL files in ${this.dirPath}`);
+  }
+
+  /**
+   * Phase 2: Begin watching for a new file (or the known resume file).
+   * Called AFTER the PTY spawn.
+   */
   async start(): Promise<void> {
     if (this.resumeUuid) {
       // Known UUID — wait for that specific file
       this.targetPath = path.join(this.dirPath, `${this.resumeUuid}.jsonl`);
       this.waitForFile(this.targetPath);
     } else {
-      // Snapshot existing files, then watch for a new one
-      this.snapshotExisting();
+      // Watch for a new file that wasn't in the snapshot
       this.watchForNewFile();
     }
   }
@@ -139,10 +153,13 @@ export class JsonlWatcher extends EventEmitter {
         return;
       }
 
-      // Find the most recently modified file that wasn't pre-existing
-      // (or fall back to most recent overall)
+      // Prefer files NOT in the pre-existing snapshot (i.e., created after we started)
+      const newFiles = files.filter(f => !this.preExistingFiles.has(f));
+      const candidates = newFiles.length > 0 ? newFiles : files;
+
+      // Pick the most recently modified
       let best: { name: string; mtime: number } | null = null;
-      for (const f of files) {
+      for (const f of candidates) {
         try {
           const stat = fs.statSync(path.join(this.dirPath, f));
           if (!best || stat.mtimeMs > best.mtime) {
@@ -154,7 +171,7 @@ export class JsonlWatcher extends EventEmitter {
       if (best) {
         this.targetPath = path.join(this.dirPath, best.name);
         if (this.dirWatcher) { this.dirWatcher.close(); this.dirWatcher = null; }
-        console.log(`[jsonl-watcher] Fallback: using most recent file: ${best.name}`);
+        console.log(`[jsonl-watcher] Fallback: using ${newFiles.length > 0 ? 'new' : 'most recent'} file: ${best.name}`);
         this.startTailing();
       }
     } catch {}

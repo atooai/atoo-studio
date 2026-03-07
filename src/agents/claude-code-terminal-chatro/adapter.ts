@@ -46,18 +46,14 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     }
 
     try {
-      // Spawn terminal PTY (reuse terminal agent's spawner)
-      this.envId = spawnTerminalCliProcess({
-        skipPermissions: options.skipPermissions,
-        cwd: this.cwd,
-        resumeSessionUuid: options.resumeSessionUuid,
-      });
-
-      // Start watching JSONL session file
+      // Create watcher and snapshot existing files BEFORE spawning the PTY
+      // to avoid a race where the CLI creates its JSONL file before we record
+      // what was already there.
       this.jsonlWatcher = new JsonlWatcher({
         cwd: this.cwd,
         resumeUuid: options.resumeSessionUuid,
       });
+      this.jsonlWatcher.snapshot();
 
       this.jsonlWatcher.on('event', (event: any) => {
         this.handleJsonlEvent(event);
@@ -67,7 +63,14 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
         console.error(`[terminal-chatro] JSONL watcher error:`, err.message);
       });
 
-      // Start watcher (async discovery, doesn't block)
+      // Now spawn the terminal PTY
+      this.envId = spawnTerminalCliProcess({
+        skipPermissions: options.skipPermissions,
+        cwd: this.cwd,
+        resumeSessionUuid: options.resumeSessionUuid,
+      });
+
+      // Start watching for the new file (async discovery, doesn't block)
       this.jsonlWatcher.start().catch((err: Error) => {
         console.error(`[terminal-chatro] JSONL watcher start error:`, err.message);
       });
