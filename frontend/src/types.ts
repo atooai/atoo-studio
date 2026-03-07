@@ -58,6 +58,8 @@ export interface ChatMessage {
   _responded?: boolean;
   _response?: string;
   _attachments?: Attachment[];
+  _sidechain?: boolean;
+  _parentToolUseId?: string;
 }
 
 export interface FilteredMessage extends ChatMessage {

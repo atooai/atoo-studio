@@ -246,13 +246,14 @@ function UserQuestion({ m, session, input, isResponded }: { m: FilteredMessage; 
   const questions = input.questions || [];
   const uuid = m._eventUuid || '';
   const answers = questionAnswers[uuid] || {};
+  const isReadOnly = session.agentMode === 'terminal+chatRO';
 
-  if (isResponded) {
+  if (isResponded || isReadOnly) {
     return (
       <div className="chat-question-answered">
         {questions.map((q: any, i: number) => {
           const header = q.header || 'Q';
-          const answer = answers[q.question] || 'Answered';
+          const answer = answers[q.question] || (isReadOnly ? 'Pending' : 'Answered');
           return (
             <span key={i}>
               <span className="chat-question-answered-header">{escapeHtml(header)}: </span>
@@ -351,6 +352,8 @@ function QuestionItem({ q, uuid, sessionId, answers }: { q: any; uuid: string; s
 }
 
 function PlanApproval({ m, session, plan, isResponded }: { m: FilteredMessage; session: Session; plan: string; isResponded: boolean }) {
+  const isReadOnly = session.agentMode === 'terminal+chatRO';
+
   if (isResponded) {
     const approved = m._response === 'approved';
     return (
@@ -364,16 +367,19 @@ function PlanApproval({ m, session, plan, isResponded }: { m: FilteredMessage; s
     <div className="chat-plan-approval">
       <div className="chat-plan-header">Plan Approval</div>
       <div className="chat-plan-content" dangerouslySetInnerHTML={{ __html: renderMd(plan) }} />
-      <div className="chat-plan-buttons">
-        <button className="chat-plan-approve" onClick={() => (window as any).approveControl(session.id)}>Approve Plan</button>
-        <button className="chat-plan-deny" onClick={() => (window as any).denyControl(session.id)}>Deny</button>
-      </div>
+      {!isReadOnly && (
+        <div className="chat-plan-buttons">
+          <button className="chat-plan-approve" onClick={() => (window as any).approveControl(session.id)}>Approve Plan</button>
+          <button className="chat-plan-deny" onClick={() => (window as any).denyControl(session.id)}>Deny</button>
+        </div>
+      )}
     </div>
   );
 }
 
 function ToolApproval({ m, session, toolName, input }: { m: FilteredMessage; session: Session; toolName: string; input: any }) {
   const isBash = toolName === 'Bash';
+  const isReadOnly = session.agentMode === 'terminal+chatRO';
 
   return (
     <div className="chat-tool-approval">
@@ -386,10 +392,12 @@ function ToolApproval({ m, session, toolName, input }: { m: FilteredMessage; ses
       ) : (
         <GenericApprovalContent toolName={toolName} input={input} />
       )}
-      <div className="chat-tool-approval-buttons">
-        <button className="chat-tool-approval-allow" onClick={() => (window as any).approveControl(session.id)}>Allow</button>
-        <button className="chat-tool-approval-deny" onClick={() => (window as any).denyControl(session.id)}>Deny</button>
-      </div>
+      {!isReadOnly && (
+        <div className="chat-tool-approval-buttons">
+          <button className="chat-tool-approval-allow" onClick={() => (window as any).approveControl(session.id)}>Allow</button>
+          <button className="chat-tool-approval-deny" onClick={() => (window as any).denyControl(session.id)}>Deny</button>
+        </div>
+      )}
     </div>
   );
 }

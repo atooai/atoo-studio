@@ -37,7 +37,7 @@ export function ChatArea() {
       <ChatMessages session={session} />
       {!chatReadOnly && <AttachmentsBar />}
       {!chatReadOnly && <ChatInputBar session={session} proj={proj} />}
-      <ChatStatusBar session={session} />
+      {!chatReadOnly && <ChatStatusBar session={session} />}
     </>
   );
 }
@@ -53,13 +53,48 @@ function ChatMessages({ session }: { session: Session }) {
     }
   }, [filtered.length, session.status]);
 
+  // Group consecutive sidechain messages for rendering
+  const renderItems: React.ReactNode[] = [];
+  let i = 0;
+  while (i < filtered.length) {
+    const m = filtered[i];
+    if (m._parentToolUseId) {
+      // Collect consecutive messages with the same parentToolUseId
+      const parentId = m._parentToolUseId;
+      const group: typeof filtered = [];
+      while (i < filtered.length && filtered[i]._parentToolUseId === parentId) {
+        group.push(filtered[i]);
+        i++;
+      }
+      renderItems.push(
+        <SubagentGroup key={`sg-${parentId}`} messages={group} session={session} />
+      );
+    } else {
+      renderItems.push(
+        <ChatMessageItem key={m._eventUuid || i} m={m} fi={i} session={session} />
+      );
+      i++;
+    }
+  }
+
   return (
     <div className="chat-area" ref={areaRef}>
-      {filtered.map((m, fi) => (
-        <ChatMessageItem key={m._eventUuid || fi} m={m} fi={fi} session={session} />
-      ))}
+      {renderItems}
       <StatusLine session={session} />
     </div>
+  );
+}
+
+function SubagentGroup({ messages, session }: { messages: any[]; session: Session }) {
+  return (
+    <details className="chat-subagent-group" open>
+      <summary className="chat-subagent-header">Subagent ({messages.length} messages)</summary>
+      <div className="chat-subagent-messages">
+        {messages.map((m, i) => (
+          <ChatMessageItem key={m._eventUuid || i} m={m} fi={i} session={session} />
+        ))}
+      </div>
+    </details>
   );
 }
 

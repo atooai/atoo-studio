@@ -402,6 +402,13 @@ function handleAgentMessage(sessionId: string, msg: any) {
 
     console.log('[agent]', msg.type, JSON.stringify(msg).substring(0, 300));
 
+    // Extract sidechain metadata if present
+    const sidechainMeta: any = {};
+    if (msg._sidechain) {
+      sidechainMeta._sidechain = true;
+      sidechainMeta._parentToolUseId = msg._parentToolUseId;
+    }
+
     if (msg.type === 'agent_info') {
       sess._agentInfo = msg;
       if (msg.mode) sess.permissionMode = msg.mode;
@@ -521,6 +528,13 @@ function handleAgentMessage(sessionId: string, msg: any) {
       return proj;
     } else {
       return proj;
+    }
+
+    // Tag sidechain metadata on any newly pushed messages
+    if (sidechainMeta._sidechain && sess.messages.length > proj.sessions[sessIdx].messages.length) {
+      for (let mi = proj.sessions[sessIdx].messages.length; mi < sess.messages.length; mi++) {
+        sess.messages[mi] = { ...sess.messages[mi], ...sidechainMeta };
+      }
     }
 
     // Update title from first user message
