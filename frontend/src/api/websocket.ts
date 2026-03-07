@@ -229,6 +229,16 @@ function handleStatusMessage(msg: any) {
     for (const s of msg.services) {
       store.addToast(projName, `Started ${s.protocol} service "${s.name}" on port ${s.port}`, 'info');
     }
+    store.addReportedServices(msg.services.map((s: any) => ({
+      name: s.name,
+      description: s.description,
+      port: s.port,
+      protocol: s.protocol,
+      host: s.host,
+      cwd: msg.cwd,
+      projectName: projName,
+      reportedAt: Date.now(),
+    })));
     // Auto-manage preview tabs for http/https/ws/wss services
     if (store.previewVisible) {
       const httpServices = msg.services.filter((s: any) =>

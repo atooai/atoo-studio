@@ -5,6 +5,7 @@ import { escapeHtml } from '../../utils';
 export function TopBar() {
   const {
     activeProjectId, projects, environments, activeEnvironmentId,
+    setModal, reportedServices, serialRequests,
   } = useStore();
 
   const proj = projects.find(p => p.id === activeProjectId);
@@ -18,6 +19,9 @@ export function TopBar() {
       <div className="topbar-spacer"></div>
       <div className="topbar-actions">
         <EnvSelector />
+        <button className="topbar-btn" onClick={() => setModal({ type: 'forwarded-connections' })} title="View forwarded TCP services and serial devices">
+          ⇌ Connections{(reportedServices.length + serialRequests.length) > 0 ? ` (${reportedServices.length + serialRequests.length})` : ''}
+        </button>
         <button className="topbar-btn" onClick={() => (window as any).togglePreviewPanel()} title="Toggle app preview panel">⬒ Preview</button>
         <button className="topbar-btn" onClick={() => (window as any).newSession()} title="Start new Claude session">+ New Session</button>
         <button className="topbar-btn" onClick={() => (window as any).showOverview()}>◫ Overview</button>

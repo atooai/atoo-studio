@@ -208,6 +208,17 @@ export interface SerialRequest {
   error?: string;
 }
 
+export interface ReportedService {
+  name: string;
+  description: string;
+  port: number;
+  protocol: string;
+  host?: string;
+  cwd?: string;
+  projectName?: string;
+  reportedAt: number;
+}
+
 export interface PreviewTab {
   id: string;
   label: string;

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment, SerialRequest } from '../types';
+import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment, SerialRequest, ReportedService } from '../types';
 
 export interface AppState {
   // Environment state
@@ -40,6 +40,9 @@ export interface AppState {
 
   // Serial device passthrough
   serialRequests: SerialRequest[];
+
+  // Reported TCP services
+  reportedServices: ReportedService[];
 
   // Chat attachments
   chatAttachments: ChatAttachment[];
@@ -92,6 +95,8 @@ export interface AppState {
   setPreviewDpr: (d: number) => void;
   setPreviewIsMobile: (v: boolean) => void;
   setPreviewHasTouch: (v: boolean) => void;
+  addReportedServices: (services: ReportedService[]) => void;
+  removeReportedService: (port: number) => void;
   addSerialRequest: (req: SerialRequest) => void;
   updateSerialRequest: (requestId: string, updates: Partial<SerialRequest>) => void;
   removeSerialRequest: (requestId: string) => void;
@@ -132,6 +137,7 @@ export const useStore = create<AppState>((set, get) => ({
   activeFileIdx: -1,
   monacoReady: false,
   serialRequests: [],
+  reportedServices: [],
   previewTabs: [],
   previewActiveIdx: 0,
   previewResponsive: false,
@@ -196,6 +202,13 @@ export const useStore = create<AppState>((set, get) => ({
   setPreviewDpr: (d) => set({ previewDpr: d }),
   setPreviewIsMobile: (v) => set({ previewIsMobile: v }),
   setPreviewHasTouch: (v) => set({ previewHasTouch: v }),
+  addReportedServices: (services) => set((s) => {
+    const existing = s.reportedServices.filter((e) => !services.some((n) => n.port === e.port));
+    return { reportedServices: [...existing, ...services] };
+  }),
+  removeReportedService: (port) => set((s) => ({
+    reportedServices: s.reportedServices.filter((r) => r.port !== port),
+  })),
   addSerialRequest: (req) => set((s) => ({ serialRequests: [...s.serialRequests, req] })),
   updateSerialRequest: (requestId, updates) => set((s) => ({
     serialRequests: s.serialRequests.map((r) => r.requestId === requestId ? { ...r, ...updates } : r),
