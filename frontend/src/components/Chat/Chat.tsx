@@ -4,7 +4,7 @@ import { filterMessages, classifyFile, getAttachIcon, escapeHtml } from '../../u
 import { ChatMessageItem } from './ChatMessage';
 import { api } from '../../api';
 import { sendAgentCommand } from '../../api/websocket';
-import type { Session, ChatAttachment } from '../../types';
+import type { Session, ChatAttachment, FilteredMessage } from '../../types';
 
 export function ChatArea() {
   const { activeProjectId, projects, activeTabType } = useStore();
@@ -59,15 +59,16 @@ function ChatMessages({ session }: { session: Session }) {
   while (i < filtered.length) {
     const m = filtered[i];
     if (m._parentToolUseId) {
-      // Collect consecutive messages with the same parentToolUseId
+      // Collect ALL messages with the same parentToolUseId (consecutive run)
       const parentId = m._parentToolUseId;
-      const group: typeof filtered = [];
+      const agentId = m._agentId;
+      const group: FilteredMessage[] = [];
       while (i < filtered.length && filtered[i]._parentToolUseId === parentId) {
         group.push(filtered[i]);
         i++;
       }
       renderItems.push(
-        <SubagentGroup key={`sg-${parentId}`} messages={group} session={session} />
+        <SubagentGroup key={`sg-${parentId}`} messages={group} session={session} agentId={agentId} />
       );
     } else {
       renderItems.push(
@@ -85,16 +86,44 @@ function ChatMessages({ session }: { session: Session }) {
   );
 }
 
-function SubagentGroup({ messages, session }: { messages: any[]; session: Session }) {
+function SubagentGroup({ messages, session, agentId }: { messages: FilteredMessage[]; session: Session; agentId?: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Derive a summary: count tool calls and find the last assistant message
+  const toolCount = messages.filter(m => m.role === 'tool').length;
+  const assistantMsgs = messages.filter(m => m.role === 'assistant');
+  const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
+  const summaryText = lastAssistant
+    ? lastAssistant.content.length > 120 ? lastAssistant.content.substring(0, 120) + '...' : lastAssistant.content
+    : '';
+
+  // Determine label from agentId prefix or fallback
+  const label = agentId ? `Agent ${agentId.substring(0, 8)}` : 'Subagent';
+
   return (
-    <details className="chat-subagent-group" open>
-      <summary className="chat-subagent-header">Subagent ({messages.length} messages)</summary>
-      <div className="chat-subagent-messages">
-        {messages.map((m, i) => (
-          <ChatMessageItem key={m._eventUuid || i} m={m} fi={i} session={session} />
-        ))}
+    <div className="chat-msg assistant">
+      <div className="chat-avatar claude">A</div>
+      <div className="chat-subagent-bubble">
+        <div className="chat-subagent-header" onClick={() => setExpanded(!expanded)}>
+          <span className={`chat-subagent-chevron ${expanded ? 'expanded' : ''}`}>▶</span>
+          <span className="chat-subagent-label">{label}</span>
+          <span className="chat-subagent-stats">
+            {toolCount > 0 && <span className="chat-subagent-stat">{toolCount} tool call{toolCount !== 1 ? 's' : ''}</span>}
+            <span className="chat-subagent-stat">{messages.length} msg{messages.length !== 1 ? 's' : ''}</span>
+          </span>
+        </div>
+        {!expanded && summaryText && (
+          <div className="chat-subagent-summary">{escapeHtml(summaryText)}</div>
+        )}
+        {expanded && (
+          <div className="chat-subagent-messages">
+            {messages.map((m, i) => (
+              <ChatMessageItem key={m._eventUuid || i} m={m} fi={i} session={session} />
+            ))}
+          </div>
+        )}
       </div>
-    </details>
+    </div>
   );
 }
 

@@ -3101,23 +3101,88 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   font-size: 10px;
   font-weight: 600;
 }
-/* Subagent group (read-only chat) */
-.chat-subagent-group {
-  margin-left: 20px;
-  border-left: 2px solid var(--border-subtle, #444);
-  padding-left: 12px;
-  margin-bottom: 8px;
-  margin-top: 4px;
+/* Subagent group bubble */
+.chat-subagent-bubble {
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border-subtle, #333);
+  border-radius: 10px;
+  padding: 8px 12px;
+  max-width: 85%;
+  min-width: 200px;
 }
 .chat-subagent-header {
-  font-size: 12px;
-  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
+  user-select: none;
   padding: 2px 0;
+}
+.chat-subagent-header:hover {
+  opacity: 0.85;
+}
+.chat-subagent-chevron {
+  font-size: 9px;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+.chat-subagent-chevron.expanded {
+  transform: rotate(90deg);
+}
+.chat-subagent-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-blue, #7ab3f0);
   font-family: var(--font-mono);
 }
+.chat-subagent-stats {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.chat-subagent-stat {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  background: var(--bg-tertiary, #2a2a3a);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.chat-subagent-summary {
+  font-size: 12px;
+  color: var(--text-secondary, #aaa);
+  margin-top: 6px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-subagent-messages {
-  padding-top: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle, #333);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chat-subagent-messages .chat-msg {
+  padding: 2px 0;
+}
+.chat-subagent-messages .chat-avatar {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  font-size: 9px;
+}
+.chat-subagent-messages .chat-bubble {
+  font-size: 12px;
+}
+.chat-subagent-messages .chat-tool-use {
+  font-size: 11px;
+}
+.chat-subagent-messages .chat-thinking {
+  font-size: 11px;
 }
 
 /* TUI collapsed block */

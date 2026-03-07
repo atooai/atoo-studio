@@ -60,6 +60,7 @@ export interface ChatMessage {
   _attachments?: Attachment[];
   _sidechain?: boolean;
   _parentToolUseId?: string;
+  _agentId?: string;
 }
 
 export interface FilteredMessage extends ChatMessage {

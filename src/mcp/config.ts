@@ -1,10 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { WEB_PORT, PROJECT_ROOT } from '../config.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.ccproxy');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config.json');
+
+// Detect dev mode: when running via tsx, __filename is in src/; when compiled, it's in dist/src/
+const __mcp_config_dir = path.dirname(fileURLToPath(import.meta.url));
+const IS_DEV = !__mcp_config_dir.includes('/dist/src');
 
 let cachedPath: string | null = null;
 
@@ -26,13 +31,17 @@ export const MCP_SYSTEM_PROMPT = [
 export function getMcpConfigPath(): string {
   if (cachedPath) return cachedPath;
 
-  // Always point to the compiled MCP server
-  const serverScript = path.join(PROJECT_ROOT, 'dist', 'src', 'mcp', 'server.js');
+  // In dev mode (tsx), run MCP server from source via tsx so no build step is needed.
+  // In production (compiled), run from dist/ via node.
+  const command = IS_DEV ? 'tsx' : 'node';
+  const serverScript = IS_DEV
+    ? path.join(PROJECT_ROOT, 'src', 'mcp', 'server.ts')
+    : path.join(PROJECT_ROOT, 'dist', 'src', 'mcp', 'server.js');
 
   const config = {
     mcpServers: {
       ccproxy: {
-        command: 'node',
+        command,
         args: [serverScript],
         env: {
           CCPROXY_WEB_PORT: String(WEB_PORT),
@@ -45,7 +54,7 @@ export function getMcpConfigPath(): string {
 
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
-  console.log(`[mcp] Wrote MCP config to ${CONFIG_PATH}`);
+  console.log(`[mcp] Wrote MCP config to ${CONFIG_PATH} (${IS_DEV ? 'dev' : 'production'} mode)`);
 
   cachedPath = CONFIG_PATH;
   return CONFIG_PATH;

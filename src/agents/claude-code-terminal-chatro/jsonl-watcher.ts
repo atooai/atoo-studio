@@ -1,6 +1,7 @@
 /**
  * JSONL session file discovery and tailing.
  * Watches Claude CLI's session JSONL files for new events in real-time.
+ * Also discovers and tails subagent JSONL files from progress events.
  */
 import { EventEmitter } from 'events';
 import fs from 'fs';
@@ -19,11 +20,26 @@ function cwdToDirHash(cwd: string): string {
   return cwd.replace(/\//g, '-');
 }
 
+export interface SubagentMetadata {
+  sidechain: true;
+  parentToolUseID: string;
+  agentId: string;
+}
+
+interface SubagentTailer {
+  filePath: string;
+  lastReadOffset: number;
+  lineBuffer: string;
+  fileWatcher: fs.FSWatcher | null;
+  debounceTimer: ReturnType<typeof setTimeout> | null;
+}
+
 export class JsonlWatcher extends EventEmitter {
   private cwd: string;
   private resumeUuid?: string;
   private dirPath: string;
   private targetPath: string | null = null;
+  private sessionUuid: string | null = null;
   private lastReadOffset = 0;
   private lineBuffer = '';
   private dirWatcher: fs.FSWatcher | null = null;
@@ -32,6 +48,11 @@ export class JsonlWatcher extends EventEmitter {
   private discoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   private preExistingFiles = new Set<string>();
+
+  /** Active subagent tailers keyed by agentId */
+  private subagentTailers = new Map<string, SubagentTailer>();
+  /** Maps agentId → parentToolUseID from the progress event that spawned it */
+  private subagentParents = new Map<string, string>();
 
   constructor(options: { cwd: string; resumeUuid?: string }) {
     super();
@@ -59,11 +80,17 @@ export class JsonlWatcher extends EventEmitter {
     if (this.resumeUuid) {
       // Known UUID — wait for that specific file
       this.targetPath = path.join(this.dirPath, `${this.resumeUuid}.jsonl`);
+      this.sessionUuid = this.resumeUuid;
       this.waitForFile(this.targetPath);
     } else {
       // Watch for a new file that wasn't in the snapshot
       this.watchForNewFile();
     }
+  }
+
+  /** Set of agentIds currently being tailed (for adapter to check) */
+  get tailedAgentIds(): ReadonlySet<string> {
+    return new Set(this.subagentTailers.keys());
   }
 
   stop(): void {
@@ -72,6 +99,15 @@ export class JsonlWatcher extends EventEmitter {
     if (this.fileWatcher) { this.fileWatcher.close(); this.fileWatcher = null; }
     if (this.debounceTimer) { clearTimeout(this.debounceTimer); this.debounceTimer = null; }
     if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
+
+    // Stop all subagent tailers
+    for (const [agentId, tailer] of this.subagentTailers) {
+      if (tailer.fileWatcher) tailer.fileWatcher.close();
+      if (tailer.debounceTimer) clearTimeout(tailer.debounceTimer);
+      console.log(`[jsonl-watcher] Stopped subagent tailer: ${agentId}`);
+    }
+    this.subagentTailers.clear();
+    this.subagentParents.clear();
   }
 
   private snapshotExisting(): void {
@@ -96,6 +132,7 @@ export class JsonlWatcher extends EventEmitter {
 
         // New JSONL file appeared
         this.targetPath = path.join(this.dirPath, filename);
+        this.sessionUuid = filename.replace('.jsonl', '');
         if (this.dirWatcher) { this.dirWatcher.close(); this.dirWatcher = null; }
         if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
         console.log(`[jsonl-watcher] Discovered session file: ${filename}`);
@@ -170,6 +207,7 @@ export class JsonlWatcher extends EventEmitter {
 
       if (best) {
         this.targetPath = path.join(this.dirPath, best.name);
+        this.sessionUuid = best.name.replace('.jsonl', '');
         if (this.dirWatcher) { this.dirWatcher.close(); this.dirWatcher = null; }
         console.log(`[jsonl-watcher] Fallback: using ${newFiles.length > 0 ? 'new' : 'most recent'} file: ${best.name}`);
         this.startTailing();
@@ -241,6 +279,10 @@ export class JsonlWatcher extends EventEmitter {
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
+
+          // Check for subagent progress events and start tailing subagent files
+          this.maybeStartSubagentTailer(event);
+
           this.emit('event', event);
         } catch {
           // Skip unparseable lines
@@ -248,6 +290,119 @@ export class JsonlWatcher extends EventEmitter {
       }
     } catch (err: any) {
       console.error('[jsonl-watcher] Read error:', err.message);
+    }
+  }
+
+  /**
+   * If the event is a progress event with data.agentId, start tailing
+   * the subagent's JSONL file.
+   */
+  private maybeStartSubagentTailer(event: any): void {
+    if (event.type !== 'progress') return;
+    const agentId = event.data?.agentId;
+    if (!agentId || this.subagentTailers.has(agentId)) return;
+    if (!this.sessionUuid) return;
+
+    const parentToolUseID = event.parentToolUseID || event.toolUseID || '';
+    this.subagentParents.set(agentId, parentToolUseID);
+
+    const subagentPath = path.join(
+      this.dirPath,
+      this.sessionUuid,
+      'subagents',
+      `agent-${agentId}.jsonl`,
+    );
+
+    // Start tailing, but the file may not exist yet
+    this.startSubagentTailing(agentId, subagentPath, parentToolUseID);
+  }
+
+  private startSubagentTailing(agentId: string, filePath: string, parentToolUseID: string): void {
+    const tailer: SubagentTailer = {
+      filePath,
+      lastReadOffset: 0,
+      lineBuffer: '',
+      fileWatcher: null,
+      debounceTimer: null,
+    };
+    this.subagentTailers.set(agentId, tailer);
+
+    const metadata: SubagentMetadata = {
+      sidechain: true,
+      parentToolUseID,
+      agentId,
+    };
+
+    // Try to read existing content
+    this.readSubagentFromOffset(tailer, metadata);
+
+    // Watch for changes — file might not exist yet, retry with polling
+    const tryWatch = () => {
+      if (this.stopped) return;
+      if (!fs.existsSync(filePath)) {
+        // File doesn't exist yet, retry shortly
+        setTimeout(tryWatch, 200);
+        return;
+      }
+
+      try {
+        tailer.fileWatcher = fs.watch(filePath, (eventType) => {
+          if (this.stopped || eventType !== 'change') return;
+          if (tailer.debounceTimer) return;
+          tailer.debounceTimer = setTimeout(() => {
+            tailer.debounceTimer = null;
+            this.readSubagentFromOffset(tailer, metadata);
+          }, DEBOUNCE_MS);
+        });
+        console.log(`[jsonl-watcher] Tailing subagent ${agentId}: ${path.basename(filePath)}`);
+        // Read again in case content appeared between our first read and the watch
+        this.readSubagentFromOffset(tailer, metadata);
+      } catch (err: any) {
+        console.warn(`[jsonl-watcher] Cannot watch subagent file ${filePath}:`, err.message);
+      }
+    };
+
+    tryWatch();
+  }
+
+  private readSubagentFromOffset(tailer: SubagentTailer, metadata: SubagentMetadata): void {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(tailer.filePath);
+    } catch {
+      return; // File doesn't exist yet
+    }
+
+    if (stat.size < tailer.lastReadOffset) {
+      tailer.lastReadOffset = 0;
+      tailer.lineBuffer = '';
+    }
+
+    if (stat.size <= tailer.lastReadOffset) return;
+
+    try {
+      const fd = fs.openSync(tailer.filePath, 'r');
+      const buf = Buffer.alloc(stat.size - tailer.lastReadOffset);
+      fs.readSync(fd, buf, 0, buf.length, tailer.lastReadOffset);
+      fs.closeSync(fd);
+
+      tailer.lastReadOffset = stat.size;
+
+      const chunk = tailer.lineBuffer + buf.toString('utf-8');
+      const lines = chunk.split('\n');
+      tailer.lineBuffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          this.emit('event', event, metadata);
+        } catch {
+          // Skip unparseable lines
+        }
+      }
+    } catch (err: any) {
+      console.error(`[jsonl-watcher] Subagent read error (${metadata.agentId}):`, err.message);
     }
   }
 }

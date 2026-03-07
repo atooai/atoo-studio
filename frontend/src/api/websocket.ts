@@ -417,6 +417,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
     if (msg._sidechain) {
       sidechainMeta._sidechain = true;
       sidechainMeta._parentToolUseId = msg._parentToolUseId;
+      if (msg._agentId) sidechainMeta._agentId = msg._agentId;
     }
 
     if (msg.type === 'agent_info') {

@@ -12,7 +12,7 @@ import type {
 import { getPty, killCliProcess } from '../../spawner.js';
 import { spawnTerminalCliProcess } from '../claude-code-terminal/spawner.js';
 import { mapIngressEvent } from '../claude-code/message-mapper.js';
-import { JsonlWatcher } from './jsonl-watcher.js';
+import { JsonlWatcher, type SubagentMetadata } from './jsonl-watcher.js';
 
 /**
  * Terminal + Chat Read-Only agent.
@@ -55,8 +55,8 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       });
       this.jsonlWatcher.snapshot();
 
-      this.jsonlWatcher.on('event', (event: any) => {
-        this.handleJsonlEvent(event);
+      this.jsonlWatcher.on('event', (event: any, metadata?: SubagentMetadata) => {
+        this.handleJsonlEvent(event, metadata);
       });
 
       this.jsonlWatcher.on('error', (err: Error) => {
@@ -141,32 +141,51 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     return this.messages;
   }
 
-  private handleJsonlEvent(event: any): void {
+  private handleJsonlEvent(event: any, metadata?: SubagentMetadata): void {
     // Skip file-history-snapshot events
     if (event.type === 'file-history-snapshot') return;
 
-    // Track sidechain sessions
-    if (event.isSidechain && event.parentUuid) {
+    // Skip progress events from the main file when we're tailing the subagent's own file
+    // (progress events are condensed duplicates of the full subagent transcript)
+    if (!metadata && event.type === 'progress' && event.data?.agentId) {
+      if (this.jsonlWatcher && this.jsonlWatcher.tailedAgentIds.has(event.data.agentId)) {
+        return;
+      }
+    }
+
+    // Track sidechain sessions (from main file events)
+    if (!metadata && event.isSidechain && event.parentUuid) {
       if (event.sessionId) {
         this.sidechainSessions.set(event.sessionId, event.parentUuid);
       }
     }
 
-    // Determine if this event is from a sidechain
-    const parentToolUseId = (event.isSidechain && event.parentUuid)
-      ? event.parentUuid
-      : (event.sessionId && this.sidechainSessions.has(event.sessionId))
-        ? this.sidechainSessions.get(event.sessionId)
-        : undefined;
+    // Determine sidechain parentToolUseId:
+    // 1. From subagent metadata (subagent file tailing)
+    // 2. From event's own isSidechain + parentUuid fields
+    // 3. From tracked sidechain sessions
+    const parentToolUseId = metadata
+      ? metadata.parentToolUseID
+      : (event.isSidechain && event.parentUuid)
+        ? event.parentUuid
+        : (event.sessionId && this.sidechainSessions.has(event.sessionId))
+          ? this.sidechainSessions.get(event.sessionId)
+          : undefined;
+
+    const isSidechain = !!metadata || !!parentToolUseId;
+    const agentId = metadata?.agentId;
 
     // Map JSONL event to AbstractMessages using the existing mapper
     const mapped = mapIngressEvent(this.sessionId, event, this.pendingToolUses);
 
     for (const msg of mapped) {
       // Tag sidechain messages
-      if (parentToolUseId) {
+      if (isSidechain && parentToolUseId) {
         (msg as any)._sidechain = true;
         (msg as any)._parentToolUseId = parentToolUseId;
+      }
+      if (agentId) {
+        (msg as any)._agentId = agentId;
       }
 
       this.messages.push(msg);
