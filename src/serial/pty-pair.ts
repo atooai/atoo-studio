@@ -20,7 +20,7 @@ try {
   native = require(path.join(__dirname, 'native', 'build', 'Release', 'pty_pair.node'));
 } catch {
   // Fallback: when running from dist/, the native dir is at the source location
-  native = require(path.join(__dirname, '..', '..', 'src', 'serial', 'native', 'build', 'Release', 'pty_pair.node'));
+  native = require(path.join(__dirname, '..', '..', '..', 'src', 'serial', 'native', 'build', 'Release', 'pty_pair.node'));
 }
 
 export interface PtyPair {
@@ -32,6 +32,7 @@ export interface PtyPair {
   setModemBits(dtr: boolean, rts: boolean): void;
   close(): void;
   closed: boolean;
+  controlSignalsSupported: false;
 }
 
 const READ_BUF_SIZE = 4096;
@@ -44,6 +45,7 @@ export function createPtyPair(): PtyPair {
   return {
     masterFd,
     slavePath,
+    controlSignalsSupported: false as const,
     get closed() { return closed; },
 
     write(data: Buffer): number {

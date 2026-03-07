@@ -94,10 +94,13 @@ server.tool(
       if (!res.ok) {
         return { content: [{ type: 'text' as const, text: `Serial device request failed: ${data.error}` }] };
       }
+      const signalNote = data.controlSignalsSupported
+        ? `\n\nDTR/RTS control signals are fully supported and automatically forwarded to the physical device.`
+        : `\n\nNote: Control signals (DTR/RTS) are NOT available (PTY fallback mode). Auto-reset will not work. To flash, hold the BOOT button on the device during reset. To enable control signals, run setup-cuse.sh as root.`;
       return {
         content: [{
           type: 'text' as const,
-          text: `Serial device connected and ready.\n\nVirtual serial port: ${data.ptyPath}\nBaud rate: ${baudRate}\n\nUse this path as your serial port, e.g.:\n  screen ${data.ptyPath} ${baudRate}\n  esptool.py --port ${data.ptyPath} flash_id\n  idf.py -p ${data.ptyPath} monitor\n\nDTR/RTS signals are automatically forwarded to the physical device.`,
+          text: `Serial device connected and ready.\n\nVirtual serial port: ${data.ptyPath}\nBaud rate: ${baudRate}\n\nUse this path as your serial port, e.g.:\n  screen ${data.ptyPath} ${baudRate}\n  esptool.py --port ${data.ptyPath} flash_id\n  idf.py -p ${data.ptyPath} monitor${signalNote}`,
         }],
       };
     } catch (err: any) {

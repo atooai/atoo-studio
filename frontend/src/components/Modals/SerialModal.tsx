@@ -98,9 +98,17 @@ export function SerialModal({ requestId, onClose }: SerialModalProps) {
           </p>
         )}
 
-        {status === 'connected' && (
+        {status === 'connected' && request.controlSignalsSupported && (
           <p style={{ color: 'var(--accent-green, #4c4)', marginTop: 12 }}>
             Connected. Serial data is being bridged to the server. DTR/RTS signals are forwarded automatically.
+          </p>
+        )}
+
+        {status === 'connected' && !request.controlSignalsSupported && (
+          <p style={{ color: 'var(--accent-yellow, #fa4)', marginTop: 12 }}>
+            Connected. Serial data is being bridged, but <strong>control signals (DTR/RTS) are not available</strong>.
+            Auto-reset will not work — use the BOOT button on your device when flashing.
+            To enable control signals, run <code>setup-cuse.sh</code> as root.
           </p>
         )}
 

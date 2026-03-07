@@ -96,6 +96,14 @@ export async function gitBranches(cwd: string) {
       branches.push(trimmed);
     }
   });
+  // No commits yet: git branch returns nothing, but symbolic-ref shows the unborn branch
+  if (!currentBranch) {
+    try {
+      const ref = await git(['symbolic-ref', '--short', 'HEAD'], cwd);
+      currentBranch = ref.trim();
+      if (currentBranch) branches.push(currentBranch);
+    } catch {}
+  }
   return { branches, currentBranch };
 }
 

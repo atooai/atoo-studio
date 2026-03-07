@@ -20,7 +20,7 @@
     "dev": "tsx --watch src/index.ts",
     "start": "tsx src/index.ts",
     "build:preload": "make -C preload",
-    "build:serial": "cd src/serial/native && node-gyp rebuild",
+    "build:serial": "cd src/serial/native && node-gyp rebuild && (pkg-config --exists fuse3 2>/dev/null && gcc -Wall -O2 cuse_serial.c -o build/Release/cuse_serial $(pkg-config --cflags --libs fuse3) -lpthread || true)",
     "build:backend": "npm run build:preload && npm run build:serial && tsc",
     "build:frontend": "cd frontend && npm install && npm run build",
     "build": "npm run build:backend && npm run build:frontend",

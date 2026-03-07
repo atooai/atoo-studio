@@ -656,13 +656,13 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     const requestId = uuidv4();
 
     try {
-      const { readyPromise } = serialManager.createRequest(requestId, {
+      const { devicePath, controlSignalsSupported, readyPromise } = await serialManager.createRequest(requestId, {
         baudRate, dataBits, stopBits, parity, description,
       });
 
       // Broadcast to all browsers so they can show the serial connect modal
       const msg = JSON.stringify({
-        type: 'serial_request', requestId, baudRate, dataBits, stopBits, parity, description,
+        type: 'serial_request', requestId, baudRate, dataBits, stopBits, parity, description, controlSignalsSupported,
       });
       for (const ws of store.statusClients) {
         if (ws.readyState === 1) ws.send(msg);
@@ -673,10 +673,10 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         serialManager.rejectRequest(requestId, new Error('No browser connected within 30s'));
       }, 30000);
 
-      const ptyPath = await readyPromise;
+      const result = await readyPromise;
       clearTimeout(timeout);
 
-      res.json({ success: true, ptyPath, requestId });
+      res.json({ success: true, ptyPath: result.devicePath, requestId, controlSignalsSupported: result.controlSignalsSupported });
     } catch (err: any) {
       serialManager.closeRequest(requestId);
       res.status(500).json({ error: err.message });

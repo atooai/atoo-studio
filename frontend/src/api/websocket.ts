@@ -213,6 +213,7 @@ function handleStatusMessage(msg: any) {
       stopBits: msg.stopBits,
       parity: msg.parity,
       description: msg.description,
+      controlSignalsSupported: msg.controlSignalsSupported,
       status: 'pending',
     });
     // Show modal for user to connect a serial device

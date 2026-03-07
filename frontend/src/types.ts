@@ -206,6 +206,7 @@ export interface SerialRequest {
   stopBits: number;
   parity: 'none' | 'even' | 'odd';
   description?: string;
+  controlSignalsSupported?: boolean;
   status: 'pending' | 'connecting' | 'connected' | 'error';
   error?: string;
 }

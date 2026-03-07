@@ -1,6 +1,9 @@
 import { WebSocket } from 'ws';
 import { createPtyPair, PtyPair } from './pty-pair.js';
+import { createCuseDevice, isCuseAvailable, CuseDevice } from './cuse-device.js';
 import { store } from '../state/store.js';
+
+export type SerialDevice = PtyPair | CuseDevice;
 
 export interface SerialRequestParams {
   baudRate: number;
@@ -13,10 +16,12 @@ export interface SerialRequestParams {
 export interface SerialRequest {
   requestId: string;
   params: SerialRequestParams;
-  ptyPair: PtyPair;
+  device: SerialDevice;
+  devicePath: string;
+  controlSignalsSupported: boolean;
   status: 'pending' | 'connected' | 'closed';
   browserWs: WebSocket | null;
-  resolveReady: ((slavePath: string) => void) | null;
+  resolveReady: ((result: { devicePath: string; controlSignalsSupported: boolean }) => void) | null;
   rejectReady: ((err: Error) => void) | null;
   modemPollInterval: NodeJS.Timeout | null;
   readPollInterval: NodeJS.Timeout | null;
@@ -25,15 +30,53 @@ export interface SerialRequest {
 
 class SerialManager {
   private requests = new Map<string, SerialRequest>();
+  private cuseAvailable: boolean | null = null;
 
-  createRequest(requestId: string, params: SerialRequestParams): { slavePath: string; readyPromise: Promise<string> } {
-    const ptyPair = createPtyPair();
-    console.log(`[serial] Created PTY pair: master=${ptyPair.masterFd}, slave=${ptyPair.slavePath}`);
+  private checkCuseAvailable(): boolean {
+    if (this.cuseAvailable === null) {
+      this.cuseAvailable = isCuseAvailable();
+      if (this.cuseAvailable) {
+        console.log('[serial] CUSE available — using virtual serial device with control signal support');
+      } else {
+        console.log('[serial] CUSE not available — falling back to PTY (no control signal support)');
+      }
+    }
+    return this.cuseAvailable;
+  }
 
-    let resolveReady: ((path: string) => void) | null = null;
-    let rejectReady: ((err: Error) => void) | null = null;
+  async createRequest(requestId: string, params: SerialRequestParams): Promise<{ devicePath: string; controlSignalsSupported: boolean; readyPromise: Promise<{ devicePath: string; controlSignalsSupported: boolean }> }> {
+    let device: SerialDevice;
+    let devicePath: string;
+    let controlSignalsSupported: boolean;
 
-    const readyPromise = new Promise<string>((resolve, reject) => {
+    if (this.checkCuseAvailable()) {
+      try {
+        const cuse = await createCuseDevice();
+        device = cuse;
+        devicePath = cuse.devicePath;
+        controlSignalsSupported = true;
+        console.log(`[serial] Created CUSE device: ${devicePath}`);
+      } catch (err: any) {
+        console.log(`[serial] CUSE failed (${err.message}), falling back to PTY`);
+        this.cuseAvailable = false;
+        const pty = createPtyPair();
+        device = pty;
+        devicePath = pty.slavePath;
+        controlSignalsSupported = false;
+        console.log(`[serial] Created PTY pair: master=${pty.masterFd}, slave=${pty.slavePath}`);
+      }
+    } else {
+      const pty = createPtyPair();
+      device = pty;
+      devicePath = pty.slavePath;
+      controlSignalsSupported = false;
+      console.log(`[serial] Created PTY pair: master=${pty.masterFd}, slave=${pty.slavePath}`);
+    }
+
+    let resolveReady: SerialRequest['resolveReady'] = null;
+    let rejectReady: SerialRequest['rejectReady'] = null;
+
+    const readyPromise = new Promise<{ devicePath: string; controlSignalsSupported: boolean }>((resolve, reject) => {
       resolveReady = resolve;
       rejectReady = reject;
     });
@@ -41,7 +84,9 @@ class SerialManager {
     const request: SerialRequest = {
       requestId,
       params,
-      ptyPair,
+      device,
+      devicePath,
+      controlSignalsSupported,
       status: 'pending',
       browserWs: null,
       resolveReady,
@@ -52,7 +97,7 @@ class SerialManager {
     };
 
     this.requests.set(requestId, request);
-    return { slavePath: ptyPair.slavePath, readyPromise };
+    return { devicePath, controlSignalsSupported, readyPromise };
   }
 
   getRequest(requestId: string): SerialRequest | undefined {
@@ -66,13 +111,13 @@ class SerialManager {
     req.browserWs = ws;
     req.status = 'connected';
 
-    // Start piping PTY master reads → browser (poll every 5ms for low latency)
+    // Start piping device reads → browser (poll every 5ms for low latency)
     req.readPollInterval = setInterval(() => {
-      if (req.ptyPair.closed || ws.readyState !== WebSocket.OPEN) {
+      if (req.device.closed || ws.readyState !== WebSocket.OPEN) {
         this.closeRequest(requestId);
         return;
       }
-      const data = req.ptyPair.read();
+      const data = req.device.read();
       if (data) {
         ws.send(data);
       }
@@ -80,27 +125,27 @@ class SerialManager {
 
     // Start modem bit polling (every 50ms)
     req.modemPollInterval = setInterval(() => {
-      if (req.ptyPair.closed || ws.readyState !== WebSocket.OPEN) return;
-      const bits = req.ptyPair.getModemBits();
+      if (req.device.closed || ws.readyState !== WebSocket.OPEN) return;
+      const bits = req.device.getModemBits();
       if (bits.dtr !== req.lastModemBits.dtr || bits.rts !== req.lastModemBits.rts) {
         req.lastModemBits = { ...bits };
         ws.send(JSON.stringify({ type: 'set_signals', signals: { dtr: bits.dtr, rts: bits.rts } }));
       }
     }, 50);
 
-    // Resolve the ready promise so the MCP tool gets the PTY path
-    req.resolveReady?.(req.ptyPair.slavePath);
+    // Resolve the ready promise
+    req.resolveReady?.({ devicePath: req.devicePath, controlSignalsSupported: req.controlSignalsSupported });
     req.resolveReady = null;
     req.rejectReady = null;
 
-    console.log(`[serial] Browser connected for request ${requestId}, slave=${req.ptyPair.slavePath}`);
+    console.log(`[serial] Browser connected for request ${requestId}, device=${req.devicePath}, controlSignals=${req.controlSignalsSupported}`);
     return true;
   }
 
   handleBrowserData(requestId: string, data: Buffer): void {
     const req = this.requests.get(requestId);
-    if (!req || req.ptyPair.closed) return;
-    req.ptyPair.write(data);
+    if (!req || req.device.closed) return;
+    req.device.write(data);
   }
 
   handleBrowserControl(requestId: string, msg: any): void {
@@ -131,7 +176,7 @@ class SerialManager {
     if (req.readPollInterval) clearInterval(req.readPollInterval);
     if (req.modemPollInterval) clearInterval(req.modemPollInterval);
 
-    if (!req.ptyPair.closed) req.ptyPair.close();
+    if (!req.device.closed) req.device.close();
 
     if (req.browserWs && req.browserWs.readyState === WebSocket.OPEN) {
       try { req.browserWs.send(JSON.stringify({ type: 'close' })); } catch {}
@@ -151,11 +196,12 @@ class SerialManager {
     }
   }
 
-  getActiveRequests(): Array<{ requestId: string; slavePath: string; status: string }> {
+  getActiveRequests(): Array<{ requestId: string; devicePath: string; status: string; controlSignalsSupported: boolean }> {
     return Array.from(this.requests.values()).map(r => ({
       requestId: r.requestId,
-      slavePath: r.ptyPair.slavePath,
+      devicePath: r.devicePath,
       status: r.status,
+      controlSignalsSupported: r.controlSignalsSupported,
     }));
   }
 }
