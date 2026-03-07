@@ -7,7 +7,8 @@
     "dev": "tsx --watch src/index.ts",
     "start": "tsx src/index.ts",
     "build:preload": "make -C preload",
-    "build": "npm run build:preload && tsc"
+    "build:serial": "cd src/serial/native && node-gyp rebuild",
+    "build": "npm run build:preload && npm run build:serial && tsc"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

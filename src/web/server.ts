@@ -25,6 +25,7 @@ import { devtoolsProxyMiddleware, isDevtoolsWsUpgrade, handleDevtoolsWsUpgrade }
 import { sendContextAndRewind } from '../agents/claude-code/pty-actions.js';
 import forge from 'node-forge';
 import { CA_CERT_PATH, CA_KEY_PATH, PROJECT_ROOT } from '../config.js';
+import { serialManager } from '../serial/manager.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -649,6 +650,39 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
   });
 
+  // MCP callback: request serial device passthrough
+  app.post('/api/mcp/request-serial', async (req, res) => {
+    const { baudRate = 115200, dataBits = 8, stopBits = 1, parity = 'none', description } = req.body;
+    const requestId = uuidv4();
+
+    try {
+      const { readyPromise } = serialManager.createRequest(requestId, {
+        baudRate, dataBits, stopBits, parity, description,
+      });
+
+      // Broadcast to all browsers so they can show the serial connect modal
+      const msg = JSON.stringify({
+        type: 'serial_request', requestId, baudRate, dataBits, stopBits, parity, description,
+      });
+      for (const ws of store.statusClients) {
+        if (ws.readyState === 1) ws.send(msg);
+      }
+
+      // Wait for browser to connect (30s timeout)
+      const timeout = setTimeout(() => {
+        serialManager.rejectRequest(requestId, new Error('No browser connected within 30s'));
+      }, 30000);
+
+      const ptyPath = await readyPromise;
+      clearTimeout(timeout);
+
+      res.json({ success: true, ptyPath, requestId });
+    } catch (err: any) {
+      serialManager.closeRequest(requestId);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Mount changes API routes
   app.use(changesRouter);
 
@@ -1052,6 +1086,43 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
           });
         });
       } else {
+        // /ws/serial/:requestId — serial device passthrough
+        const serialMatch = url.match(/^\/ws\/serial\/([^/?]+)/);
+        if (serialMatch) {
+          const requestId = serialMatch[1];
+          const serialReq = serialManager.getRequest(requestId);
+          if (!serialReq || serialReq.status !== 'pending') {
+            socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            console.log(`[ws:serial] Browser connected for request ${requestId}`);
+
+            // Link browser WS and start data piping
+            serialManager.connectBrowser(requestId, ws);
+
+            // Browser → PTY: binary = serial data, text = control messages
+            ws.on('message', (data, isBinary) => {
+              if (isBinary) {
+                serialManager.handleBrowserData(requestId, Buffer.from(data as ArrayBuffer));
+              } else {
+                try {
+                  const msg = JSON.parse(data.toString());
+                  serialManager.handleBrowserControl(requestId, msg);
+                } catch {}
+              }
+            });
+
+            ws.on('close', () => {
+              console.log(`[ws:serial] Browser disconnected for request ${requestId}`);
+              serialManager.closeRequest(requestId);
+            });
+          });
+          return;
+        }
+
         // /ws/shell/:id — standalone shell terminal
         const shellMatch = url.match(/^\/ws\/shell\/([^/?]+)/);
         if (shellMatch) {

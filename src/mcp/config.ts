@@ -17,6 +17,10 @@ export const MCP_SYSTEM_PROMPT = [
   'When you need to start an HTTPS server, use mcp__ccproxy__generate_certificate to generate',
   'TLS cert files signed by the proxy CA. Specify the output directory and hostnames — the tool',
   'writes cert.pem, key.pem, and ca.pem there. The preview browser trusts this CA.',
+  'When you need to interact with a serial device (ESP32, Arduino, etc.) connected to the user\'s',
+  'machine, use mcp__ccproxy__request_serial_device to get a virtual serial port path. The user',
+  'will be prompted to connect the device in their browser. Once connected, use the returned path',
+  'with any serial tool (screen, minicom, esptool.py, idf.py monitor, etc.).',
 ].join(' ');
 
 export function getMcpConfigPath(): string {

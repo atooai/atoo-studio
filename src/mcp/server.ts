@@ -73,5 +73,38 @@ server.tool(
   },
 );
 
+server.tool(
+  'request_serial_device',
+  `Request access to a serial device (ESP32, Arduino, etc.) connected to the user's local machine via USB. The user will be prompted in their browser to select and connect a serial port. Returns the path to a virtual serial device (PTY) that you can use with any serial tool (screen, minicom, esptool.py, idf.py monitor, etc.). The tool blocks until the user connects a device or a 30-second timeout expires.`,
+  {
+    baudRate: z.number().int().min(300).max(3000000).default(115200).describe('Baud rate (default: 115200)'),
+    dataBits: z.number().int().min(7).max(8).default(8).describe('Data bits: 7 or 8 (default: 8)'),
+    stopBits: z.number().int().min(1).max(2).default(1).describe('Stop bits: 1 or 2 (default: 1)'),
+    parity: z.enum(['none', 'even', 'odd']).default('none').describe('Parity: none, even, or odd (default: none)'),
+    description: z.string().optional().describe('Description shown to the user (e.g. "ESP32 for firmware flashing")'),
+  },
+  async ({ baudRate, dataBits, stopBits, parity, description }) => {
+    try {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/request-serial`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baudRate, dataBits, stopBits, parity, description }),
+      });
+      const data = await res.json() as any;
+      if (!res.ok) {
+        return { content: [{ type: 'text' as const, text: `Serial device request failed: ${data.error}` }] };
+      }
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Serial device connected and ready.\n\nVirtual serial port: ${data.ptyPath}\nBaud rate: ${baudRate}\n\nUse this path as your serial port, e.g.:\n  screen ${data.ptyPath} ${baudRate}\n  esptool.py --port ${data.ptyPath} flash_id\n  idf.py -p ${data.ptyPath} monitor\n\nDTR/RTS signals are automatically forwarded to the physical device.`,
+        }],
+      };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Serial device request failed: ${err.message}` }] };
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 server.connect(transport);

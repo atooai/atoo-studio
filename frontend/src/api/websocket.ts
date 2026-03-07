@@ -205,6 +205,24 @@ function handleStatusMessage(msg: any) {
       gitLog: msg.gitLog,
       stashes: msg.stashes,
     }));
+  } else if (msg.type === 'serial_request') {
+    store.addSerialRequest({
+      requestId: msg.requestId,
+      baudRate: msg.baudRate,
+      dataBits: msg.dataBits,
+      stopBits: msg.stopBits,
+      parity: msg.parity,
+      description: msg.description,
+      status: 'pending',
+    });
+    // Show modal for user to connect a serial device
+    useStore.setState({ modal: { type: 'serial-connect', props: { requestId: msg.requestId } } });
+  } else if (msg.type === 'serial_closed' && msg.requestId) {
+    const req = store.serialRequests.find((r) => r.requestId === msg.requestId);
+    if (req && req.status === 'connected') {
+      store.addToast('Serial', `Serial device disconnected`, 'warning');
+    }
+    store.removeSerialRequest(msg.requestId);
   } else if (msg.type === 'service_started' && msg.services) {
     const proj = store.projects.find((p) => msg.cwd && msg.cwd.startsWith(p.path));
     const projName = proj?.name || msg.cwd || 'Unknown';

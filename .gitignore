@@ -5,5 +5,7 @@ frontend/node_modules/
 frontend/dist/
 *.log
 *.so
+*.node
+src/serial/native/build/
 .overlay-bench/
 overlay-bench.sh

@@ -195,6 +195,17 @@ export interface EditorFile {
   fileSize?: number;
 }
 
+export interface SerialRequest {
+  requestId: string;
+  baudRate: number;
+  dataBits: number;
+  stopBits: number;
+  parity: 'none' | 'even' | 'odd';
+  description?: string;
+  status: 'pending' | 'connecting' | 'connected' | 'error';
+  error?: string;
+}
+
 export interface PreviewTab {
   id: string;
   label: string;

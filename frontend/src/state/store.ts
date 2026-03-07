@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment } from '../types';
+import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment, SerialRequest } from '../types';
 
 export interface AppState {
   // Environment state
@@ -37,6 +37,9 @@ export interface AppState {
   previewDpr: number;
   previewIsMobile: boolean;
   previewHasTouch: boolean;
+
+  // Serial device passthrough
+  serialRequests: SerialRequest[];
 
   // Chat attachments
   chatAttachments: ChatAttachment[];
@@ -89,6 +92,9 @@ export interface AppState {
   setPreviewDpr: (d: number) => void;
   setPreviewIsMobile: (v: boolean) => void;
   setPreviewHasTouch: (v: boolean) => void;
+  addSerialRequest: (req: SerialRequest) => void;
+  updateSerialRequest: (requestId: string, updates: Partial<SerialRequest>) => void;
+  removeSerialRequest: (requestId: string) => void;
   setChatAttachments: (a: ChatAttachment[]) => void;
   addChatAttachment: (a: ChatAttachment) => void;
   removeChatAttachment: (id: string) => void;
@@ -125,6 +131,7 @@ export const useStore = create<AppState>((set, get) => ({
   openFiles: [],
   activeFileIdx: -1,
   monacoReady: false,
+  serialRequests: [],
   previewTabs: [],
   previewActiveIdx: 0,
   previewResponsive: false,
@@ -189,6 +196,13 @@ export const useStore = create<AppState>((set, get) => ({
   setPreviewDpr: (d) => set({ previewDpr: d }),
   setPreviewIsMobile: (v) => set({ previewIsMobile: v }),
   setPreviewHasTouch: (v) => set({ previewHasTouch: v }),
+  addSerialRequest: (req) => set((s) => ({ serialRequests: [...s.serialRequests, req] })),
+  updateSerialRequest: (requestId, updates) => set((s) => ({
+    serialRequests: s.serialRequests.map((r) => r.requestId === requestId ? { ...r, ...updates } : r),
+  })),
+  removeSerialRequest: (requestId) => set((s) => ({
+    serialRequests: s.serialRequests.filter((r) => r.requestId !== requestId),
+  })),
   setChatAttachments: (a) => set({ chatAttachments: a }),
   addChatAttachment: (a) => set((s) => ({ chatAttachments: [...s.chatAttachments, a] })),
   removeChatAttachment: (id) => set((s) => ({

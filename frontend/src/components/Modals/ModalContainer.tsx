@@ -11,6 +11,7 @@ import { WorktreeModal } from './WorktreeModal';
 import { SshProjectModal } from './SshProjectModal';
 import { RemoveProjectModal } from './RemoveProjectModal';
 import { AgentPickerModal } from './AgentPickerModal';
+import { SerialModal } from './SerialModal';
 
 export function ModalContainer() {
   const { modal, setModal } = useStore();
@@ -31,6 +32,7 @@ export function ModalContainer() {
       {modal.type === 'ssh-project' && <SshProjectModal onClose={close} />}
       {modal.type === 'remove-project' && <RemoveProjectModal {...modal.props} onClose={close} />}
       {modal.type === 'agent-picker' && <AgentPickerModal {...modal.props} onClose={close} />}
+      {modal.type === 'serial-connect' && <SerialModal requestId={modal.props?.requestId} onClose={close} />}
     </div>
   );
 }
