@@ -11,8 +11,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
-import { WEB_PORT } from '../../config.js';
-import { store } from '../../state/store.js';
+import { WEB_PORT } from '../../../config.js';
+import { store } from '../../../state/store.js';
 
 // ═══════════════════════════════════════════════════════
 // Hook token registry

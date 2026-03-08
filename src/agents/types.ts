@@ -1,129 +1,6 @@
 import { EventEmitter } from 'events';
-
-// ═══════════════════════════════════════════════════════
-// Abstract Message Types
-// ═══════════════════════════════════════════════════════
-
-export interface AbstractMessageBase {
-  id: string;
-  sessionId: string;
-  timestamp: number;
-  rawEvent?: any;
-}
-
-export interface UserMessage extends AbstractMessageBase {
-  type: 'user_message';
-  text: string;
-  attachments?: Attachment[];
-}
-
-export interface AssistantMessage extends AbstractMessageBase {
-  type: 'assistant_message';
-  text: string;
-  isPartial?: boolean;
-}
-
-export interface ToolRequest extends AbstractMessageBase {
-  type: 'tool_request';
-  requestId: string;
-  toolName: string;
-  input: any;
-  description?: string;
-  responded: boolean;
-  response?: 'approved' | 'denied';
-}
-
-export interface ToolResult extends AbstractMessageBase {
-  type: 'tool_result';
-  requestId: string;
-  toolName: string;
-  input?: any;
-  output: string;
-  isError: boolean;
-  isPending?: boolean;
-}
-
-export interface QuestionOption {
-  label: string;
-  description?: string;
-}
-
-export interface QuestionItem {
-  question: string;
-  header?: string;
-  options: QuestionOption[];
-  allowFreeInput?: boolean;
-  multiSelect?: boolean;
-}
-
-export interface Question extends AbstractMessageBase {
-  type: 'question';
-  requestId: string;
-  questions: QuestionItem[];
-  responded: boolean;
-}
-
-export interface StatusUpdate extends AbstractMessageBase {
-  type: 'status_update';
-  status: AgentStatus;
-  mode?: string;
-  model?: string;
-}
-
-export interface ContextUsage extends AbstractMessageBase {
-  type: 'context_usage';
-  model: string;
-  usedTokens: number;
-  totalTokens: number;
-  percent: number;
-  freePercent: number;
-}
-
-export interface SystemMessage extends AbstractMessageBase {
-  type: 'system_message';
-  text: string;
-  subtype?: string;
-}
-
-export interface ResultMessage extends AbstractMessageBase {
-  type: 'result';
-  subtype?: string;
-  summary?: string;
-}
-
-export interface FileChange extends AbstractMessageBase {
-  type: 'file_change';
-  operation: string;
-  path: string;
-  oldPath?: string;
-}
-
-export interface PlanApproval extends AbstractMessageBase {
-  type: 'plan_approval';
-  requestId: string;
-  plan: string;
-  responded: boolean;
-  response?: 'approved' | 'denied';
-}
-
-export interface ThinkingMessage extends AbstractMessageBase {
-  type: 'thinking';
-  text: string;
-}
-
-export type AbstractMessage =
-  | UserMessage
-  | AssistantMessage
-  | ToolRequest
-  | ToolResult
-  | Question
-  | StatusUpdate
-  | ContextUsage
-  | SystemMessage
-  | ResultMessage
-  | FileChange
-  | PlanApproval
-  | ThinkingMessage;
+import type { SessionEvent } from '../events/types.js';
+import type { WireMessage } from '../events/wire.js';
 
 // ═══════════════════════════════════════════════════════
 // Agent Status
@@ -188,9 +65,6 @@ export interface AgentInitOptions {
   cwd?: string;
   skipPermissions?: boolean;
   resumeSessionUuid?: string;
-  forkFromEvents?: any[];
-  forkParentSessionId?: string;
-  forkAfterEventUuid?: string;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -198,7 +72,7 @@ export interface AgentInitOptions {
 // ═══════════════════════════════════════════════════════
 
 export interface Agent extends EventEmitter {
-  // Events: 'message' (AbstractMessage), 'status' (AgentStatus), 'ready', 'error', 'exit'
+  // Events: 'message' (WireMessage), 'status' (AgentStatus), 'ready', 'error', 'exit'
 
   // Lifecycle
   initialize(options: AgentInitOptions): Promise<void>;
@@ -216,9 +90,19 @@ export interface Agent extends EventEmitter {
   refreshContext(): void;
   sendKey(key: string): void;
 
+  // Forking
+  /**
+   * Fork this agent's events into a resumable session file.
+   * Returns the resume UUID, or null if forking isn't supported.
+   */
+  forkToResumable(afterEventUuid: string, fromEventUuid?: string, targetDir?: string): string | null;
+
   // State
   getInfo(): AgentSessionInfo;
-  getMessages(): AbstractMessage[];
+  getMessages(): WireMessage[];
+  getEvents(): SessionEvent[];
+  getWireMessages(): WireMessage[];
+  getCliSessionId?(): string | null;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -240,12 +124,18 @@ export interface HistoricalSession {
 
 export interface AgentFactory {
   agentType: string;
+  /** Agent family identifier — factories in the same family can resume each other's sessions directly */
+  agentFamily: string;
   create(sessionId: string): Agent;
   getDescriptor(): AgentDescriptor;
   getHistoricalSessions(): Promise<HistoricalSession[]>;
   ownsSession(uuid: string): Promise<boolean>;
   /** Return all session JSONL file paths (including subagent files) for the given project directories */
   getSessionFilesForProject(cwds: string[]): Promise<string[]>;
+  /** Read a session's events (for cross-family conversion) */
+  readSessionEvents(uuid: string): Promise<SessionEvent[]>;
+  /** Write events in this family's native format for resuming. Returns the JSONL path. */
+  writeSessionForResume(events: SessionEvent[], targetUuid: string, directory: string): string;
 }
 
 // ═══════════════════════════════════════════════════════

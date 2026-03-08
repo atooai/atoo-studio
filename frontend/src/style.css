@@ -1956,6 +1956,88 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   gap: 12px;
 }
 
+/* Fork divider — shown between messages in chat RO mode */
+.fork-divider {
+  position: relative;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin: -4px 0;
+  user-select: none;
+}
+.fork-divider-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.fork-divider-btn {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  background: var(--bg-tertiary, #2a2a2a);
+  border: 1px solid var(--border-secondary, #444);
+  color: var(--text-secondary, #aaa);
+  white-space: nowrap;
+}
+.fork-divider:hover .fork-divider-line {
+  background: var(--border-secondary, #444);
+}
+.fork-divider:hover .fork-divider-btn {
+  opacity: 1;
+}
+.fork-divider-label {
+  font-weight: 500;
+}
+.fork-divider-hint {
+  font-size: 10px;
+  opacity: 0.6;
+}
+/* Shift held while hovering — red preview for range start */
+.fork-divider.shift-hover .fork-divider-line {
+  background: var(--accent-red, #e55);
+}
+.fork-divider.shift-hover .fork-divider-btn {
+  border-color: var(--accent-red, #e55);
+  color: var(--accent-red, #e55);
+}
+/* Range start — always visible, red styling */
+.fork-divider.range-start .fork-divider-line {
+  background: var(--accent-red, #e55);
+  height: 2px;
+}
+.fork-divider.range-start .fork-divider-btn {
+  opacity: 1;
+  border-color: var(--accent-red, #e55);
+  color: var(--accent-red, #e55);
+  background: var(--bg-tertiary, #2a2a2a);
+}
+/* Below range start — show "Fork range" on hover */
+.fork-divider.range-active:hover .fork-divider-btn {
+  border-color: var(--accent-purple, #a78bfa);
+  color: var(--accent-purple, #a78bfa);
+}
+/* Above range start — disabled/dimmed */
+.fork-divider.range-disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+.fork-divider.range-disabled:hover .fork-divider-btn {
+  opacity: 0;
+}
+
 .chat-msg {
   display: flex;
   gap: 10px;
@@ -3383,6 +3465,23 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 }
 .session-item.session-historical { opacity: 0.7; }
 .session-item.session-historical:hover { opacity: 1; }
+
+.session-tree-line {
+  position: relative;
+  width: 0;
+  flex-shrink: 0;
+}
+.session-tree-line::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: -4px;
+  width: 8px;
+  height: 14px;
+  border-left: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0 0 0 4px;
+}
 
 /* ═══════════════════════════════════════════════════════
    PREVIEW PANEL (widescreen — app iframes)

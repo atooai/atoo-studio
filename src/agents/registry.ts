@@ -1,6 +1,7 @@
 import type WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AbstractMessage, AgentStatus, AgentDescriptor, HistoricalSession } from './types.js';
+import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AgentStatus, AgentDescriptor, HistoricalSession } from './types.js';
+import type { WireMessage } from '../events/wire.js';
 import { store } from '../state/store.js';
 import { vccDb } from '../state/db.js';
 
@@ -37,7 +38,7 @@ class AgentRegistry {
     this.agents.set(sessionId, entry);
 
     // Wire up event forwarding
-    agent.on('message', (msg: AbstractMessage) => {
+    agent.on('message', (msg: WireMessage) => {
       this.broadcastToClients(sessionId, msg);
     });
 
@@ -125,13 +126,15 @@ class AgentRegistry {
       const sessions = await factory.getHistoricalSessions();
       allSessions.push(...sessions);
     }
-    // Deduplicate by session ID (multiple factories may share the same scanner)
-    const seen = new Set<string>();
-    let unique = allSessions.filter(s => {
-      if (seen.has(s.id)) return false;
-      seen.add(s.id);
-      return true;
-    });
+    // Deduplicate by session ID — when same UUID exists across factories, keep the most recent
+    const bestById = new Map<string, HistoricalSession>();
+    for (const s of allSessions) {
+      const existing = bestById.get(s.id);
+      if (!existing || new Date(s.lastModified).getTime() > new Date(existing.lastModified).getTime()) {
+        bestById.set(s.id, s);
+      }
+    }
+    let unique = Array.from(bestById.values());
     // Filter by project path (includes main project + all worktree paths)
     if (cwd) {
       const relatedPaths = new Set(vccDb.getAllRelatedProjectPaths(cwd));
@@ -166,27 +169,48 @@ class AgentRegistry {
     return allFiles;
   }
 
-  async resumeAgent(sessionUuid: string, options: { cwd?: string; skipPermissions?: boolean } = {}): Promise<Agent> {
+  async resumeAgent(sessionUuid: string, options: { cwd?: string; skipPermissions?: boolean; agentType?: string } = {}): Promise<Agent> {
     // Find the factory that owns this session
-    let owningFactory: AgentFactory | null = null;
+    let sourceFactory: AgentFactory | null = null;
     for (const factory of this.factories.values()) {
       if (await factory.ownsSession(sessionUuid)) {
-        owningFactory = factory;
+        sourceFactory = factory;
         break;
       }
     }
-    if (!owningFactory) {
+    if (!sourceFactory) {
       throw new Error(`No agent implementation recognizes session ${sessionUuid}`);
     }
 
+    // Determine target factory (requested agentType or same as source)
+    const targetAgentType = options.agentType || sourceFactory.agentType;
+    const targetFactory = this.factories.get(targetAgentType);
+    if (!targetFactory) {
+      throw new Error(`Unknown agent type: ${targetAgentType}`);
+    }
+
+    let resumeUuid = sessionUuid;
+
+    // Cross-family conversion: read events from source, write via target writer
+    if (sourceFactory.agentFamily !== targetFactory.agentFamily) {
+      const events = await sourceFactory.readSessionEvents(sessionUuid);
+      if (!events.length) {
+        throw new Error(`No events found in session ${sessionUuid} for cross-family conversion`);
+      }
+      const cwd = options.cwd || '.';
+      targetFactory.writeSessionForResume(events, sessionUuid, cwd);
+      // resumeUuid stays the same — written with same UUID in target format
+    }
+
     const sessionId = `agent_${uuidv4()}`;
-    return this.createAgent(owningFactory.agentType, sessionId, {
-      ...options,
-      resumeSessionUuid: sessionUuid,
+    return this.createAgent(targetFactory.agentType, sessionId, {
+      cwd: options.cwd,
+      skipPermissions: options.skipPermissions,
+      resumeSessionUuid: resumeUuid,
     });
   }
 
-  private broadcastToClients(sessionId: string, message: AbstractMessage): void {
+  private broadcastToClients(sessionId: string, message: WireMessage): void {
     const entry = this.agents.get(sessionId);
     if (!entry) return;
     const data = JSON.stringify(message);

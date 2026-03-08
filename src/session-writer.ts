@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Session, SessionEvent } from './state/types.js';
 
@@ -47,8 +48,10 @@ export function writeSessionJsonl(session: Session, directory: string): string {
   for (const event of session.events) {
     const rewritten: any = { ...event };
 
-    // Rewrite session_id to the new forked session
-    rewritten.session_id = session.id;
+    // Rewrite sessionId to the new forked session UUID (Claude Code uses camelCase, no "sess_" prefix)
+    rewritten.sessionId = uuid;
+    // Remove legacy underscore field if present
+    delete rewritten.session_id;
 
     // Rewrite uuid to fresh UUID
     if (rewritten.uuid && uuidMap.has(rewritten.uuid)) {

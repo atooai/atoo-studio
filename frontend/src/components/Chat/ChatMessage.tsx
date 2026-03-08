@@ -64,7 +64,7 @@ function AssistantContent({ m }: { m: FilteredMessage }) {
       {mode === 'txt' ? (
         <div className="chat-text-raw" data-raw-md={m.content}>{escapeHtml(m.content)}</div>
       ) : mode === 'raw' ? (
-        <div className="chat-text-raw" data-raw-md={m.content}>{escapeHtml(m._rawEvent ? JSON.stringify(m._rawEvent, null, 2) : m.content)}</div>
+        <div className="chat-text-raw" data-raw-md={m.content}>{escapeHtml(typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2))}</div>
       ) : (
         <div className="md-content" data-raw-md={m.content} dangerouslySetInnerHTML={{ __html: renderMd(m.content) }} />
       )}
@@ -126,7 +126,7 @@ function ThinkingBlock({ m }: { m: FilteredMessage }) {
       {mode === 'txt' ? (
         <div className="chat-text-raw" data-raw-md={m.content}>{escapeHtml(m.content)}</div>
       ) : mode === 'raw' ? (
-        <div className="chat-text-raw" data-raw-md={m.content}>{escapeHtml(m._rawEvent ? JSON.stringify(m._rawEvent, null, 2) : m.content)}</div>
+        <div className="chat-text-raw" data-raw-md={m.content}>{escapeHtml(typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2))}</div>
       ) : (
         <div className="md-content" data-raw-md={m.content} dangerouslySetInnerHTML={{ __html: renderMd(m.content) }} />
       )}
@@ -184,7 +184,7 @@ function ToolBlock({ m, fi }: { m: FilteredMessage; fi: number }) {
   let outputContent: React.ReactNode = null;
   if (m._toolOutput) {
     if (mode === 'raw') {
-      const rawJson = m._rawEvent ? JSON.stringify(m._rawEvent, null, 2) : m._toolOutput;
+      const rawJson = m._toolOutput;
       outputContent = <div className="chat-tool-output"><pre>{escapeHtml(rawJson)}</pre></div>;
     } else if (mode === 'txt') {
       outputContent = <div className="chat-tool-output"><pre>{escapeHtml(m._toolOutput)}</pre></div>;

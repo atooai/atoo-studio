@@ -5,7 +5,6 @@ import type { Project, EditorFile } from '../types';
 // WebSocket instances
 let statusWs: WebSocket | null = null;
 let settingsWs: WebSocket | null = null;
-const sessionWsMap: Record<string, WebSocket> = {};
 const agentWsMap: Record<string, WebSocket> = {};
 let pendingAgentCreation = false;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -85,7 +84,6 @@ function handleStatusMessage(msg: any) {
     const s = msg.session;
     const projects = store.projects.map((proj) => {
       if (proj.path === s.directory && !proj.sessions.find((x) => x.id === s.id)) {
-        connectSessionWs(s.id);
         return {
           ...proj,
           sessions: [
@@ -118,7 +116,6 @@ function handleStatusMessage(msg: any) {
             const current = useStore.getState();
             const updated = current.projects.map((proj) => {
               if (proj.id === activeProj.id && !proj.sessions.find((x) => x.id === s.id)) {
-                connectSessionWs(newSess.id);
                 return {
                   ...proj,
                   sessions: [
@@ -300,119 +297,6 @@ function handleStatusMessage(msg: any) {
   }
 }
 
-// --- Session WebSocket ---
-export function connectSessionWs(sessionId: string) {
-  if (sessionWsMap[sessionId]) return;
-  const proto = getWsProto();
-  const ws = new WebSocket(`${proto}//${location.host}/ws/sessions/${sessionId}`);
-  sessionWsMap[sessionId] = ws;
-
-  ws.onmessage = (e) => {
-    try {
-      const event = JSON.parse(e.data);
-      handleSessionEvent(sessionId, event);
-    } catch {}
-  };
-  ws.onclose = () => {
-    delete sessionWsMap[sessionId];
-  };
-}
-
-function getEventText(content: any): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return content.map((b) => b.text || b.content || '').join('');
-  return '';
-}
-
-function hasAnsi(text: string): boolean {
-  return /\x1b\[/.test(text);
-}
-
-function handleSessionEvent(sessionId: string, event: any) {
-  const store = useStore.getState();
-  const projects = store.projects.map((proj) => {
-    const sessIdx = proj.sessions.findIndex((s) => s.id === sessionId);
-    if (sessIdx === -1) return proj;
-    const sess = { ...proj.sessions[sessIdx], messages: [...proj.sessions[sessIdx].messages] };
-
-    console.log('[event]', event.type, JSON.stringify(event).substring(0, 300));
-
-    if (event.type === 'user' && event.message) {
-      if (event.isSynthetic) return proj;
-      const text = getEventText(event.message.content);
-      if (text.startsWith('/') || hasAnsi(text)) return proj;
-      if (/<command-name>|<local-command-caveat>|<command-message>/.test(text)) return proj;
-      if (Array.isArray(event.message.content) && event.message.content.every((b: any) => b.type === 'tool_result')) return proj;
-      if (sess.messages.some((m) => m._eventUuid === event.uuid)) return proj;
-      const displayContent = typeof event.message.content === 'string' ? event.message.content : text;
-      let attachments;
-      if (Array.isArray(event.message.content)) {
-        attachments = event.message.content
-          .filter((b: any) => (b.type === 'image' && b.source) || (b.type === 'document' && b.source))
-          .map((b: any) => ({ media_type: b.source.media_type, data: b.source.data, name: b.name, kind: b.type === 'image' ? 'image' : 'pdf' }));
-        if (!attachments.length) attachments = undefined;
-      }
-      sess.messages.push({ role: 'user', content: displayContent, _eventUuid: event.uuid, _rawEvent: event, _attachments: attachments });
-    } else if (event.type === 'assistant' && event.message) {
-      const msg = event.message;
-      if (msg.model === '<synthetic>') return proj;
-      if (msg.content) {
-        if (Array.isArray(msg.content)) {
-          for (const block of msg.content) {
-            if (block.type === 'thinking' && block.thinking) {
-              sess.messages.push({ role: 'thinking', content: block.thinking, _eventUuid: event.uuid, _rawEvent: event });
-            } else if (block.type === 'text') {
-              if (hasAnsi(block.text)) continue;
-              sess.messages.push({ role: 'assistant', content: block.text, _eventUuid: event.uuid, _rawEvent: event });
-            } else if (block.type === 'tool_use') {
-              sess.messages.push({ role: 'tool', content: `${block.name}: ${JSON.stringify(block.input).substring(0, 100)}`, _eventUuid: event.uuid, _toolUseId: block.id, _rawEvent: event, _toolName: block.name, _toolInput: block.input });
-            }
-          }
-        } else if (typeof msg.content === 'string') {
-          if (!hasAnsi(msg.content)) {
-            sess.messages.push({ role: 'assistant', content: msg.content, _eventUuid: event.uuid, _rawEvent: event });
-          }
-        }
-      }
-    } else if (event.type === 'result') {
-      if (event.message?.content) {
-        const raw = typeof event.message.content === 'string' ? event.message.content : JSON.stringify(event.message.content);
-        if (hasAnsi(raw)) return proj;
-        const content = raw.substring(0, 200);
-        sess.messages.push({ role: 'tool', content, _eventUuid: event.uuid, _rawEvent: event });
-      }
-    } else if (event.type === 'system' && event.subtype === 'init') {
-      if (event.model) sess.model = event.model;
-      if (event.permissionMode) sess.permissionMode = event.permissionMode;
-    } else if (event.type === 'system' && event.subtype === 'status') {
-      if (event.permissionMode) sess.permissionMode = event.permissionMode;
-    } else if (event.type === 'control_request') {
-      sess.status = 'waiting';
-      sess._pendingControl = event;
-      sess.messages.push({
-        role: 'control_request',
-        content: event.request || event,
-        _eventUuid: event.uuid,
-        _rawEvent: event,
-      });
-    } else {
-      return proj;
-    }
-
-    // Update title from first user message
-    if (!sess.title || sess.title === 'New session') {
-      const firstUser = sess.messages.find((m) => m.role === 'user');
-      if (firstUser) sess.title = firstUser.content.substring(0, 50);
-    }
-
-    return {
-      ...proj,
-      sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)),
-    };
-  });
-  useStore.setState({ projects });
-}
-
 // --- Agent WebSocket ---
 export function connectAgentWs(sessionId: string) {
   if (agentWsMap[sessionId]) return;
@@ -467,12 +351,11 @@ function handleAgentMessage(sessionId: string, msg: any) {
 
     if (msg.type === 'user_message') {
       if (sess.messages.some((m) => m._eventUuid === msg.id)) return proj;
-      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _rawEvent: msg.rawEvent, _attachments: msg.attachments });
+      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _attachments: msg.attachments });
     } else if (msg.type === 'assistant_message') {
-      if (msg.rawEvent?.message?.model === '<synthetic>') return proj;
-      sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id, _rawEvent: msg.rawEvent });
+      sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
     } else if (msg.type === 'thinking') {
-      sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.id, _rawEvent: msg.rawEvent });
+      sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
     } else if (msg.type === 'plan_approval') {
       sess.status = 'waiting';
       sess._pendingControl = msg;
@@ -480,7 +363,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
         role: 'control_request',
         content: { subtype: 'plan_approval', plan: msg.plan },
         _eventUuid: msg.id,
-        _rawEvent: msg.rawEvent,
+
         _requestId: msg.requestId,
         _responded: msg.responded,
       });
@@ -495,7 +378,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
           tool_use: { name: msg.toolName, input: msg.input },
         },
         _eventUuid: msg.id,
-        _rawEvent: msg.rawEvent,
+
         _requestId: msg.requestId,
         _responded: msg.responded,
       });
@@ -505,7 +388,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
           role: 'tool',
           content: `${msg.toolName}: running...`,
           _eventUuid: msg.id,
-          _rawEvent: msg.rawEvent,
+  
           _toolName: msg.toolName,
           _toolInput: msg.input,
           _requestId: msg.requestId,
@@ -521,14 +404,13 @@ function handleAgentMessage(sessionId: string, msg: any) {
             _toolInput: sess.messages[pendingIdx]._toolInput || msg.input,
             _isError: msg.isError,
             _pending: false,
-            _rawEvent: msg.rawEvent || sess.messages[pendingIdx]._rawEvent,
-          };
+                      };
         } else {
           sess.messages.push({
             role: 'tool',
             content: `${msg.toolName}: ${msg.output.substring(0, 100)}`,
             _eventUuid: msg.id,
-            _rawEvent: msg.rawEvent,
+    
             _toolName: msg.toolName,
             _toolInput: msg.input,
             _toolOutput: msg.output,
@@ -546,7 +428,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
           tool_use: { name: 'AskUserQuestion', input: { questions: msg.questions } },
         },
         _eventUuid: msg.id,
-        _rawEvent: msg.rawEvent,
+
         _requestId: msg.requestId,
         _responded: msg.responded,
       });
@@ -605,7 +487,3 @@ export function connectSettingsWs() {
   };
 }
 
-// --- Session WS map access (for legacy fallback) ---
-export function getSessionWs(sessionId: string): WebSocket | undefined {
-  return sessionWsMap[sessionId];
-}

@@ -4,10 +4,10 @@
  */
 import os from 'os';
 import { spawnProcess } from '../../spawner.js';
-import { ensureWorkspaceTrust } from '../lib/claude-workspace-trust.js';
+import { ensureWorkspaceTrust } from '../lib/claude/workspace-trust.js';
 import { getMcpConfigPath, MCP_SYSTEM_PROMPT } from '../../mcp/config.js';
 import { WEB_PORT } from '../../config.js';
-import { getHooksSettingsArgs } from '../lib/claude-hooks.js';
+import { getHooksSettingsArgs } from '../lib/claude/hooks.js';
 
 export function spawnTerminalCliProcess(options: {
   skipPermissions?: boolean;

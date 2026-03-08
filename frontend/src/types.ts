@@ -48,7 +48,6 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'thinking' | 'tool' | 'control_request';
   content: any;
   _eventUuid?: string;
-  _rawEvent?: any;
   _toolUseId?: string;
   _toolName?: string;
   _toolInput?: any;

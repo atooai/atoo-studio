@@ -43,9 +43,15 @@ export function ChatArea() {
 }
 
 function ChatMessages({ session }: { session: Session }) {
+  const { activeProjectId } = useStore();
   const areaRef = useRef<HTMLDivElement>(null);
   const showVerbose = session.showVerbose !== false;
   const filtered = filterMessages(session.messages, showVerbose);
+  const chatReadOnly = session.agentMode === 'terminal+chatRO';
+
+  // Range fork state
+  const [rangeStartIdx, setRangeStartIdx] = useState<number | null>(null);
+  const [rangeStartUuid, setRangeStartUuid] = useState<string | null>(null);
 
   useEffect(() => {
     if (areaRef.current) {
@@ -53,13 +59,13 @@ function ChatMessages({ session }: { session: Session }) {
     }
   }, [filtered.length, session.status]);
 
-  // Group consecutive sidechain messages for rendering
+  // Group consecutive sidechain messages for rendering, tracking event UUIDs per item
   const renderItems: React.ReactNode[] = [];
+  const eventUuids: (string | undefined)[] = [];
   let i = 0;
   while (i < filtered.length) {
     const m = filtered[i];
     if (m._parentToolUseId) {
-      // Collect ALL messages with the same parentToolUseId (consecutive run)
       const parentId = m._parentToolUseId;
       const agentId = m._agentId;
       const group: FilteredMessage[] = [];
@@ -70,18 +76,136 @@ function ChatMessages({ session }: { session: Session }) {
       renderItems.push(
         <SubagentGroup key={`sg-${parentId}`} messages={group} session={session} agentId={agentId} />
       );
+      eventUuids.push(group[group.length - 1]._eventUuid);
     } else {
       renderItems.push(
         <ChatMessageItem key={m._eventUuid || i} m={m} fi={i} session={session} />
       );
+      eventUuids.push(m._eventUuid);
       i++;
     }
   }
 
+  // Interleave fork dividers in read-only mode
+  const finalItems: React.ReactNode[] = [];
+  if (chatReadOnly && renderItems.length > 0) {
+    const handleFork = (afterUuid: string) => {
+      if (!activeProjectId) return;
+      (window as any).forkSession(activeProjectId, session.id, afterUuid, rangeStartUuid || undefined);
+      setRangeStartIdx(null);
+      setRangeStartUuid(null);
+    };
+    const handleSetRangeStart = (idx: number, uuid: string) => {
+      setRangeStartIdx(idx);
+      setRangeStartUuid(uuid);
+    };
+    const handleClearRange = () => {
+      setRangeStartIdx(null);
+      setRangeStartUuid(null);
+    };
+
+    for (let j = 0; j < renderItems.length; j++) {
+      finalItems.push(renderItems[j]);
+      const uuid = eventUuids[j];
+      if (j < renderItems.length - 1 && uuid) {
+        finalItems.push(
+          <ForkDivider
+            key={`fork-${j}`}
+            index={j}
+            afterEventUuid={uuid}
+            rangeStartIndex={rangeStartIdx}
+            isRangeStart={rangeStartIdx === j}
+            onFork={handleFork}
+            onSetRangeStart={handleSetRangeStart}
+            onClearRange={handleClearRange}
+          />
+        );
+      }
+    }
+  } else {
+    finalItems.push(...renderItems);
+  }
+
   return (
     <div className="chat-area" ref={areaRef}>
-      {renderItems}
+      {finalItems}
       <StatusLine session={session} />
+    </div>
+  );
+}
+
+function ForkDivider({ index, afterEventUuid, rangeStartIndex, isRangeStart, onFork, onSetRangeStart, onClearRange }: {
+  index: number;
+  afterEventUuid: string;
+  rangeStartIndex: number | null;
+  isRangeStart: boolean;
+  onFork: (uuid: string) => void;
+  onSetRangeStart: (idx: number, uuid: string) => void;
+  onClearRange: () => void;
+}) {
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const [hovered, setHovered] = useState(false);
+
+  useEffect(() => {
+    if (!hovered) return;
+    const onKey = (e: KeyboardEvent) => setShiftHeld(e.shiftKey);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
+    };
+  }, [hovered]);
+
+  const hasRangeStart = rangeStartIndex !== null;
+  const isAboveRange = hasRangeStart && index < rangeStartIndex!;
+  const isBelowRange = hasRangeStart && !isRangeStart && index > rangeStartIndex!;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isRangeStart) {
+      onClearRange();
+      return;
+    }
+    if (isAboveRange) return; // disabled
+    if (e.shiftKey) {
+      onSetRangeStart(index, afterEventUuid);
+    } else {
+      onFork(afterEventUuid);
+    }
+  };
+
+  let className = 'fork-divider';
+  if (isRangeStart) className += ' range-start';
+  else if (isAboveRange) className += ' range-disabled';
+  else if (isBelowRange) className += ' range-active';
+  else if (hovered && shiftHeld) className += ' shift-hover';
+
+  let label = 'Fork here';
+  let hint = 'Shift+click: set range start';
+  if (isRangeStart) {
+    label = 'Range start';
+    hint = 'Click to clear';
+  } else if (isBelowRange) {
+    label = 'Fork range';
+    hint = '';
+  } else if (hovered && shiftHeld) {
+    label = 'Set range start';
+    hint = '';
+  }
+
+  return (
+    <div
+      className={className}
+      onClick={handleClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => { setHovered(false); setShiftHeld(false); }}
+    >
+      <div className="fork-divider-line"></div>
+      <div className="fork-divider-btn">
+        <span className="fork-divider-label">{label}</span>
+        {hint && <span className="fork-divider-hint">{hint}</span>}
+      </div>
     </div>
   );
 }
@@ -187,28 +311,7 @@ function ChatInputBar({ session, proj }: { session: Session; proj: any }) {
 
     const cmd = { action: 'send_message', text, attachments: attachments.length ? attachments : undefined };
 
-    if (sendAgentCommand(session.id, cmd)) {
-      // Agent WS will echo back
-    } else {
-      const msgUuid = crypto.randomUUID();
-      // Optimistic push
-      updateProject(proj.id, (p) => ({
-        ...p,
-        sessions: p.sessions.map(s =>
-          s.id === session.id
-            ? { ...s, status: 'running' as const, messages: [...s.messages, { role: 'user' as const, content: text, _eventUuid: msgUuid }] }
-            : s
-        ),
-      }));
-      try {
-        await api('POST', `/api/sessions/${session.id}/message`, {
-          message: text, uuid: msgUuid,
-          attachments: attachments.length ? attachments : undefined,
-        });
-      } catch (e: any) {
-        addToast(proj.name, `Failed to send: ${e.message}`, 'attention');
-      }
-    }
+    sendAgentCommand(session.id, cmd);
   };
 
   const handleKey = (e: React.KeyboardEvent) => {

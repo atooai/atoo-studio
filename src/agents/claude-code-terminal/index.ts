@@ -1,9 +1,12 @@
 import type { AgentFactory, Agent, AgentDescriptor, HistoricalSession } from '../types.js';
+import type { SessionEvent } from '../../events/types.js';
 import { ClaudeCodeTerminalAgent } from './adapter.js';
-import { fsSessionScanner } from '../lib/claude-fs-sessions.js';
+import { fsSessionScanner } from '../lib/claude/fs-sessions.js';
+import { writeForkedClaudeJsonl } from '../lib/claude/jsonl-writer.js';
 
 export class ClaudeCodeTerminalAgentFactory implements AgentFactory {
   agentType = 'claude-code-terminal';
+  agentFamily = 'claude';
 
   create(sessionId: string): Agent {
     return new ClaudeCodeTerminalAgent(sessionId);
@@ -38,5 +41,13 @@ export class ClaudeCodeTerminalAgentFactory implements AgentFactory {
 
   async getSessionFilesForProject(cwds: string[]): Promise<string[]> {
     return fsSessionScanner.getFilesForProject(cwds);
+  }
+
+  async readSessionEvents(uuid: string): Promise<SessionEvent[]> {
+    return fsSessionScanner.readEvents(uuid);
+  }
+
+  writeSessionForResume(events: SessionEvent[], targetUuid: string, directory: string): string {
+    return writeForkedClaudeJsonl(events, targetUuid, directory);
   }
 }

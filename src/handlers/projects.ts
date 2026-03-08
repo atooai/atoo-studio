@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
+import archiver from 'archiver';
 import { vccDb } from '../state/db.js';
 import { getFileTree, readFileContent } from '../services/fs-browser.js';
 import { getRemoteFileTree, readRemoteFileContent } from '../services/remote-fs-browser.js';
@@ -62,7 +63,7 @@ projectsRouter.get('/api/projects/:id/sessions', (req, res) => {
       return env?.directory === project.path;
     })
     .map(s => {
-      const initEvent = s.events.find((e: any) => e.type === 'system' && e.subtype === 'init');
+      const initEvent = s.events.find((e) => e.type === 'system' && (e as any).subtype === 'init') as any;
       const ctxUsage = store.contextUsages.get(s.id);
       return {
         id: s.id,
@@ -159,6 +160,28 @@ projectsRouter.get('/api/files/raw', (req, res) => {
     res.setHeader('Content-Type', ct);
     res.setHeader('Content-Length', stat.size);
     fs.createReadStream(resolved).pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Stream a directory as a zip file (for drag-out folder download)
+projectsRouter.get('/api/files/zip', (req, res) => {
+  const dirPath = req.query.path as string;
+  if (!dirPath) return res.status(400).json({ error: 'path required' });
+  try {
+    const resolved = path.resolve(dirPath);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      return res.status(404).json({ error: 'directory not found' });
+    }
+    const dirName = path.basename(resolved);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${dirName}.zip"`);
+    const archive = archiver('zip', { zlib: { level: 5 } });
+    archive.on('error', (err: any) => res.status(500).end());
+    archive.pipe(res);
+    archive.directory(resolved, false);
+    archive.finalize();
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

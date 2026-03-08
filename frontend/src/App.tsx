@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useStore } from './state/store';
 import { api } from './api';
-import { connectStatusWs, connectSettingsWs, connectSessionWs, connectAgentWs, sendAgentCommand, setPendingAgentCreation, getSessionWs } from './api/websocket';
+import { connectStatusWs, connectSettingsWs, connectAgentWs, sendAgentCommand, setPendingAgentCreation } from './api/websocket';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { TopBar } from './components/TopBar/TopBar';
 import { Overview } from './components/Overview/Overview';
@@ -401,9 +401,6 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
           eventCount: h.eventCount,
         }));
 
-      for (const s of mappedSessions) {
-        if (s.status !== 'ended') connectSessionWs(s.id);
-      }
       for (const s of matchingAgentSessions) {
         connectAgentWs(s.id);
       }
@@ -626,31 +623,7 @@ function registerGlobalFunctions() {
       store.addToast(proj.name, 'New session created', 'success');
     } catch (e: any) {
       setPendingAgentCreation(false);
-      // Fallback to legacy
-      try {
-        const result = await api('POST', '/api/sessions', { cwd: proj.path, skip_permissions: true });
-        const session = {
-          id: result.id,
-          title: result.title || 'New session',
-          status: 'waiting' as const,
-          startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          messages: [],
-          lastMessage: '',
-          viewMode: 'chat' as 'chat' | 'tui',
-          permissionMode: result.permission_mode || 'bypassPermissions',
-          model: result.model || null,
-        };
-        store.updateProject(proj.id, p => ({
-          ...p,
-          sessions: [...p.sessions, session],
-          activeSessionIdx: p.sessions.filter(s => s.status !== 'ended').length,
-        }));
-        store.setActiveTabType('session');
-        connectSessionWs(session.id);
-        store.addToast(proj.name, 'New session created', 'success');
-      } catch (e2: any) {
-        store.addToast(proj.name, `Failed: ${e2.message}`, 'attention');
-      }
+      store.addToast(proj.name, `Failed: ${e.message}`, 'attention');
     }
   };
 
@@ -703,8 +676,8 @@ function registerGlobalFunctions() {
     const activeSessions = proj.sessions.filter((s: any) => s.status !== 'ended');
     const session = activeSessions[idx];
     if (!session) return;
-    // Kill the CLI process on the backend
-    try { await api('DELETE', `/api/sessions/${session.id}`); } catch {}
+    // Destroy the agent session
+    try { await api('DELETE', `/api/agent-sessions/${session.id}`); } catch {}
     // Mark session as ended in the store (removes from active tabs)
     store.updateProject(projId, p => ({
       ...p,
@@ -1020,14 +993,10 @@ function registerGlobalFunctions() {
     }));
     useStore.setState({ projects });
 
-    if (requestId && sendAgentCommand(sessionId, { action: 'approve', requestId })) {
-      // OK
-    } else {
-      try { await api('POST', `/api/sessions/${sessionId}/control-response`, { permission: 'allow' }); } catch {}
-    }
+    if (requestId) sendAgentCommand(sessionId, { action: 'approve', requestId });
   };
 
-  win.denyControl = async (sessionId: string) => {
+  win.denyControl = (sessionId: string) => {
     const store = useStore.getState();
     let requestId: string | undefined;
     const projects = store.projects.map(proj => ({
@@ -1045,14 +1014,10 @@ function registerGlobalFunctions() {
     }));
     useStore.setState({ projects });
 
-    if (requestId && sendAgentCommand(sessionId, { action: 'deny', requestId })) {
-      // OK
-    } else {
-      try { await api('POST', `/api/sessions/${sessionId}/control-response`, { permission: 'deny' }); } catch {}
-    }
+    if (requestId) sendAgentCommand(sessionId, { action: 'deny', requestId });
   };
 
-  win.submitQuestion = async (uuid: string, sessionId: string) => {
+  win.submitQuestion = (uuid: string, sessionId: string) => {
     const store = useStore.getState();
     const answers = store.questionAnswers[uuid] || {};
     const cleanAnswers: Record<string, string> = {};
@@ -1081,14 +1046,10 @@ function registerGlobalFunctions() {
       }
     }
 
-    if (requestId && sendAgentCommand(sessionId, { action: 'answer_question', requestId, answers: cleanAnswers })) {
-      // OK
-    } else {
-      try { await api('POST', `/api/sessions/${sessionId}/control-response`, { permission: 'allow', updatedInput: { answers: cleanAnswers } }); } catch {}
-    }
+    if (requestId) sendAgentCommand(sessionId, { action: 'answer_question', requestId, answers: cleanAnswers });
   };
 
-  win.skipQuestion = async (uuid: string, sessionId: string) => {
+  win.skipQuestion = (uuid: string, sessionId: string) => {
     // Mark responded
     const store = useStore.getState();
     const projects = store.projects.map(proj => ({
@@ -1111,11 +1072,7 @@ function registerGlobalFunctions() {
       }
     }
 
-    if (requestId && sendAgentCommand(sessionId, { action: 'deny', requestId })) {
-      // OK
-    } else {
-      try { await api('POST', `/api/sessions/${sessionId}/control-response`, { permission: 'deny' }); } catch {}
-    }
+    if (requestId) sendAgentCommand(sessionId, { action: 'deny', requestId });
   };
 
   win.updateSessionMode = (value: string) => {
@@ -1129,9 +1086,7 @@ function registerGlobalFunctions() {
       ...p,
       sessions: p.sessions.map(s => s.id === session.id ? { ...s, permissionMode: value } : s),
     }));
-    if (!sendAgentCommand(session.id, { action: 'set_mode', mode: value })) {
-      api('POST', `/api/sessions/${session.id}/set-mode`, { mode: value }).catch(() => {});
-    }
+    sendAgentCommand(session.id, { action: 'set_mode', mode: value });
   };
 
   win.updateSessionModel = (value: string) => {
@@ -1145,15 +1100,7 @@ function registerGlobalFunctions() {
       ...p,
       sessions: p.sessions.map(s => s.id === session.id ? { ...s, model: value } : s),
     }));
-    if (sendAgentCommand(session.id, { action: 'set_model', model: value })) {
-      // agent handles it
-    } else {
-      const ws = getSessionWs(session.id);
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'control_request', request_id: crypto.randomUUID(), request: { subtype: 'set_model', model: value } }));
-      }
-      setTimeout(() => { api('POST', `/api/sessions/${session.id}/refresh-context`).catch(() => {}); }, 1000);
-    }
+    sendAgentCommand(session.id, { action: 'set_model', model: value });
   };
 
   win.setSessionView = (mode: string) => {
@@ -1202,60 +1149,151 @@ function registerGlobalFunctions() {
       if (idx >= 0) win.switchToSession(projId, idx);
       return;
     }
-    try {
-      setPendingAgentCreation(true);
-      const result = await api('POST', '/api/agent-sessions/resume', { sessionUuid: sessionId, cwd: proj.path, skipPermissions: true });
-      setPendingAgentCreation(false);
-      const newSessionId = result.sessionId;
-      const newSession = {
-        id: newSessionId, title: session.title || 'Resumed session', status: 'waiting' as const,
-        startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-        messages: [], lastMessage: '', viewMode: 'chat' as const,
-        permissionMode: result.mode || 'bypassPermissions', model: result.model || null, _capabilities: result.capabilities,
-      };
-      store.updateProject(projId, p => ({
-        ...p,
-        sessions: [...p.sessions.filter(s => s.id !== newSessionId), newSession],
-        activeSessionIdx: p.sessions.filter(s => s.status !== 'ended').length,
-      }));
-      store.setActiveTabType('session');
-      connectAgentWs(newSessionId);
-      store.addToast(proj.name, 'Session resumed', 'success');
-    } catch (e: any) {
-      setPendingAgentCreation(false);
-      store.addToast(proj.name, `Failed to resume: ${e.message}`, 'attention');
-    }
+
+    const doResume = async (agentType?: string) => {
+      try {
+        setPendingAgentCreation(true);
+        const result = await api('POST', '/api/agent-sessions/resume', {
+          sessionUuid: sessionId, cwd: proj.path, skipPermissions: true,
+          agentType: agentType || undefined,
+        });
+        setPendingAgentCreation(false);
+        const newSessionId = result.sessionId;
+        const defaultViewMode = (result.agentMode === 'terminal') ? 'tui' : 'chat';
+        const newSession = {
+          id: newSessionId, title: session.title || 'Resumed session', status: 'waiting' as const,
+          startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          messages: [], lastMessage: '', viewMode: defaultViewMode as 'chat' | 'tui',
+          agentType: result.agentType, agentMode: result.agentMode,
+          permissionMode: result.mode || 'bypassPermissions', model: result.model || null, _capabilities: result.capabilities,
+        };
+        store.updateProject(projId, p => ({
+          ...p,
+          sessions: [...p.sessions.filter(s => s.id !== newSessionId), newSession],
+          activeSessionIdx: p.sessions.filter(s => s.status !== 'ended').length,
+        }));
+        store.setActiveTabType('session');
+        connectAgentWs(newSessionId);
+        store.addToast(proj.name, 'Session resumed', 'success');
+      } catch (e: any) {
+        setPendingAgentCreation(false);
+        store.addToast(proj.name, `Failed to resume: ${e.message}`, 'attention');
+      }
+    };
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: async (agent: any) => {
+          store.setModal(null);
+          await doResume(agent.agentType);
+        },
+      },
+    });
   };
 
   win.resumeHistoricalSession = async (projId: string, sessionUuid: string) => {
     const store = useStore.getState();
     const proj = store.projects.find(p => p.id === projId);
     if (!proj) return;
-    try {
-      setPendingAgentCreation(true);
-      const result = await api('POST', '/api/agent-sessions/resume', { sessionUuid, cwd: proj.path, skipPermissions: true });
-      setPendingAgentCreation(false);
-      const sessionId = result.sessionId;
-      const histEntry = (proj.historicalSessions || []).find(h => h.id === sessionUuid);
-      const session = {
-        id: sessionId, title: histEntry?.title || result.title || 'Resumed session', status: 'waiting' as const,
-        startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-        messages: [], lastMessage: '', viewMode: 'chat' as const,
-        permissionMode: result.mode || 'bypassPermissions', model: result.model || null, _capabilities: result.capabilities,
-      };
-      store.updateProject(projId, p => ({
-        ...p,
-        sessions: [...p.sessions.filter(s => s.id !== sessionId), session],
-        historicalSessions: (p.historicalSessions || []).filter(h => h.id !== sessionUuid),
-        activeSessionIdx: p.sessions.filter(s => s.status !== 'ended').length,
-      }));
-      store.setActiveTabType('session');
-      connectAgentWs(sessionId);
-      store.addToast(proj.name, 'Session resumed', 'success');
-    } catch (e: any) {
-      setPendingAgentCreation(false);
-      store.addToast(proj.name, `Failed to resume: ${e.message}`, 'attention');
-    }
+
+    const doResume = async (agentType?: string) => {
+      try {
+        setPendingAgentCreation(true);
+        const result = await api('POST', '/api/agent-sessions/resume', {
+          sessionUuid, cwd: proj.path, skipPermissions: true,
+          agentType: agentType || undefined,
+        });
+        setPendingAgentCreation(false);
+        const sessionId = result.sessionId;
+        const histEntry = (proj.historicalSessions || []).find(h => h.id === sessionUuid);
+        const defaultViewMode = (result.agentMode === 'terminal') ? 'tui' : 'chat';
+        const session = {
+          id: sessionId, title: histEntry?.title || result.title || 'Resumed session', status: 'waiting' as const,
+          startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          messages: [], lastMessage: '', viewMode: defaultViewMode as 'chat' | 'tui',
+          agentType: result.agentType, agentMode: result.agentMode,
+          permissionMode: result.mode || 'bypassPermissions', model: result.model || null, _capabilities: result.capabilities,
+        };
+        store.updateProject(projId, p => ({
+          ...p,
+          sessions: [...p.sessions.filter(s => s.id !== sessionId), session],
+          historicalSessions: (p.historicalSessions || []).filter(h => h.id !== sessionUuid),
+          activeSessionIdx: p.sessions.filter(s => s.status !== 'ended').length,
+        }));
+        store.setActiveTabType('session');
+        connectAgentWs(sessionId);
+        store.addToast(proj.name, 'Session resumed', 'success');
+      } catch (e: any) {
+        setPendingAgentCreation(false);
+        store.addToast(proj.name, `Failed to resume: ${e.message}`, 'attention');
+      }
+    };
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: async (agent: any) => {
+          store.setModal(null);
+          await doResume(agent.agentType);
+        },
+      },
+    });
+  };
+
+  win.forkSession = async (projId: string, parentSessionId: string, afterEventUuid: string, fromEventUuid?: string) => {
+    const store = useStore.getState();
+    const proj = store.projects.find(p => p.id === projId);
+    if (!proj) return;
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: async (agent: any) => {
+          store.setModal(null);
+          try {
+            setPendingAgentCreation(true);
+            const result = await api('POST', '/api/agent-sessions', {
+              agentType: agent.agentType,
+              cwd: proj.path,
+              skipPermissions: true,
+              forkParentSessionId: parentSessionId,
+              forkAfterEventUuid: afterEventUuid,
+              forkFromEventUuid: fromEventUuid || undefined,
+            });
+            setPendingAgentCreation(false);
+
+            const sessionId = result.sessionId;
+            const defaultViewMode = (agent.mode === 'terminal') ? 'tui' : 'chat';
+            const session = {
+              id: sessionId,
+              title: 'Forked session',
+              status: 'waiting' as const,
+              startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+              messages: [],
+              lastMessage: '',
+              viewMode: defaultViewMode as 'chat' | 'tui',
+              agentType: agent.agentType,
+              agentMode: agent.mode as any,
+              permissionMode: result.mode || 'bypassPermissions',
+              model: result.model || null,
+              _capabilities: result.capabilities,
+            };
+            store.updateProject(projId, p => ({
+              ...p,
+              sessions: [...p.sessions, session],
+              activeSessionIdx: p.sessions.filter(s => s.status !== 'ended').length,
+            }));
+            store.setActiveTabType('session');
+            connectAgentWs(sessionId);
+            store.addToast(proj.name, fromEventUuid ? 'Range fork created' : 'Session forked', 'success');
+          } catch (e: any) {
+            setPendingAgentCreation(false);
+            store.addToast(proj.name, `Failed to fork: ${e.message}`, 'attention');
+          }
+        },
+      },
+    });
   };
 
   // Modals and context menus — keep as simple DOM manipulation for now
@@ -1717,13 +1755,47 @@ function ctxNewFolder(dirPath: string, proj: any) {
 // Drag & drop for file tree
 const dragState = { srcPath: null as string | null, srcType: null as string | null };
 
+function isNativeFileDrag(dt: DataTransfer | null | undefined): boolean {
+  if (!dt || dragState.srcPath) return false;
+  return Array.from(dt.types).includes('Files');
+}
+
 function onDragStart(srcPath: string, srcType: string, el: HTMLElement, dataTransfer: DataTransfer | null) {
   dragState.srcPath = srcPath;
   dragState.srcType = srcType;
   el.classList.add('dragging');
   if (dataTransfer) {
-    dataTransfer.effectAllowed = 'move';
+    dataTransfer.effectAllowed = 'copyMove';
     dataTransfer.setData('text/plain', srcPath);
+
+    // Chrome drag-out: set DownloadURL so files/folders can be dragged to OS desktop/finder
+    const store = useStore.getState();
+    const proj = store.getActiveProject();
+    if (proj) {
+      const fullPath = proj.path + '/' + srcPath;
+      const itemName = srcPath.split('/').pop() || srcPath;
+      if (srcType === 'dir') {
+        // Folders: download as zip via streaming endpoint
+        const url = `${location.origin}/api/files/zip?path=${encodeURIComponent(fullPath)}`;
+        try { dataTransfer.setData('DownloadURL', `application/zip:${itemName}.zip:${url}`); } catch (_) {}
+      } else {
+        const ext = (itemName.split('.').pop() || '').toLowerCase();
+        const mimeMap: Record<string, string> = {
+          png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+          webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+          json: 'application/json', xml: 'application/xml',
+          html: 'text/html', css: 'text/css', js: 'text/javascript', txt: 'text/plain',
+          ts: 'text/plain', tsx: 'text/plain', py: 'text/plain', rs: 'text/plain',
+          go: 'text/plain', java: 'text/plain', c: 'text/plain', cpp: 'text/plain', h: 'text/plain',
+          md: 'text/markdown', yaml: 'text/yaml', yml: 'text/yaml',
+          zip: 'application/zip', gz: 'application/gzip',
+          mp3: 'audio/mpeg', wav: 'audio/wav', mp4: 'video/mp4',
+        };
+        const mime = mimeMap[ext] || 'application/octet-stream';
+        const url = `${location.origin}/api/files/raw?path=${encodeURIComponent(fullPath)}`;
+        try { dataTransfer.setData('DownloadURL', `${mime}:${itemName}:${url}`); } catch (_) {}
+      }
+    }
   }
 }
 
@@ -1737,10 +1809,11 @@ function onDragEnd() {
 
 function onDragOverItem(targetPath: string, targetType: string, el: HTMLElement, e: { preventDefault: () => void; clientY: number; dataTransfer?: DataTransfer | null }) {
   e.preventDefault();
-  if (!dragState.srcPath || targetPath === dragState.srcPath) return;
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  const native = isNativeFileDrag(e.dataTransfer);
+  if (!native && (!dragState.srcPath || targetPath === dragState.srcPath)) return;
+  if (e.dataTransfer) e.dataTransfer.dropEffect = native ? 'copy' : 'move';
   document.querySelectorAll('.drop-target, .drop-above, .drop-below').forEach(x => x.classList.remove('drop-target', 'drop-above', 'drop-below'));
-  if (targetType === 'dir') {
+  if (targetType === 'dir' || native) {
     el.classList.add('drop-target');
   } else {
     const rect = el.getBoundingClientRect();
@@ -1753,8 +1826,17 @@ function onDragLeaveItem(el: HTMLElement) {
   el.classList.remove('drop-target', 'drop-above', 'drop-below');
 }
 
-async function onDropItem(targetPath: string, targetType: string) {
+async function onDropItem(targetPath: string, targetType: string, dataTransfer?: DataTransfer | null) {
   document.querySelectorAll('.drop-target, .drop-above, .drop-below').forEach(x => x.classList.remove('drop-target', 'drop-above', 'drop-below'));
+
+  // Native file drop from OS
+  if (isNativeFileDrag(dataTransfer) && dataTransfer) {
+    const destDir = targetType === 'dir' ? targetPath : targetPath.split('/').slice(0, -1).join('/');
+    await handleNativeFileDrop(destDir, dataTransfer);
+    return;
+  }
+
+  // Internal move
   if (!dragState.srcPath || targetPath === dragState.srcPath) return;
   const store = useStore.getState();
   const proj = store.getActiveProject();
@@ -1778,7 +1860,14 @@ async function onDropItem(targetPath: string, targetType: string) {
   } catch (e2: any) { store.addToast(proj.name, `Failed: ${e2.message}`, 'attention'); }
 }
 
-function onDropRoot() {
+async function onDropRoot(dataTransfer?: DataTransfer | null) {
+  // Native file drop from OS
+  if (isNativeFileDrag(dataTransfer) && dataTransfer) {
+    await handleNativeFileDrop('', dataTransfer);
+    return;
+  }
+
+  // Internal move to root
   if (!dragState.srcPath) return;
   const store = useStore.getState();
   const proj = store.getActiveProject();
@@ -1791,6 +1880,113 @@ function onDropRoot() {
     store.updateProject(proj.id, (p: any) => ({ ...p, _filesLoaded: false }));
     selectProject(proj.id);
   }).catch(() => {});
+}
+
+// Native file/folder drop from OS -> upload to project
+async function handleNativeFileDrop(destRelDir: string, dataTransfer: DataTransfer) {
+  const store = useStore.getState();
+  const proj = store.getActiveProject();
+  if (!proj) return;
+
+  const basePath = proj.path + (destRelDir ? '/' + destRelDir : '');
+
+  // Use webkitGetAsEntry for folder support (Chrome/Edge)
+  const items = dataTransfer.items;
+  const entries: FileSystemEntry[] = [];
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      const entry = (items[i] as any).webkitGetAsEntry?.();
+      if (entry) entries.push(entry);
+    }
+  }
+
+  let filesToUpload: { relPath: string; file: File }[] = [];
+
+  if (entries.length > 0) {
+    for (const entry of entries) {
+      filesToUpload.push(...await readEntryRecursive(entry, ''));
+    }
+  } else {
+    // Fallback: plain file list (no folder support)
+    for (let i = 0; i < dataTransfer.files.length; i++) {
+      filesToUpload.push({ relPath: dataTransfer.files[i].name, file: dataTransfer.files[i] });
+    }
+  }
+
+  if (filesToUpload.length === 0) return;
+
+  // Collect unique directories to create
+  const dirsToCreate = new Set<string>();
+  for (const { relPath } of filesToUpload) {
+    const parts = relPath.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      dirsToCreate.add(parts.slice(0, i).join('/'));
+    }
+  }
+
+  // Create directories first (sorted by depth)
+  for (const dir of [...dirsToCreate].sort()) {
+    try { await api('POST', '/api/files/create', { path: basePath + '/' + dir, type: 'dir' }); } catch (_) { /* may exist */ }
+  }
+
+  // Upload files
+  let uploaded = 0;
+  for (const { relPath, file } of filesToUpload) {
+    try {
+      const fullPath = basePath + '/' + relPath;
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
+      await api('POST', '/api/files/binary', { path: fullPath, data: base64 });
+      uploaded++;
+    } catch (e: any) {
+      store.addToast(proj.name, `Failed to upload ${relPath}: ${e.message}`, 'attention');
+    }
+  }
+
+  if (uploaded > 0) {
+    store.addToast(proj.name, `Uploaded ${uploaded} file${uploaded !== 1 ? 's' : ''}`, 'info');
+    store.updateProject(proj.id, (p: any) => ({ ...p, _filesLoaded: false }));
+    await selectProject(proj.id);
+  }
+}
+
+// Recursively read FileSystemEntry (Chrome/Edge webkitGetAsEntry API)
+async function readEntryRecursive(entry: FileSystemEntry, parentPath: string): Promise<{ relPath: string; file: File }[]> {
+  if (entry.isFile) {
+    return new Promise((resolve) => {
+      (entry as FileSystemFileEntry).file(
+        file => resolve([{ relPath: parentPath ? parentPath + '/' + entry.name : entry.name, file }]),
+        () => resolve([])
+      );
+    });
+  }
+  if (entry.isDirectory) {
+    const dirReader = (entry as FileSystemDirectoryEntry).createReader();
+    const dirPath = parentPath ? parentPath + '/' + entry.name : entry.name;
+
+    // readEntries may not return all entries at once — must call until batch is empty
+    const allEntries: FileSystemEntry[] = [];
+    await new Promise<void>((resolve) => {
+      const readBatch = () => {
+        dirReader.readEntries(batch => {
+          if (batch.length === 0) { resolve(); return; }
+          allEntries.push(...batch);
+          readBatch();
+        }, () => resolve());
+      };
+      readBatch();
+    });
+
+    const results: { relPath: string; file: File }[] = [];
+    for (const child of allEntries) {
+      results.push(...await readEntryRecursive(child, dirPath));
+    }
+    return results;
+  }
+  return [];
 }
 
 // Speech recognition

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useStore } from '../../state/store';
 import { getFileIconSvg, FOLDER_ARROW_CLOSED, FOLDER_ARROW_OPEN } from '../../icons';
 import type { FileNode, GitChange } from '../../types';
@@ -136,8 +136,16 @@ export function FileTree() {
     <>
       <FileToolbar proj={proj} changeCount={changeCount} />
       <div className="panel-content" id="files-panel" tabIndex={0} onKeyDown={handleKeyDown}
-        onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; }}
-        onDrop={(e) => { e.preventDefault(); (window as any).dropRoot(); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer) {
+            const isNative = !e.dataTransfer.types.includes('text/plain') && e.dataTransfer.types.includes('Files');
+            e.dataTransfer.dropEffect = isNative ? 'copy' : 'move';
+            if (isNative) e.currentTarget.classList.add('drop-root');
+          }
+        }}
+        onDragLeave={(e) => { e.currentTarget.classList.remove('drop-root'); }}
+        onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('drop-root'); (window as any).dropRoot(e.dataTransfer); }}
       >
         {fileFilter === 'changed'
           ? <ChangedFiles gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} />
@@ -223,7 +231,7 @@ function TreeNodes({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, dirtyDir
             onDragEnd={() => (window as any).dragEnd()}
             onDragOver={(e) => { e.stopPropagation(); (window as any).dragOverItem(fullPath, 'file', e.currentTarget, e); }}
             onDragLeave={(e) => (window as any).dragLeaveItem(e.currentTarget)}
-            onDrop={(e) => { e.preventDefault(); e.stopPropagation(); (window as any).dropItem(fullPath, 'file'); }}
+            onDrop={(e) => { e.preventDefault(); e.stopPropagation(); (window as any).dropItem(fullPath, 'file', e.dataTransfer); }}
           >
             <span className="file-tree-icon" dangerouslySetInnerHTML={{ __html: getFileIconSvg(node.name) }} />
             <span className="file-tree-name file">{node.name}</span>
@@ -237,8 +245,13 @@ function TreeNodes({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, dirtyDir
 
 function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, depth, selectedPath, onSelect }: { node: FileNode; fullPath: string; gitMap: Record<string, string>; gitStaged: Record<string, boolean>; gitOldPaths: Record<string, string>; dirtyDirs: Set<string>; depth: number; selectedPath: string | null; onSelect: (p: string) => void }) {
   const [open, setOpen] = useState(false);
+  const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gitBadge = gitMap[fullPath];
   const isDirty = dirtyDirs.has(fullPath);
+
+  const clearExpandTimer = () => {
+    if (expandTimer.current) { clearTimeout(expandTimer.current); expandTimer.current = null; }
+  };
 
   return (
     <>
@@ -252,9 +265,23 @@ function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, de
         onContextMenu={(e) => { e.preventDefault(); (window as any).showCtxMenu(e.nativeEvent, fullPath, 'dir'); }}
         onDragStart={(e) => { (window as any).dragStart(fullPath, 'dir', e.currentTarget, e.dataTransfer); }}
         onDragEnd={() => (window as any).dragEnd()}
-        onDragOver={(e) => { e.stopPropagation(); (window as any).dragOverItem(fullPath, 'dir', e.currentTarget, e); }}
-        onDragLeave={(e) => (window as any).dragLeaveItem(e.currentTarget)}
-        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); (window as any).dropItem(fullPath, 'dir'); }}
+        onDragOver={(e) => {
+          e.stopPropagation();
+          // Auto-expand collapsed folder after 300ms of hover
+          if (!open && !expandTimer.current) {
+            expandTimer.current = setTimeout(() => { setOpen(true); expandTimer.current = null; }, 300);
+          }
+          (window as any).dragOverItem(fullPath, 'dir', e.currentTarget, e);
+        }}
+        onDragLeave={(e) => {
+          clearExpandTimer();
+          (window as any).dragLeaveItem(e.currentTarget);
+        }}
+        onDrop={(e) => {
+          e.preventDefault(); e.stopPropagation();
+          clearExpandTimer();
+          (window as any).dropItem(fullPath, 'dir', e.dataTransfer);
+        }}
       >
         <span className="file-tree-arrow">{open ? FOLDER_ARROW_OPEN : FOLDER_ARROW_CLOSED}</span>
         <span className="file-tree-name folder">{node.name}</span>

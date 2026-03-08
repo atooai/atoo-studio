@@ -6,18 +6,21 @@ import type {
   AgentSessionInfo,
   AgentStatus,
   AgentCapabilities,
-  AbstractMessage,
   Attachment,
 } from '../types.js';
+import type { SessionEvent } from '../../events/types.js';
+import type { WireMessage } from '../../events/wire.js';
+import { toWireMessages } from '../../events/wire.js';
+import { forkEventsToResumable } from '../lib/claude/jsonl-writer.js';
 import { getPty, killCliProcess } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
-import { mapIngressEvent } from '../lib/claude-message-mapper.js';
 import { JsonlWatcher, type SubagentMetadata } from './jsonl-watcher.js';
+import { fsSessionScanner } from '../lib/claude/fs-sessions.js';
 import {
   generateHookToken,
   registerHookToken,
   removeHookToken,
-} from '../lib/claude-hooks.js';
+} from '../lib/claude/hooks.js';
 
 /**
  * Terminal + Chat Read-Only agent.
@@ -34,10 +37,14 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
   private destroyed = false;
 
   private jsonlWatcher: JsonlWatcher | null = null;
-  private messages: AbstractMessage[] = [];
+  private wireMessages: WireMessage[] = [];
+  private events: SessionEvent[] = []; // canonical event store
   private pendingToolUses = new Map<string, { name: string; input: any }>();
   private sidechainSessions = new Map<string, string>(); // sessionId → parentToolUseId
   private hookToken: string | null = null;
+  private cliSessionId: string | null = null; // CLI's own session UUID (JSONL filename)
+  private resumeSessionUuid: string | null = null; // Original session UUID for parent linking
+  private preloadedUuids = new Set<string>(); // UUIDs from pre-loaded historical events
 
   constructor(sessionId: string) {
     super();
@@ -52,6 +59,12 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     }
 
     try {
+      // Pre-load historical messages for resume (before spawning CLI)
+      if (options.resumeSessionUuid) {
+        this.resumeSessionUuid = options.resumeSessionUuid;
+        await this.loadHistoricalMessages(options.resumeSessionUuid);
+      }
+
       // Create JSONL watcher (don't start yet — hooks may give us the exact file)
       this.jsonlWatcher = new JsonlWatcher({
         cwd: this.cwd,
@@ -92,6 +105,7 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
         ]);
         // Hook worked — start tailing the exact file
         console.log(`[terminal-chatro] Hook-based session discovery: ${cliUuid}`);
+        this.cliSessionId = cliUuid;
         this.jsonlWatcher.startTailingKnownUuid(cliUuid);
       } catch {
         // Hooks not supported or timed out — fall back to directory watching
@@ -168,13 +182,84 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     };
   }
 
-  getMessages(): AbstractMessage[] {
-    return this.messages;
+  forkToResumable(afterEventUuid: string, fromEventUuid?: string, targetDir?: string): string | null {
+    const dir = targetDir || this.cwd || os.homedir();
+    // Prefer the original resume UUID for parent linking — the CLI creates a new
+    // session UUID on --resume, but forks should link to the session the user sees.
+    const parentId = this.resumeSessionUuid || this.cliSessionId || this.sessionId;
+    return forkEventsToResumable(this.events, afterEventUuid, dir, parentId, fromEventUuid);
+  }
+
+  getMessages(): WireMessage[] {
+    return this.wireMessages;
+  }
+
+  getEvents(): SessionEvent[] {
+    return this.events;
+  }
+
+  getWireMessages(): WireMessage[] {
+    const wireToolUses = new Map<string, { name: string; input: any }>();
+    const result: WireMessage[] = [];
+    for (const event of this.events) {
+      result.push(...toWireMessages(this.sessionId, event, wireToolUses));
+    }
+    return result;
+  }
+
+  private async loadHistoricalMessages(uuid: string): Promise<void> {
+    try {
+      if (!fsSessionScanner.getByUuid(uuid)) {
+        fsSessionScanner.invalidate();
+        await fsSessionScanner.scan();
+      }
+
+      const historicalEvents = await fsSessionScanner.readEvents(uuid);
+      this.events.push(...(historicalEvents as SessionEvent[]));
+
+      // Track UUIDs so the JSONL watcher skips already-loaded events
+      for (const event of historicalEvents) {
+        if (event.uuid) this.preloadedUuids.add(event.uuid);
+      }
+
+      // Replay events through toWireMessages for correlation
+      const historyToolUses = new Map<string, { name: string; input: any }>();
+      for (const event of historicalEvents) {
+        const wireMsgs = toWireMessages(this.sessionId, event as SessionEvent, historyToolUses);
+        for (const msg of wireMsgs) {
+          if ((event as any).timestamp) msg.timestamp = (event as any).timestamp;
+
+          if (msg.type === 'tool_result' && !msg.isPending) {
+            const pendingIdx = this.wireMessages.findIndex(
+              m => m.type === 'tool_result' && (m as any).isPending && (m as any).requestId === msg.requestId
+            );
+            if (pendingIdx >= 0) {
+              this.wireMessages[pendingIdx] = msg;
+              continue;
+            }
+          }
+
+          this.wireMessages.push(msg);
+        }
+      }
+
+      // Sync pendingToolUses with the history replay state
+      for (const [id, info] of historyToolUses) {
+        this.pendingToolUses.set(id, info);
+      }
+
+      console.log(`[terminal-chatro] Loaded ${this.wireMessages.length} historical messages for resume of ${uuid}`);
+    } catch (err: any) {
+      console.warn(`[terminal-chatro] Failed to load historical messages for ${uuid}:`, err.message);
+    }
   }
 
   private handleJsonlEvent(event: any, metadata?: SubagentMetadata): void {
     // Skip file-history-snapshot events
     if (event.type === 'file-history-snapshot') return;
+
+    // Skip events already loaded from historical pre-load
+    if (event.uuid && this.preloadedUuids.has(event.uuid)) return;
 
     // Skip progress events from the main file when we're tailing the subagent's own file
     // (progress events are condensed duplicates of the full subagent transcript)
@@ -183,6 +268,9 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
         return;
       }
     }
+
+    // Store the raw event as a SessionEvent
+    this.events.push(event as SessionEvent);
 
     // Track sidechain sessions (from main file events)
     if (!metadata && event.isSidechain && event.parentUuid) {
@@ -206,20 +294,20 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     const isSidechain = !!metadata || !!parentToolUseId;
     const agentId = metadata?.agentId;
 
-    // Map JSONL event to AbstractMessages using the existing mapper
-    const mapped = mapIngressEvent(this.sessionId, event, this.pendingToolUses);
+    // Map JSONL event to WireMessages
+    const mapped = toWireMessages(this.sessionId, event as SessionEvent, this.pendingToolUses);
 
     for (const msg of mapped) {
       // Tag sidechain messages
       if (isSidechain && parentToolUseId) {
-        (msg as any)._sidechain = true;
-        (msg as any)._parentToolUseId = parentToolUseId;
+        msg._sidechain = true;
+        msg._parentToolUseId = parentToolUseId;
       }
       if (agentId) {
-        (msg as any)._agentId = agentId;
+        msg._agentId = agentId;
       }
 
-      this.messages.push(msg);
+      this.wireMessages.push(msg);
       this.emit('message', msg);
     }
   }
@@ -229,7 +317,7 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       canChangeMode: false,
       canChangeModel: false,
       hasContextUsage: false,
-      canFork: false,
+      canFork: true,
       canResume: true,
       hasTerminal: true,
       hasFileTracking: false,

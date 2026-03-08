@@ -1,4 +1,6 @@
-import type { ServerResponse } from 'http';
+import type { SessionEvent } from '../events/types.js';
+
+export type { SessionEvent } from '../events/types.js';
 
 export interface Environment {
   id: string;
@@ -19,18 +21,7 @@ export interface Session {
   createdAt: Date;
   source: string;
   permissionMode?: string;
-  parentSessionId?: string;
-  forkAfterEventUuid?: string;
   fsUuid?: string;
-}
-
-export interface SessionEvent {
-  uuid: string;
-  session_id: string;
-  type: string;
-  parent_tool_use_id?: string | null;
-  message?: { role: string; content: any };
-  [key: string]: any;
 }
 
 export interface WorkItem {

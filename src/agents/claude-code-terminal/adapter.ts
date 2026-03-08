@@ -6,12 +6,13 @@ import type {
   AgentSessionInfo,
   AgentStatus,
   AgentCapabilities,
-  AbstractMessage,
   Attachment,
 } from '../types.js';
+import type { SessionEvent } from '../../events/types.js';
+import type { WireMessage } from '../../events/wire.js';
 import { getPty, killCliProcess } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
-import { generateHookToken, registerHookToken, removeHookToken } from '../lib/claude-hooks.js';
+import { generateHookToken, registerHookToken, removeHookToken } from '../lib/claude/hooks.js';
 
 /**
  * Terminal-only Claude Code agent.
@@ -114,7 +115,19 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
     };
   }
 
-  getMessages(): AbstractMessage[] {
+  forkToResumable(_afterEventUuid: string, _fromEventUuid?: string, _targetDir?: string): string | null {
+    return null;
+  }
+
+  getMessages(): WireMessage[] {
+    return [];
+  }
+
+  getEvents(): SessionEvent[] {
+    return [];
+  }
+
+  getWireMessages(): WireMessage[] {
     return [];
   }
 

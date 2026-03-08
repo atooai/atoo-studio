@@ -23,7 +23,6 @@ class Store {
   pendingIngressResponses = new Map<string, any[]>(); // sessionId → queued control_responses for HTTP delivery
 
   // WebSocket connections
-  subscribeClients = new Map<string, Set<WebSocket>>(); // sessionId → browser WSs
   ingressClients = new Map<string, WebSocket>(); // sessionId → CLI WS
   statusClients = new Set<WebSocket>(); // global status listeners
 
@@ -190,23 +189,11 @@ class Store {
     return false;
   }
 
-  broadcastToSubscribers(sessionId: string, message: any): void {
-    const clients = this.subscribeClients.get(sessionId);
-    if (!clients) return;
-    const data = JSON.stringify(message);
-    for (const ws of clients) {
-      if (ws.readyState === 1) {
-        ws.send(data);
-      }
-    }
-  }
-
   setAgentStatus(sessionId: string, status: AgentStatus): void {
     const prev = this.agentStatuses.get(sessionId);
     if (prev === status) return;
     this.agentStatuses.set(sessionId, status);
     const msg = { type: 'agent_status', status, session_id: sessionId };
-    this.broadcastToSubscribers(sessionId, msg);
     // Broadcast to global status listeners (sidebar)
     const data = JSON.stringify(msg);
     for (const ws of this.statusClients) {
@@ -225,12 +212,10 @@ class Store {
       this.contextInProgressSessions.delete(sessionId);
     }
     const listeners = this.eventListeners.get(sessionId);
-    const subscribers = this.subscribeClients.get(sessionId);
-    console.log(`[store] setContextInProgress(${sessionId}, ${inProgress}) — eventListeners=${listeners?.size ?? 0}, subscribers=${subscribers?.size ?? 0}, statusClients=${this.statusClients.size}`);
+    console.log(`[store] setContextInProgress(${sessionId}, ${inProgress}) — eventListeners=${listeners?.size ?? 0}, statusClients=${this.statusClients.size}`);
     const msg = { type: 'context_in_progress', session_id: sessionId, inProgress };
     // Notify agent event listeners so the adapter can re-emit with agent session ID
     this.notifyEventListeners(sessionId, msg);
-    this.broadcastToSubscribers(sessionId, msg);
     const data = JSON.stringify(msg);
     for (const ws of this.statusClients) {
       if (ws.readyState === 1) ws.send(data);
@@ -265,90 +250,6 @@ class Store {
     if (!pending || pending.length === 0) return [];
     this.pendingIngressResponses.delete(sessionId);
     return pending;
-  }
-
-  /**
-   * Fork a session at a given event UUID.
-   * Copies events up to (inclusive) the specified event, handling tool_use boundary integrity.
-   * Generates a forked session ID that encodes parent lineage.
-   */
-  forkSession(parentId: string, afterEventUuid: string): Session {
-    const parent = this.sessions.get(parentId);
-    if (!parent) throw new Error(`Parent session not found: ${parentId}`);
-
-    // Find the fork-point event index
-    const forkIdx = parent.events.findIndex((e) => e.uuid === afterEventUuid);
-    if (forkIdx === -1) throw new Error(`Event UUID not found: ${afterEventUuid}`);
-
-    // Copy events up to fork point (inclusive)
-    let events = parent.events.slice(0, forkIdx + 1);
-
-    // Event boundary integrity: if the last event is an assistant message with tool_use blocks,
-    // include the corresponding tool_result user events and any child events
-    const lastEvent = events[events.length - 1];
-    if (lastEvent?.type === 'assistant' && Array.isArray(lastEvent.message?.content)) {
-      const toolUseIds = lastEvent.message.content
-        .filter((b: any) => b.type === 'tool_use')
-        .map((b: any) => b.id);
-
-      if (toolUseIds.length > 0) {
-        // Scan remaining parent events for tool_results and child events
-        for (let i = forkIdx + 1; i < parent.events.length; i++) {
-          const ev = parent.events[i];
-          // Include child events (sub-agent)
-          if (ev.parent_tool_use_id && toolUseIds.includes(ev.parent_tool_use_id)) {
-            events.push(ev);
-            continue;
-          }
-          // Include user events containing tool_result for our tool_use ids
-          if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
-            const hasMatchingResult = ev.message.content.some(
-              (item: any) => item.type === 'tool_result' && toolUseIds.includes(item.tool_use_id)
-            );
-            if (hasMatchingResult) {
-              events.push(ev);
-              continue;
-            }
-          }
-        }
-      }
-    }
-
-    // Generate forked session ID using parent-ID-linking scheme
-    // Extract last 16 hex chars from parent UUID portion
-    const parentUuidPart = parentId.replace('sess_', '');
-    const parentHex = parentUuidPart.replace(/-/g, '');
-    const last16 = parentHex.slice(-16);
-
-    // Build new UUID: first 16 hex = parent's last 16, rest is random
-    const randomPart = crypto.randomBytes(16).toString('hex');
-    const newHex = last16 + randomPart.slice(16);
-    // Format as UUID: 8-4-4-4-12
-    const newUuid = [
-      newHex.slice(0, 8),
-      newHex.slice(8, 12),
-      newHex.slice(12, 16),
-      newHex.slice(16, 20),
-      newHex.slice(20, 32),
-    ].join('-');
-    const forkedId = `sess_${newUuid}`;
-
-    const session: Session = {
-      id: forkedId,
-      title: `Fork of ${parent.title}`,
-      environmentId: parent.environmentId,
-      status: 'active',
-      events: events.map((e) => ({ ...e })), // shallow copy each event
-      createdAt: new Date(),
-      source: 'fork',
-      permissionMode: parent.permissionMode,
-      parentSessionId: parentId,
-      forkAfterEventUuid: afterEventUuid,
-    };
-
-    this.sessions.set(forkedId, session);
-    console.log(`[store] Forked session ${forkedId} from ${parentId} at event ${afterEventUuid}`);
-    return session;
   }
 
   private generateIngressToken(sessionId: string): string {
