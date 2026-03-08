@@ -1,6 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../state/store';
+import { api } from '../../api';
 import { escapeHtml } from '../../utils';
+import type { AgentDescriptor } from '../../types';
 
 /**
  * Extract raw hex (no dashes, no prefix) from a session ID.
@@ -102,6 +104,21 @@ function buildTree(
 export function SessionsPanel() {
   const { activeProjectId, projects } = useStore();
   const proj = projects.find(p => p.id === activeProjectId);
+
+  // Fetch agent descriptors once to build agentType → icon map
+  const [agentIcons, setAgentIcons] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    api('GET', '/api/available-agents')
+      .then((agents: AgentDescriptor[]) => {
+        const map = new Map<string, string>();
+        for (const a of agents) {
+          map.set(a.agentType, a.iconUrl);
+        }
+        setAgentIcons(map);
+      })
+      .catch(() => {});
+  }, []);
+
   if (!proj) return null;
 
   const tree = useMemo(
@@ -121,6 +138,9 @@ export function SessionsPanel() {
           <div key={s.id} className={`session-item ${s.status !== 'ended' ? 'active-session' : ''}`}
                style={{ paddingLeft: `${10 + n.depth * 16}px` }}>
             {n.depth > 0 && <span className="session-tree-line" />}
+            {s.agentType && agentIcons.get(s.agentType) && (
+              <img src={agentIcons.get(s.agentType)} alt="" className="session-agent-icon" />
+            )}
             <div className={`session-status-dot ${s.status === 'ended' ? 'ended' : s.status === 'waiting' ? 'waiting' : s.status === 'running' ? 'live' : 'ended'}`}></div>
             <div className="session-info">
               <div className="session-title">{s.title}</div>
@@ -144,6 +164,9 @@ export function SessionsPanel() {
               <div key={h.id} className="session-item session-historical" onClick={() => (window as any).resumeHistoricalSession(proj.id, h.id)}
                    style={{ paddingLeft: `${10 + n.depth * 16}px` }}>
                 {n.depth > 0 && <span className="session-tree-line" />}
+                {h.agentType && agentIcons.get(h.agentType) && (
+                  <img src={agentIcons.get(h.agentType)} alt="" className="session-agent-icon" />
+                )}
                 <div className="session-status-dot ended"></div>
                 <div className="session-info">
                   <div className="session-title">{escapeHtml(h.title)}</div>

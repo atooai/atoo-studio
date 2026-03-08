@@ -2,6 +2,7 @@ export type AgentMode = 'terminal' | 'chat' | 'terminal+chat' | 'terminal+chatRO
 
 export interface AgentDescriptor {
   agentType: string;
+  agentFamily: string;
   name: string;
   mode: AgentMode;
   iconUrl: string;
@@ -156,6 +157,7 @@ export interface TerminalInfo {
 export interface HistoricalSession {
   id: string;
   agentType?: string;
+  agentFamily?: string;
   title: string;
   lastModified: string;
   eventCount: number;

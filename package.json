@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "setup": "tsx scripts/setup.ts",
-    "dev": "tsx --watch src/index.ts",
+    "dev": "tsx --watch src/index.ts & cd frontend && npx vite build --watch & wait",
     "start": "tsx src/index.ts",
     "build:preload": "make -C preload",
     "build:serial": "cd src/serial/native && node-gyp rebuild && (pkg-config --exists fuse3 2>/dev/null && gcc -Wall -O2 cuse_serial.c -o build/Release/cuse_serial $(pkg-config --cflags --libs fuse3) -lpthread || true)",

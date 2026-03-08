@@ -96,6 +96,9 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
     case 'send_key':
       agent.sendKey(cmd.key);
       break;
+    case 'session_viewed':
+      agent.markViewed();
+      break;
     default:
       console.warn(`[agent-ws] Unknown command action for ${sessionId}:`, (cmd as any).action);
   }

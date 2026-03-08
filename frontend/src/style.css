@@ -3414,6 +3414,14 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 .session-item:hover { background: var(--bg-surface-2); }
 .session-item.active-session { background: var(--bg-surface-3); }
 
+.session-agent-icon {
+  width: 14px; height: 14px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.session-item:hover .session-agent-icon { opacity: 1; }
+
 .session-status-dot {
   width: 8px; height: 8px;
   border-radius: 50%;

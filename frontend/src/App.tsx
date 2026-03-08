@@ -646,6 +646,16 @@ function registerGlobalFunctions() {
     const store = useStore.getState();
     store.setActiveTabType('session');
     store.updateProject(projId, p => ({ ...p, activeSessionIdx: idx }));
+
+    // Notify agent that session was viewed (clears attention badge)
+    const proj = store.projects.find(p => p.id === projId);
+    if (proj) {
+      const active = proj.sessions.filter(s => s.status !== 'ended');
+      const session = active[idx];
+      if (session) {
+        sendAgentCommand(session.id, { action: 'session_viewed' });
+      }
+    }
   };
 
   win.switchToTerminal = (projId: string, idx: number) => {

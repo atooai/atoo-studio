@@ -25,6 +25,7 @@ import { CA_CERT_PATH, CA_KEY_PATH, PROJECT_ROOT } from '../config.js';
 import { serialManager } from '../serial/manager.js';
 import { searchSessionHistory } from '../services/session-search.js';
 import { handleHookCallback } from '../agents/lib/claude/hooks.js';
+import { handleCodexNotifyCallback } from '../agents/lib/codex/notify.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -388,6 +389,23 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
       handleHookCallback(token, payload);
     } catch (err: any) {
       console.error(`[hooks] Callback error:`, err.message);
+    }
+    res.json({ ok: true });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Codex Notify Callback
+  // ═══════════════════════════════════════════════════════
+
+  app.post('/api/codex/notify-callback', (req, res) => {
+    const { token, payload } = req.body;
+    if (!token || !payload) {
+      return res.status(400).json({ error: 'Missing token or payload' });
+    }
+    try {
+      handleCodexNotifyCallback(token, payload);
+    } catch (err: any) {
+      console.error(`[codex-notify] Callback error:`, err.message);
     }
     res.json({ ok: true });
   });

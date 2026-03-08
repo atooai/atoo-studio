@@ -20,6 +20,7 @@ export type AgentMode = 'terminal' | 'chat' | 'terminal+chat' | 'terminal+chatRO
 
 export interface AgentDescriptor {
   agentType: string;
+  agentFamily: string;
   name: string;
   mode: AgentMode;
   iconUrl: string;
@@ -89,6 +90,7 @@ export interface Agent extends EventEmitter {
   setModel(model: string): void;
   refreshContext(): void;
   sendKey(key: string): void;
+  markViewed(): void;
 
   // Forking
   /**
@@ -161,4 +163,5 @@ export type AgentCommand =
   | { action: 'set_mode'; mode: string }
   | { action: 'set_model'; model: string }
   | { action: 'refresh_context' }
-  | { action: 'send_key'; key: string };
+  | { action: 'send_key'; key: string }
+  | { action: 'session_viewed' };

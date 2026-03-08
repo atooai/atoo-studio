@@ -87,6 +87,7 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
   setMode(_mode: string): void {}
   setModel(_model: string): void {}
   refreshContext(): void {}
+  markViewed(): void {}
 
   sendKey(key: string): void {
     if (!this.envId) return;
