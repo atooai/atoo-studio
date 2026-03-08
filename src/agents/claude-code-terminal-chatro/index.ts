@@ -36,4 +36,8 @@ export class ClaudeCodeTerminalChatROAgentFactory implements AgentFactory {
     // Users can start a new terminal-chatro session and resume with it explicitly.
     return false;
   }
+
+  async getSessionFilesForProject(cwds: string[]): Promise<string[]> {
+    return fsSessionScanner.getFilesForProject(cwds);
+  }
 }

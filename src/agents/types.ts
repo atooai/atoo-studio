@@ -244,6 +244,8 @@ export interface AgentFactory {
   getDescriptor(): AgentDescriptor;
   getHistoricalSessions(): Promise<HistoricalSession[]>;
   ownsSession(uuid: string): Promise<boolean>;
+  /** Return all session JSONL file paths (including subagent files) for the given project directories */
+  getSessionFilesForProject(cwds: string[]): Promise<string[]>;
 }
 
 // ═══════════════════════════════════════════════════════

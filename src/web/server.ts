@@ -26,6 +26,8 @@ import { sendContextAndRewind } from '../agents/claude-code/pty-actions.js';
 import forge from 'node-forge';
 import { CA_CERT_PATH, CA_KEY_PATH, PROJECT_ROOT } from '../config.js';
 import { serialManager } from '../serial/manager.js';
+import { searchSessionHistory } from '../services/session-search.js';
+import { handleHookCallback } from '../agents/lib/claude-hooks.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -692,6 +694,23 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     res.json({ success: true });
   });
 
+  // MCP callback: search session history files for the current project
+  app.post('/api/mcp/search-history', async (req, res) => {
+    const { query, max_results = 50, cwd } = req.body;
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ error: 'query string is required' });
+    }
+    if (!cwd || typeof cwd !== 'string') {
+      return res.status(400).json({ error: 'cwd is required' });
+    }
+    try {
+      const results = await searchSessionHistory(query, cwd, max_results);
+      res.json(results);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Mount changes API routes
   app.use(changesRouter);
 
@@ -793,6 +812,23 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         0
       ),
     });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Claude Code Hooks Callback
+  // ═══════════════════════════════════════════════════════
+
+  app.post('/api/hooks/callback', (req, res) => {
+    const { token, payload } = req.body;
+    if (!token || !payload) {
+      return res.status(400).json({ error: 'Missing token or payload' });
+    }
+    try {
+      handleHookCallback(token, payload);
+    } catch (err: any) {
+      console.error(`[hooks] Callback error:`, err.message);
+    }
+    res.json({ ok: true });
   });
 
   // ═══════════════════════════════════════════════════════

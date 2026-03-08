@@ -2,6 +2,7 @@ import type WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AbstractMessage, AgentStatus, AgentDescriptor, HistoricalSession } from './types.js';
 import { store } from '../state/store.js';
+import { vccDb } from '../state/db.js';
 
 interface AgentEntry {
   agent: Agent;
@@ -134,6 +135,30 @@ class AgentRegistry {
     // Sort by date descending (most recent first)
     unique.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
     return unique;
+  }
+
+  /**
+   * Collect all session JSONL file paths for a project directory,
+   * deduplicated across all registered agent factories.
+   * Resolves related paths (main project + all worktrees, current and historical)
+   * so that searching from any worktree or the main project returns the full history.
+   */
+  async getSessionFilesForProject(cwd: string): Promise<string[]> {
+    // Resolve all related project paths (main + worktrees, current and historical)
+    const relatedPaths = vccDb.getAllRelatedProjectPaths(cwd);
+
+    const seen = new Set<string>();
+    const allFiles: string[] = [];
+    for (const factory of this.factories.values()) {
+      const files = await factory.getSessionFilesForProject(relatedPaths);
+      for (const f of files) {
+        if (!seen.has(f)) {
+          seen.add(f);
+          allFiles.push(f);
+        }
+      }
+    }
+    return allFiles;
   }
 
   async resumeAgent(sessionUuid: string, options: { cwd?: string; skipPermissions?: boolean } = {}): Promise<Agent> {

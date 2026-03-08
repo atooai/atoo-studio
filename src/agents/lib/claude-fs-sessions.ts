@@ -247,6 +247,49 @@ class FsSessionScanner {
     this.cache.clear();
     this.lastScanTime = 0;
   }
+
+  /**
+   * Return all JSONL file paths (sessions + subagents) for sessions
+   * whose working directory matches any of the given cwds.
+   */
+  async getFilesForProject(cwds: string[]): Promise<string[]> {
+    await this.scan();
+    const cwdSet = new Set(cwds);
+    const files: string[] = [];
+    const seen = new Set<string>();
+
+    for (const meta of this.cache.values()) {
+      if (!cwdSet.has(meta.directory)) continue;
+
+      // Add main session file
+      if (!seen.has(meta.jsonlPath)) {
+        seen.add(meta.jsonlPath);
+        files.push(meta.jsonlPath);
+      }
+
+      // Add subagent files: <dirHash>/<uuid>/subagents/*.jsonl
+      const subagentsDir = path.join(
+        path.dirname(meta.jsonlPath),
+        meta.uuid,
+        'subagents',
+      );
+      try {
+        const entries = fs.readdirSync(subagentsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+            const subPath = path.join(subagentsDir, entry.name);
+            if (!seen.has(subPath)) {
+              seen.add(subPath);
+              files.push(subPath);
+            }
+          }
+        }
+      } catch {
+        // No subagents directory
+      }
+    }
+    return files;
+  }
 }
 
 /**

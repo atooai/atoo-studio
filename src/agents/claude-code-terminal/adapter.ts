@@ -11,6 +11,7 @@ import type {
 } from '../types.js';
 import { getPty, killCliProcess } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
+import { generateHookToken, registerHookToken, removeHookToken } from '../lib/claude-hooks.js';
 
 /**
  * Terminal-only Claude Code agent.
@@ -26,6 +27,7 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
   private cwd: string | null = null;
   private createdAt = Date.now();
   private destroyed = false;
+  private hookToken: string | null = null;
 
   constructor(sessionId: string) {
     super();
@@ -40,10 +42,14 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
     }
 
     try {
+      this.hookToken = generateHookToken();
+      registerHookToken(this.hookToken, this.sessionId, this.cwd);
+
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
         resumeSessionUuid: options.resumeSessionUuid,
+        hookToken: this.hookToken,
       });
 
       this.setStatus('idle');
@@ -58,6 +64,11 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
+
+    if (this.hookToken) {
+      removeHookToken(this.hookToken);
+      this.hookToken = null;
+    }
 
     if (this.envId) {
       killCliProcess(this.envId);

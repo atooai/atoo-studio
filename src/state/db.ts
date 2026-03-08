@@ -66,6 +66,7 @@ class VccDatabase {
     this.initSchema();
     this.migrateProjectsSshColumns();
     this.migrateProjectsParentColumn();
+    this.migrateWorktreeHistory();
     this.migrate();
   }
 
@@ -182,6 +183,18 @@ class VccDatabase {
       ALTER TABLE projects ADD COLUMN parent_project_id TEXT REFERENCES projects(id) ON DELETE CASCADE;
     `);
     console.log('[db] Added parent_project_id column to projects');
+  }
+
+  private migrateWorktreeHistory(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS worktree_history (
+        id TEXT PRIMARY KEY,
+        parent_project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        worktree_path TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (parent_project_id, worktree_path)
+      );
+    `);
   }
 
   private migrateProjectEnvironmentSchema(): void {
@@ -475,6 +488,73 @@ class VccDatabase {
   deleteSshConnection(id: string): boolean {
     const result = this.db.prepare('DELETE FROM ssh_connections WHERE id = ?').run(id);
     return result.changes > 0;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // WORKTREE HISTORY (persists paths after removal)
+  // ═══════════════════════════════════════════════════
+
+  /**
+   * Record a worktree path for a parent project. Idempotent — skips duplicates.
+   */
+  recordWorktreePath(parentProjectId: string, worktreePath: string): void {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO worktree_history (id, parent_project_id, worktree_path)
+      VALUES (?, ?, ?)
+    `).run(uuidv4(), parentProjectId, worktreePath);
+  }
+
+  /**
+   * Get all project paths related to a given path (main project + all worktrees, current and historical).
+   * Works bidirectionally: pass a main project path or a worktree path.
+   */
+  getAllRelatedProjectPaths(projectPath: string): string[] {
+    // First, find the project by path
+    const project = this.findProjectByPath(projectPath);
+    if (!project) {
+      // Path might be a historical worktree that's been deleted from projects table
+      const hist = this.db.prepare(
+        'SELECT parent_project_id FROM worktree_history WHERE worktree_path = ?'
+      ).get(projectPath) as { parent_project_id: string } | undefined;
+      if (!hist) return [projectPath]; // Unknown path, just return itself
+
+      const parent = this.getProject(hist.parent_project_id);
+      if (!parent) return [projectPath];
+      return this.collectAllPaths(parent.id, parent.path);
+    }
+
+    // If this is a child project (worktree), resolve to parent
+    const parentId = project.parent_project_id;
+    if (parentId) {
+      const parent = this.getProject(parentId);
+      if (parent) {
+        return this.collectAllPaths(parent.id, parent.path);
+      }
+    }
+
+    // This is a root project — collect all its paths
+    return this.collectAllPaths(project.id, project.path);
+  }
+
+  private collectAllPaths(parentProjectId: string, parentPath: string): string[] {
+    const paths = new Set<string>();
+    paths.add(parentPath);
+
+    // Current child projects (active worktrees)
+    const children = this.getChildProjects(parentProjectId);
+    for (const child of children) {
+      paths.add(child.path);
+    }
+
+    // Historical worktree paths (includes removed worktrees)
+    const historical = this.db.prepare(
+      'SELECT worktree_path FROM worktree_history WHERE parent_project_id = ?'
+    ).all(parentProjectId) as { worktree_path: string }[];
+    for (const row of historical) {
+      paths.add(row.worktree_path);
+    }
+
+    return Array.from(paths);
   }
 
   // ═══════════════════════════════════════════════════

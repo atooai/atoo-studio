@@ -144,6 +144,11 @@ export function reconcileWorktrees(projectId: string, projectPath: string) {
   // Get environments this parent is linked to (so we can link new children too)
   const parentEnvs = vccDb.getEnvironmentsForProject(projectId);
 
+  // Record all discovered worktree paths in history (idempotent)
+  for (const [wtPath] of discoveredPaths) {
+    vccDb.recordWorktreePath(projectId, wtPath);
+  }
+
   // Add new worktrees as child projects
   for (const [wtPath, branch] of discoveredPaths) {
     if (existingPaths.has(wtPath)) continue;

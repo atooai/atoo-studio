@@ -26,6 +26,11 @@ export const MCP_SYSTEM_PROMPT = [
   'machine, use mcp__ccproxy__request_serial_device to get a virtual serial port path. The user',
   'will be prompted to connect the device in their browser. Once connected, use the returned path',
   'with any serial tool (screen, minicom, esptool.py, idf.py monitor, etc.).',
+  'When you need to recall previous decisions, implementation reasoning, discussed approaches,',
+  'or any context from past sessions for this project, use mcp__ccproxy__search_session_history.',
+  'It searches across ALL session history files (including subagent sessions) for the current project.',
+  'IMPORTANT: Prefer delegating search_session_history calls to a subagent when possible, so the',
+  'main conversation context is not polluted with potentially large search results.',
 ].join(' ');
 
 export function getMcpConfigPath(): string {

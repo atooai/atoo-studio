@@ -93,6 +93,20 @@ export class JsonlWatcher extends EventEmitter {
     return new Set(this.subagentTailers.keys());
   }
 
+  /**
+   * Start tailing a known session UUID file directly, bypassing discovery.
+   * Used when hooks report the exact session ID.
+   */
+  startTailingKnownUuid(uuid: string): void {
+    this.targetPath = path.join(this.dirPath, `${uuid}.jsonl`);
+    this.sessionUuid = uuid;
+    // Stop any active discovery
+    if (this.dirWatcher) { this.dirWatcher.close(); this.dirWatcher = null; }
+    if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
+    // Wait for the file to exist, then start tailing
+    this.waitForFile(this.targetPath);
+  }
+
   stop(): void {
     this.stopped = true;
     if (this.dirWatcher) { this.dirWatcher.close(); this.dirWatcher = null; }

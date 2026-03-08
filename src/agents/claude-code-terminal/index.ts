@@ -35,4 +35,8 @@ export class ClaudeCodeTerminalAgentFactory implements AgentFactory {
     await fsSessionScanner.scan();
     return !!fsSessionScanner.getByUuid(uuid);
   }
+
+  async getSessionFilesForProject(cwds: string[]): Promise<string[]> {
+    return fsSessionScanner.getFilesForProject(cwds);
+  }
 }

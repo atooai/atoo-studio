@@ -109,5 +109,41 @@ server.tool(
   },
 );
 
+server.tool(
+  'search_session_history',
+  `Search through ALL session history files (chat logs) of the current project across all agent types (Claude Code, subagents, etc.). Use this to find previous decisions, implementation notes, reasoning, discussed approaches, or any other information from past and current sessions. Returns matching lines with file paths and line numbers, deduplicated across agent types. IMPORTANT: When using this tool, prefer to delegate the search to a subagent if your client supports it, so the main conversation context is not polluted with potentially large search results.`,
+  {
+    query: z.string().describe('Search query (regex supported) to find in session history — e.g. "port 3000", "database schema", "decided to use", etc.'),
+    max_results: z.number().int().min(1).max(200).default(50).describe('Maximum number of matching lines to return (default: 50)'),
+  },
+  async ({ query, max_results }) => {
+    try {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/search-history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, max_results, cwd: process.cwd() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        return { content: [{ type: 'text' as const, text: `Search failed: ${(err as any).error}` }] };
+      }
+      const data = await res.json() as { results: Array<{ file: string; line: number; text: string }>; totalMatches: number; filesSearched: number };
+      if (!data.results.length) {
+        return { content: [{ type: 'text' as const, text: `No matches found for "${query}" across ${data.filesSearched} session file(s).` }] };
+      }
+      const lines = data.results.map(r => `${r.file}:${r.line}: ${r.text}`);
+      let output = lines.join('\n');
+      if (data.totalMatches > data.results.length) {
+        output += `\n\n(Showing ${data.results.length} of ${data.totalMatches} total matches across ${data.filesSearched} files)`;
+      } else {
+        output += `\n\n(${data.results.length} match(es) across ${data.filesSearched} file(s))`;
+      }
+      return { content: [{ type: 'text' as const, text: output }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Search failed: ${err.message}` }] };
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 server.connect(transport);

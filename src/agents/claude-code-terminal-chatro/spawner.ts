@@ -1,5 +1,5 @@
 /**
- * Claude Code Terminal–specific spawn logic.
+ * Claude Code Terminal+ChatRO–specific spawn logic.
  * Plain `claude` PTY — no MITM, no /remote-control, but with MCP and system prompt.
  */
 import os from 'os';
@@ -27,7 +27,6 @@ export function spawnTerminalCliProcess(options: {
   const env = { ...process.env };
   delete env.CLAUDECODE;
 
-  // Pass hook token via environment so the hook command can identify this spawn
   if (options.hookToken) {
     env.CCPROXY_HOOK_TOKEN = options.hookToken;
     env.CCPROXY_WEB_PORT = String(WEB_PORT);
@@ -38,7 +37,7 @@ export function spawnTerminalCliProcess(options: {
     args,
     cwd,
     env,
-    logPrefix: 'claude-terminal',
+    logPrefix: 'claude-terminal-chatro',
   });
 
   return envId;

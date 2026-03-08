@@ -10,9 +10,14 @@ import type {
   Attachment,
 } from '../types.js';
 import { getPty, killCliProcess } from '../../spawner.js';
-import { spawnTerminalCliProcess } from '../claude-code-terminal/spawner.js';
-import { mapIngressEvent } from '../claude-code/message-mapper.js';
+import { spawnTerminalCliProcess } from './spawner.js';
+import { mapIngressEvent } from '../lib/claude-message-mapper.js';
 import { JsonlWatcher, type SubagentMetadata } from './jsonl-watcher.js';
+import {
+  generateHookToken,
+  registerHookToken,
+  removeHookToken,
+} from '../lib/claude-hooks.js';
 
 /**
  * Terminal + Chat Read-Only agent.
@@ -32,6 +37,7 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
   private messages: AbstractMessage[] = [];
   private pendingToolUses = new Map<string, { name: string; input: any }>();
   private sidechainSessions = new Map<string, string>(); // sessionId → parentToolUseId
+  private hookToken: string | null = null;
 
   constructor(sessionId: string) {
     super();
@@ -46,14 +52,11 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     }
 
     try {
-      // Create watcher and snapshot existing files BEFORE spawning the PTY
-      // to avoid a race where the CLI creates its JSONL file before we record
-      // what was already there.
+      // Create JSONL watcher (don't start yet — hooks may give us the exact file)
       this.jsonlWatcher = new JsonlWatcher({
         cwd: this.cwd,
         resumeUuid: options.resumeSessionUuid,
       });
-      this.jsonlWatcher.snapshot();
 
       this.jsonlWatcher.on('event', (event: any, metadata?: SubagentMetadata) => {
         this.handleJsonlEvent(event, metadata);
@@ -63,17 +66,40 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
         console.error(`[terminal-chatro] JSONL watcher error:`, err.message);
       });
 
-      // Now spawn the terminal PTY
+      // Set up hooks for reliable session discovery and status tracking
+      this.hookToken = generateHookToken();
+      const sessionUuidPromise = registerHookToken(this.hookToken, this.sessionId, this.cwd);
+
+      // Snapshot existing JSONL files as fallback (before spawn)
+      this.jsonlWatcher.snapshot();
+
+      // Spawn the terminal PTY with hook token
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
         resumeSessionUuid: options.resumeSessionUuid,
+        hookToken: this.hookToken,
       });
 
-      // Start watching for the new file (async discovery, doesn't block)
-      this.jsonlWatcher.start().catch((err: Error) => {
-        console.error(`[terminal-chatro] JSONL watcher start error:`, err.message);
-      });
+      // Race: hook-based discovery vs timeout fallback
+      const HOOK_TIMEOUT = 8000;
+      try {
+        const cliUuid = await Promise.race([
+          sessionUuidPromise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('hook timeout')), HOOK_TIMEOUT)
+          ),
+        ]);
+        // Hook worked — start tailing the exact file
+        console.log(`[terminal-chatro] Hook-based session discovery: ${cliUuid}`);
+        this.jsonlWatcher.startTailingKnownUuid(cliUuid);
+      } catch {
+        // Hooks not supported or timed out — fall back to directory watching
+        console.warn(`[terminal-chatro] Hook-based discovery failed, falling back to JSONL directory watching`);
+        this.jsonlWatcher.start().catch((err: Error) => {
+          console.error(`[terminal-chatro] JSONL watcher start error:`, err.message);
+        });
+      }
 
       this.setStatus('idle');
       this.emit('ready');
@@ -87,6 +113,11 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
+
+    if (this.hookToken) {
+      removeHookToken(this.hookToken);
+      this.hookToken = null;
+    }
 
     if (this.jsonlWatcher) {
       this.jsonlWatcher.stop();
