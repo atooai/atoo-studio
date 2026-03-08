@@ -189,22 +189,41 @@ function handleStatusMessage(msg: any) {
     useStore.setState({ projects });
   } else if (msg.type === 'project_files_changed' && msg.projectId) {
     const s = useStore.getState();
-    s.updateProject(msg.projectId, (p) => ({
-      ...p,
-      files: msg.files,
-    }));
-    // Refresh any open files that belong to this project
     const proj = s.projects.find((p) => p.id === msg.projectId);
-    if (proj && s.openFiles.length > 0) {
-      refreshOpenFiles(proj.path, s.openFiles);
+    // Only apply if the update path matches current view (skip main project updates when in worktree)
+    const viewingPath = proj?.worktreePath || proj?.path;
+    const updatePath = msg.projectPath || proj?.path;
+    if (!proj?.worktreePath || updatePath === viewingPath) {
+      if (s.showHidden) {
+        // Watcher sends default (hidden-filtered) tree; re-fetch with showHidden
+        const rootParam = proj?.worktreePath ? `?rootPath=${encodeURIComponent(proj.worktreePath)}&showHidden=true` : '?showHidden=true';
+        api('GET', `/api/projects/${msg.projectId}/files${rootParam}`).then((files: any) => {
+          useStore.getState().updateProject(msg.projectId, (p) => ({ ...p, files }));
+        }).catch(() => {});
+      } else {
+        s.updateProject(msg.projectId, (p) => ({
+          ...p,
+          files: msg.files,
+        }));
+      }
+      if (proj && s.openFiles.length > 0) {
+        refreshOpenFiles(proj.path, s.openFiles);
+      }
     }
   } else if (msg.type === 'project_git_changed' && msg.projectId) {
-    useStore.getState().updateProject(msg.projectId, (p) => ({
-      ...p,
-      gitChanges: msg.gitChanges,
-      gitLog: msg.gitLog,
-      stashes: msg.stashes,
-    }));
+    const s = useStore.getState();
+    const proj = s.projects.find((p) => p.id === msg.projectId);
+    // Only apply if the update path matches current view (skip main project updates when in worktree)
+    const viewingPath = proj?.worktreePath || proj?.path;
+    const updatePath = msg.projectPath || proj?.path;
+    if (!proj?.worktreePath || updatePath === viewingPath) {
+      s.updateProject(msg.projectId, (p) => ({
+        ...p,
+        gitChanges: msg.gitChanges,
+        gitLog: msg.gitLog,
+        stashes: msg.stashes,
+      }));
+    }
   } else if (msg.type === 'serial_request') {
     store.addSerialRequest({
       requestId: msg.requestId,

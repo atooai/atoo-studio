@@ -683,6 +683,15 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
   });
 
+  // Reject a serial request (user closed modal without connecting)
+  app.post('/api/mcp/reject-serial', (req, res) => {
+    const { requestId } = req.body;
+    if (!requestId) return res.status(400).json({ error: 'requestId required' });
+    serialManager.rejectRequest(requestId, new Error('User rejected the serial device request'));
+    serialManager.closeRequest(requestId);
+    res.json({ success: true });
+  });
+
   // Mount changes API routes
   app.use(changesRouter);
 

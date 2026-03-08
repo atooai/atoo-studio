@@ -16,6 +16,7 @@ export interface AppState {
   previewVisible: boolean;
   fileFilter: 'all' | 'changed';
   fileView: 'tree' | 'flat';
+  showHidden: boolean;
   stashOpen: boolean;
   activeTabType: 'session' | 'terminal';
   sidebarCollapsed: boolean;
@@ -79,6 +80,7 @@ export interface AppState {
   setPreviewVisible: (v: boolean) => void;
   setFileFilter: (f: 'all' | 'changed') => void;
   setFileView: (v: 'tree' | 'flat') => void;
+  setShowHidden: (v: boolean) => void;
   setStashOpen: (v: boolean) => void;
   setActiveTabType: (t: 'session' | 'terminal') => void;
   setSidebarCollapsed: (v: boolean) => void;
@@ -129,6 +131,7 @@ export const useStore = create<AppState>((set, get) => ({
   previewVisible: false,
   fileFilter: 'all',
   fileView: 'tree',
+  showHidden: false,
   stashOpen: false,
   activeTabType: 'session',
   sidebarCollapsed: false,
@@ -169,6 +172,7 @@ export const useStore = create<AppState>((set, get) => ({
   setPreviewVisible: (v) => set({ previewVisible: v }),
   setFileFilter: (f) => set({ fileFilter: f }),
   setFileView: (v) => set({ fileView: v }),
+  setShowHidden: (v) => set({ showHidden: v }),
   setStashOpen: (v) => set({ stashOpen: v }),
   setActiveTabType: (t) => set({ activeTabType: t }),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),

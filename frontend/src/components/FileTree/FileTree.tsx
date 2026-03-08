@@ -154,7 +154,15 @@ export function FileTree() {
 }
 
 function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) {
-  const { fileFilter, setFileFilter, fileView, setFileView, stashOpen, setStashOpen } = useStore();
+  const { fileFilter, setFileFilter, fileView, setFileView, showHidden, setShowHidden, stashOpen, setStashOpen } = useStore();
+
+  const toggleHidden = () => {
+    const next = !showHidden;
+    setShowHidden(next);
+    // Re-fetch files with new setting
+    useStore.getState().updateProject(proj.id, (p: any) => ({ ...p, _filesLoaded: false }));
+    (window as any).selectProject(proj.id, proj.pe_id || '');
+  };
 
   return (
     <>
@@ -174,6 +182,7 @@ function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) 
         </div>
         <div className="lp-toolbar-sep"></div>
         <div className="lp-toolbar-group">
+          <button className={`lp-tb-btn ${showHidden ? 'active' : ''}`} onClick={toggleHidden} title="Show hidden directories (node_modules, .git, etc.)">⦿</button>
           <button className={`lp-tb-btn ${(!proj.stashes || proj.stashes.length === 0) ? 'disabled' : ''}`} onClick={() => setStashOpen(!stashOpen)} title="Stashes">⊟</button>
         </div>
         {proj.isGit && (

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../state/store';
+import { api } from '../../api';
 import { SerialBridge } from '../../lib/serial-bridge';
 
 interface SerialModalProps {
@@ -18,14 +19,18 @@ export function SerialModal({ requestId, onClose }: SerialModalProps) {
 
   const serialSupported = typeof navigator !== 'undefined' && 'serial' in navigator;
 
+  const statusRef = useRef(status);
+  statusRef.current = status;
+
   useEffect(() => {
     return () => {
       // Cleanup on unmount if not connected (user closed modal without connecting)
-      if (status === 'prompt' || status === 'error') {
-        // Don't disconnect if connected — bridge stays alive
+      if (statusRef.current !== 'connected') {
+        api('POST', '/api/mcp/reject-serial', { requestId }).catch(() => {});
+        useStore.getState().removeSerialRequest(requestId);
       }
     };
-  }, []);
+  }, [requestId]);
 
   if (!request) {
     return (
@@ -71,6 +76,9 @@ export function SerialModal({ requestId, onClose }: SerialModalProps) {
 
   const handleCancel = () => {
     if (status === 'connected') return; // Don't close while connected
+    // Notify server that the user rejected the request
+    api('POST', '/api/mcp/reject-serial', { requestId }).catch(() => {});
+    removeSerialRequest(requestId);
     onClose();
   };
 

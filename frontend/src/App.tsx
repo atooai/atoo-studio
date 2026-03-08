@@ -251,7 +251,10 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
 
   // Determine effective path (worktree or project root)
   const cwdParam = proj.worktreePath ? `?cwd=${encodeURIComponent(proj.worktreePath)}` : '';
-  const rootPathParam = proj.worktreePath ? `?rootPath=${encodeURIComponent(proj.worktreePath)}` : '';
+  const rootPathParams = new URLSearchParams();
+  if (proj.worktreePath) rootPathParams.set('rootPath', proj.worktreePath);
+  if (useStore.getState().showHidden) rootPathParams.set('showHidden', 'true');
+  const rootPathParam = rootPathParams.toString() ? `?${rootPathParams.toString()}` : '';
 
   // Lazy-load file tree
   if (!proj._filesLoaded) {
@@ -307,37 +310,69 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
         api('GET', '/api/historical-sessions').catch(() => []),
         api('GET', '/api/agent-sessions').catch(() => []),
       ]);
-      const mappedSessions = sessions.map((s: any) => ({
-        id: s.id,
-        title: s.title || 'Untitled',
-        status: s.agent_status === 'active' ? 'running' : s.agent_status === 'waiting' ? 'waiting' : 'idle',
-        startedAt: new Date(s.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-        messages: [],
-        lastMessage: '',
-        viewMode: 'chat',
-        model: s.model || null,
-        permissionMode: s.permission_mode || null,
-      }));
+
+      // Build a map of existing sessions to preserve messages/state
+      const existingSessions = new Map(
+        (useStore.getState().projects.find(p => p.id === projectId)?.sessions || []).map(s => [s.id, s])
+      );
+
+      const mappedSessions = sessions.map((s: any) => {
+        const existing = existingSessions.get(s.id);
+        return {
+          id: s.id,
+          title: s.title || 'Untitled',
+          status: s.agent_status === 'active' ? 'running' : s.agent_status === 'waiting' ? 'waiting' : 'idle',
+          startedAt: new Date(s.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          messages: existing?.messages || [],
+          lastMessage: existing?.lastMessage || '',
+          viewMode: existing?.viewMode || 'chat',
+          model: s.model || null,
+          permissionMode: s.permission_mode || null,
+          cwd: proj.path,
+          // Preserve runtime state from existing session
+          ...(existing ? {
+            showVerbose: existing.showVerbose,
+            _agentInfo: existing._agentInfo,
+            _capabilities: existing._capabilities,
+            _pendingControl: existing._pendingControl,
+            _filteredMessages: existing._filteredMessages,
+            contextUsage: existing.contextUsage,
+            contextInProgress: existing.contextInProgress,
+          } : {}),
+        };
+      });
 
       // Merge running agent sessions (e.g. claude-code-terminal) that match this project
       const effectivePath = proj.worktreePath || proj.path;
       const legacyIds = new Set(mappedSessions.map((s: any) => s.id));
       const matchingAgentSessions = agentSessions
         .filter((a: any) => a.cwd === effectivePath && !legacyIds.has(a.sessionId) && a.status !== 'exited')
-        .map((a: any) => ({
-          id: a.sessionId,
-          title: 'Terminal session',
-          status: a.status === 'active' ? 'running' as const : a.status === 'waiting' ? 'waiting' as const : 'idle' as const,
-          startedAt: new Date(a.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          messages: [],
-          lastMessage: '',
-          viewMode: a.agentMode === 'terminal' ? 'tui' as const : 'chat' as const,
-          agentType: a.agentType,
-          agentMode: a.agentMode,
-          model: a.model || null,
-          permissionMode: a.mode || null,
-          _capabilities: a.capabilities,
-        }));
+        .map((a: any) => {
+          const existing = existingSessions.get(a.sessionId);
+          return {
+            id: a.sessionId,
+            title: existing?.title || 'Terminal session',
+            status: a.status === 'active' ? 'running' as const : a.status === 'waiting' ? 'waiting' as const : 'idle' as const,
+            startedAt: existing?.startedAt || new Date(a.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+            messages: existing?.messages || [],
+            lastMessage: existing?.lastMessage || '',
+            viewMode: existing?.viewMode || (a.agentMode === 'terminal' ? 'tui' as const : 'chat' as const),
+            agentType: a.agentType,
+            agentMode: a.agentMode,
+            model: a.model || null,
+            permissionMode: a.mode || null,
+            cwd: a.cwd,
+            _capabilities: existing?._capabilities || a.capabilities,
+            ...(existing ? {
+              showVerbose: existing.showVerbose,
+              _agentInfo: existing._agentInfo,
+              _pendingControl: existing._pendingControl,
+              _filteredMessages: existing._filteredMessages,
+              contextUsage: existing.contextUsage,
+              contextInProgress: existing.contextInProgress,
+            } : {}),
+          };
+        });
 
       const activeIds = new Set([...legacyIds, ...matchingAgentSessions.map((s: any) => s.id)]);
       const historicalSessions = historical
@@ -910,6 +945,7 @@ function registerGlobalFunctions() {
     const store = useStore.getState();
     const proj = store.getActiveProject();
     if (!proj?.worktreePath) return;
+    const wtPath = proj.worktreePath;
     store.updateProject(proj.id, p => ({
       ...p,
       worktreePath: null,
@@ -917,6 +953,8 @@ function registerGlobalFunctions() {
       _filesLoaded: false,
       _gitLoaded: false,
     }));
+    // Stop watching the worktree path
+    api('POST', `/api/projects/${proj.id}/unwatch-worktree`, { path: wtPath }).catch(() => {});
     await selectProject(proj.id);
     store.addToast(proj.name, `Returned to main project`, 'info');
   };
@@ -1427,6 +1465,11 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
     const inst = terminalInstances[termId];
     container.innerHTML = '';
     container.appendChild(inst.el);
+    // Re-observe the new container for resize events
+    if (inst.resizeObserver && inst.container !== container) {
+      inst.resizeObserver.disconnect();
+      inst.resizeObserver.observe(container);
+    }
     inst.container = container;
     setTimeout(() => inst.fitAddon.fit(), 0);
     return;

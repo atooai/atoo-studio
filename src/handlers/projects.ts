@@ -8,6 +8,7 @@ import * as gitOps from '../services/git-ops.js';
 import * as remoteGitOps from '../services/remote-git-ops.js';
 import { sshManager } from '../services/ssh-manager.js';
 import { store } from '../state/store.js';
+import { watchWorktree, unwatchWorktree } from '../services/project-watcher.js';
 
 export const projectsRouter = Router();
 
@@ -88,11 +89,16 @@ projectsRouter.get('/api/projects/:id/files', async (req, res) => {
 
   try {
     const rootPath = (req.query.rootPath as string) || ctx.cwd;
+    const showHidden = req.query.showHidden === 'true';
+    // Auto-watch worktree paths so file/git changes are broadcast
+    if (rootPath !== ctx.cwd && !ctx.connectionId) {
+      watchWorktree(req.params.id, rootPath);
+    }
     if (ctx.connectionId) {
       const tree = await getRemoteFileTree(ctx.connectionId, rootPath);
       res.json(tree);
     } else {
-      const tree = getFileTree(rootPath);
+      const tree = getFileTree(rootPath, 0, showHidden);
       res.json(tree);
     }
   } catch (err: any) {
@@ -765,8 +771,17 @@ projectsRouter.delete('/api/projects/:id/git/worktrees', async (req, res) => {
     ctx.connectionId
       ? await remoteGitOps.gitWorktreeRemove(ctx.connectionId, ctx.cwd, worktreePath)
       : await gitOps.gitWorktreeRemove(ctx.cwd, worktreePath);
+    unwatchWorktree(req.params.id, worktreePath);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Stop watching a worktree path (called when closing worktree view)
+projectsRouter.post('/api/projects/:id/unwatch-worktree', (req, res) => {
+  const worktreePath = req.body?.path;
+  if (!worktreePath) return res.status(400).json({ error: 'path required' });
+  unwatchWorktree(req.params.id, worktreePath);
+  res.json({ success: true });
 });

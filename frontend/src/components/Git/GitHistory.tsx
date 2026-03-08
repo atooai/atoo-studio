@@ -70,11 +70,14 @@ function BranchBar({ proj }: { proj: any }) {
         value={proj.gitLog.currentBranch}
         onChange={(e) => (window as any).switchGitBranch(e.target.value)}
       >
-        {(proj.gitLog.branches || []).map((b: string) => {
+        {(proj.gitLog.branches || []).filter((b: string) => {
+          if (b.startsWith('remotes/')) return true;
+          // Hide branches checked out in other worktrees (they're shown in the worktree list)
+          return b === proj.gitLog.currentBranch || !worktreeBranches.includes(b);
+        }).map((b: string) => {
           const isRemote = b.startsWith('remotes/');
           const display = isRemote ? b.replace('remotes/', '') : b;
-          const isWorktreeBranch = !isRemote && worktreeBranches.includes(b) && b !== proj.gitLog.currentBranch;
-          return <option key={b} value={b} disabled={isWorktreeBranch} style={isWorktreeBranch ? { color: 'var(--text-muted)' } : undefined}>{display}{isWorktreeBranch ? ' (worktree)' : ''}</option>;
+          return <option key={b} value={b}>{display}</option>;
         })}
       </select>
       <div className="gh-branch-actions">

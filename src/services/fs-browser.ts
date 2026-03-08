@@ -7,11 +7,11 @@ interface FileNode {
   children?: FileNode[];
 }
 
-const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', '.nuxt', 'dist', 'build', '__pycache__', '.venv', 'venv', '.cache', '.parcel-cache', 'coverage', '.svn', '.hg']);
+const SKIP_DIRS = new Set(['.git', '.vcc', 'node_modules', '.next', '.nuxt', 'dist', 'build', '__pycache__', '.venv', 'venv', '.cache', '.parcel-cache', 'coverage', '.svn', '.hg']);
 const MAX_DEPTH = 8;
 const MAX_ENTRIES = 2000;
 
-export function getFileTree(dirPath: string, depth: number = 0): FileNode[] {
+export function getFileTree(dirPath: string, depth: number = 0, showHidden: boolean = false): FileNode[] {
   if (depth > MAX_DEPTH) return [];
 
   let entries: fs.Dirent[];
@@ -33,8 +33,8 @@ export function getFileTree(dirPath: string, depth: number = 0): FileNode[] {
   for (const entry of entries) {
     if (count >= MAX_ENTRIES) break;
     if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const children = getFileTree(path.join(dirPath, entry.name), depth + 1);
+      if (!showHidden && SKIP_DIRS.has(entry.name)) continue;
+      const children = getFileTree(path.join(dirPath, entry.name), depth + 1, showHidden);
       result.push({ name: entry.name, type: 'dir', children });
     } else if (entry.isFile() || entry.isSymbolicLink()) {
       result.push({ name: entry.name, type: 'file' });

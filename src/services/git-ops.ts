@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import path from 'path';
 
 const TIMEOUT = 15000;
 
@@ -30,25 +31,64 @@ export async function gitClone(url: string, dest: string): Promise<void> {
 
 export async function gitStatus(cwd: string) {
   const output = await git(['status', '--porcelain', '-uall', '-M'], cwd);
-  return output.split('\n').filter(Boolean).map(line => {
+  const entries = output.split('\n').filter(Boolean).map(line => {
     const x = line[0]; // index (staged) status
     const y = line[1]; // working tree status
     const rest = line.substring(3);
-    // Handle renames: "R100 new_path\told_path" or "R  new_path -> old_path"
+    // Handle renames: porcelain format "R  old_path -> new_path"
     let file = rest;
     let oldPath: string | undefined;
     if (x === 'R' || y === 'R') {
-      // Porcelain format uses NUL or " -> " for rename paths
       const arrowIdx = rest.indexOf(' -> ');
       if (arrowIdx >= 0) {
-        file = rest.substring(0, arrowIdx);
-        oldPath = rest.substring(arrowIdx + 4);
+        oldPath = rest.substring(0, arrowIdx);
+        file = rest.substring(arrowIdx + 4);
       }
     }
     let status = (x + y).trim() || '?';
     const staged = x !== ' ' && x !== '?' && x !== '!';
     return { status, file, staged, indexStatus: x, workTreeStatus: y, oldPath };
   });
+
+  // Detect unstaged renames: pair D (deleted) + ?? (untracked) by comparing file content hashes
+  const deleted = entries.filter(e => e.status === 'D' || e.status === ' D');
+  const untracked = entries.filter(e => e.status === '??');
+  if (deleted.length > 0 && untracked.length > 0) {
+    try {
+      // Get hashes for deleted files (from HEAD) and untracked files (from working tree)
+      const deletedHashes = new Map<string, string>();
+      for (const d of deleted) {
+        try {
+          const hash = (await git(['hash-object', '--stdin-path', d.file], cwd)).trim();
+          // Actually use show to get the blob hash from HEAD
+          const h = (await git(['rev-parse', `HEAD:${d.file}`], cwd)).trim();
+          deletedHashes.set(h, d.file);
+        } catch {}
+      }
+      const matched = new Set<string>();
+      for (const u of untracked) {
+        try {
+          const h = (await git(['hash-object', path.join(cwd, u.file)], cwd)).trim();
+          const oldFile = deletedHashes.get(h);
+          if (oldFile) {
+            // Found a match — convert to rename
+            u.status = 'R';
+            u.indexStatus = 'R';
+            u.oldPath = oldFile;
+            u.staged = false;
+            matched.add(oldFile);
+            deletedHashes.delete(h);
+          }
+        } catch {}
+      }
+      // Remove matched deleted entries
+      if (matched.size > 0) {
+        return entries.filter(e => !(matched.has(e.file) && (e.status === 'D' || e.status === ' D')));
+      }
+    } catch {}
+  }
+
+  return entries;
 }
 
 export async function gitLog(cwd: string, branch?: string, count: number = 30) {

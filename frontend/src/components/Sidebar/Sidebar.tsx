@@ -42,13 +42,16 @@ export function Sidebar() {
           const status = getProjectStatus(p);
           const isActive = p.id === activeProjectId;
           const initials = p.name.substring(0, 2).toUpperCase();
-          const waitingCount = p.sessions.filter(s => s.status === 'waiting').length;
-          const activeCount = p.sessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
-          const openCh = p.sessions.filter(s => s.status !== 'ended').length;
-          const hasAttention = waitingCount > 0;
-
           // Non-main worktrees (exclude the main repo path)
           const worktrees = (p.worktrees || []).filter(wt => wt.path !== p.path);
+          const worktreePaths = new Set(worktrees.map(wt => wt.path));
+
+          // Sessions for the main project only (exclude sessions running in worktrees)
+          const mainSessions = p.sessions.filter(s => !s.cwd || !worktreePaths.has(s.cwd));
+          const waitingCount = mainSessions.filter(s => s.status === 'waiting').length;
+          const activeCount = mainSessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
+          const openCh = mainSessions.filter(s => s.status !== 'ended').length;
+          const hasAttention = waitingCount > 0;
 
           // If project is active and in a worktree, badges go on the worktree sub-item
           const isInWorktree = isActive && !!p.worktreePath;
@@ -61,12 +64,12 @@ export function Sidebar() {
                 name={p.name}
                 path={p.path}
                 initials={initials}
-                status={isInWorktree ? 'idle' : status}
+                status={hasAttention ? 'waiting' : activeCount > 0 ? 'running' : 'idle'}
                 isActive={isActive && !isInWorktree}
-                hasAttention={isInWorktree ? false : hasAttention}
-                waitingCount={isInWorktree ? 0 : waitingCount}
-                activeCount={isInWorktree ? 0 : activeCount}
-                openChats={isInWorktree ? 0 : openCh}
+                hasAttention={hasAttention}
+                waitingCount={waitingCount}
+                activeCount={activeCount}
+                openChats={openCh}
                 sshConnectionId={p.ssh_connection_id}
                 hasWorktrees={worktrees.length > 0}
                 onClick={() => {
@@ -81,6 +84,13 @@ export function Sidebar() {
               {worktrees.map(wt => {
                 const isActiveWorktree = isActive && p.worktreePath === wt.path;
                 const wtName = wt.branch || wt.path.split('/').pop() || 'worktree';
+                // Count sessions running in this worktree
+                const wtSessions = p.sessions.filter(s => s.cwd === wt.path);
+                const wtWaiting = wtSessions.filter(s => s.status === 'waiting').length;
+                const wtActive = wtSessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
+                const wtOpen = wtSessions.filter(s => s.status !== 'ended').length;
+                const wtStatus = wtSessions.some(s => s.status === 'waiting') ? 'waiting'
+                  : wtSessions.some(s => s.status === 'running') ? 'running' : 'idle';
                 return (
                   <WorktreeSubItem
                     key={wt.path}
@@ -89,12 +99,12 @@ export function Sidebar() {
                     name={wtName}
                     path={wt.path}
                     branch={wt.branch}
-                    status={isActiveWorktree ? status : 'idle'}
+                    status={wtStatus}
                     isActive={isActiveWorktree}
-                    hasAttention={isActiveWorktree ? hasAttention : false}
-                    waitingCount={isActiveWorktree ? waitingCount : 0}
-                    activeCount={isActiveWorktree ? activeCount : 0}
-                    openChats={isActiveWorktree ? openCh : 0}
+                    hasAttention={wtWaiting > 0}
+                    waitingCount={wtWaiting}
+                    activeCount={wtActive}
+                    openChats={wtOpen}
                   />
                 );
               })}

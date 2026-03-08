@@ -25,6 +25,7 @@ export interface Session {
   agentMode?: AgentMode;
   permissionMode: string | null;
   model: string | null;
+  cwd?: string;
   showVerbose?: boolean;
   _agentInfo?: any;
   _capabilities?: any;

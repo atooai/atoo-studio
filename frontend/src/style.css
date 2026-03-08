@@ -459,8 +459,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   font-size: 9px;
 }
 .worktree-sub-item .badge {
-  font-size: 8px;
-  padding: 1px 4px;
+  font-size: 9px;
+  padding: 2px 5px;
 }
 .worktree-icon {
   color: var(--text-muted);
