@@ -65,8 +65,9 @@ function reconstructSessionMeta(event: SystemEvent, sessionUuid: string, cwd: st
   };
 }
 
-function reconstructUserMessage(event: UserEvent): object | null {
+function reconstructUserMessage(event: UserEvent): object[] {
   const content = event.message.content;
+  const ts = event.timestamp || new Date().toISOString();
 
   // Tool result events — map to function_call_output
   if (Array.isArray(content)) {
@@ -79,7 +80,7 @@ function reconstructUserMessage(event: UserEvent): object | null {
             ? block.content.map((b: any) => b.text || '').join('')
             : JSON.stringify(block.content || '');
         results.push({
-          timestamp: event.timestamp || new Date().toISOString(),
+          timestamp: ts,
           type: 'response_item',
           payload: {
             type: 'function_call_output',
@@ -89,35 +90,54 @@ function reconstructUserMessage(event: UserEvent): object | null {
         });
       }
     }
-    if (results.length > 0) return results as any;
+    if (results.length > 0) return results;
   }
 
   // Plain text user message
   const text = typeof content === 'string' ? content : '';
-  if (!text) return null;
+  if (!text) return [];
 
-  return {
-    timestamp: event.timestamp || new Date().toISOString(),
-    type: 'event_msg',
-    payload: {
-      type: 'user_message',
-      message: text,
-      images: [],
-      local_images: [],
-      text_elements: [],
+  return [
+    // response_item with role:"user" — this is what Codex uses to rebuild context
+    {
+      timestamp: ts,
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text }],
+      },
     },
-  };
+    // event_msg for UI display
+    {
+      timestamp: ts,
+      type: 'event_msg',
+      payload: {
+        type: 'user_message',
+        message: text,
+        images: [],
+        local_images: [],
+        text_elements: [],
+      },
+    },
+  ];
 }
 
 function reconstructAssistantMessage(event: AssistantEvent): object[] {
   const lines: object[] = [];
   const content = event.message.content;
+  const ts = event.timestamp || new Date().toISOString();
+
+  // Collect text blocks for the response_item with role:"assistant"
+  const outputTextBlocks: object[] = [];
 
   if (Array.isArray(content)) {
     for (const block of content) {
       if (block.type === 'text') {
+        outputTextBlocks.push({ type: 'output_text', text: block.text });
+        // event_msg for UI display
         lines.push({
-          timestamp: event.timestamp || new Date().toISOString(),
+          timestamp: ts,
           type: 'event_msg',
           payload: {
             type: 'agent_message',
@@ -127,7 +147,7 @@ function reconstructAssistantMessage(event: AssistantEvent): object[] {
         });
       } else if (block.type === 'tool_use' && 'id' in block && 'name' in block) {
         lines.push({
-          timestamp: event.timestamp || new Date().toISOString(),
+          timestamp: ts,
           type: 'response_item',
           payload: {
             type: 'function_call',
@@ -139,12 +159,27 @@ function reconstructAssistantMessage(event: AssistantEvent): object[] {
       }
     }
   } else if (typeof content === 'string') {
+    outputTextBlocks.push({ type: 'output_text', text: content });
     lines.push({
-      timestamp: event.timestamp || new Date().toISOString(),
+      timestamp: ts,
       type: 'event_msg',
       payload: {
         type: 'agent_message',
         message: content,
+        phase: 'final_answer',
+      },
+    });
+  }
+
+  // response_item with role:"assistant" — this is what Codex uses to rebuild context
+  if (outputTextBlocks.length > 0) {
+    lines.push({
+      timestamp: ts,
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: outputTextBlocks,
         phase: 'final_answer',
       },
     });
@@ -184,6 +219,59 @@ function reconstructControlRequest(event: ControlRequestEvent): object | null {
   };
 }
 
+function reconstructTurnContext(turnId: string, cwd: string, model: string): object {
+  return {
+    timestamp: new Date().toISOString(),
+    type: 'turn_context',
+    payload: {
+      turn_id: turnId,
+      cwd,
+      current_date: new Date().toISOString().split('T')[0],
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      approval_policy: 'on-request',
+      sandbox_policy: {
+        type: 'workspace-write',
+        writable_roots: [],
+        network_access: false,
+        exclude_tmpdir_env_var: false,
+        exclude_slash_tmp: false,
+      },
+      model,
+      personality: 'pragmatic',
+      collaboration_mode: { mode: 'default', settings: {} },
+      realtime_active: false,
+      summary: 'none',
+      user_instructions: '',
+      truncation_policy: { mode: 'tokens', limit: 10000 },
+    },
+  };
+}
+
+function reconstructTaskStarted(turnId: string, ts: string): object {
+  return {
+    timestamp: ts,
+    type: 'event_msg',
+    payload: {
+      type: 'task_started',
+      turn_id: turnId,
+      model_context_window: 258400,
+      collaboration_mode_kind: 'default',
+    },
+  };
+}
+
+function reconstructTaskComplete(turnId: string, ts: string, lastMessage: string): object {
+  return {
+    timestamp: ts,
+    type: 'event_msg',
+    payload: {
+      type: 'task_complete',
+      turn_id: turnId,
+      last_agent_message: lastMessage,
+    },
+  };
+}
+
 /**
  * Convert SessionEvent to zero or more Codex JSONL line objects.
  */
@@ -197,9 +285,7 @@ function toCodexJsonlLines(event: SessionEvent, sessionUuid: string, cwd: string
       return [];
     }
     case 'user': {
-      const result = reconstructUserMessage(event as UserEvent);
-      if (!result) return [];
-      return Array.isArray(result) ? result : [result];
+      return reconstructUserMessage(event as UserEvent);
     }
     case 'assistant':
       return reconstructAssistantMessage(event as AssistantEvent);
@@ -219,6 +305,59 @@ function toCodexJsonlLines(event: SessionEvent, sessionUuid: string, cwd: string
 // ═══════════════════════════════════════════════════════
 
 /**
+ * Group events into turns (user message + following assistant/result events).
+ * Each turn gets wrapped with task_started, turn_context, task_complete.
+ */
+function groupIntoTurns(events: SessionEvent[]): { system: SessionEvent[]; turns: SessionEvent[][] } {
+  const system: SessionEvent[] = [];
+  const turns: SessionEvent[][] = [];
+  let currentTurn: SessionEvent[] = [];
+
+  for (const event of events) {
+    if (event.type === 'system') {
+      system.push(event);
+      continue;
+    }
+    // Skip non-conversation events (progress, last-prompt, etc.)
+    if (!['user', 'assistant', 'result', 'control_request'].includes(event.type)) {
+      continue;
+    }
+    if (event.type === 'user') {
+      // Tool results belong to the current turn, not a new one
+      const ue = event as UserEvent;
+      const content = ue.message.content;
+      const isToolResult = Array.isArray(content) && content.some((b: any) => b.type === 'tool_result');
+      if (!isToolResult && currentTurn.length > 0) {
+        turns.push(currentTurn);
+        currentTurn = [];
+      }
+    }
+    currentTurn.push(event);
+  }
+  if (currentTurn.length > 0) turns.push(currentTurn);
+
+  return { system, turns };
+}
+
+/**
+ * Extract the last assistant text message from a turn for task_complete.
+ */
+function getLastAssistantText(turn: SessionEvent[]): string {
+  for (let i = turn.length - 1; i >= 0; i--) {
+    if (turn[i].type === 'assistant') {
+      const ae = turn[i] as AssistantEvent;
+      const content = ae.message.content;
+      if (typeof content === 'string') return content;
+      if (Array.isArray(content)) {
+        const textBlock = [...content].reverse().find((b: any) => b.type === 'text');
+        if (textBlock && 'text' in textBlock) return (textBlock as any).text;
+      }
+    }
+  }
+  return '';
+}
+
+/**
  * Write SessionEvent[] as a Codex JSONL file for `codex resume`.
  * Path: ~/.codex/sessions/YYYY/MM/DD/rollout-{timestamp}-{uuid}.jsonl
  *
@@ -235,6 +374,7 @@ export function writeForkedCodexJsonl(
   const filename = buildFilename(targetUuid);
   const jsonlPath = path.join(dateDir, filename);
   const cwd = directory || process.cwd();
+  const model = 'gpt-5.4';
 
   const lines: string[] = [];
 
@@ -256,11 +396,39 @@ export function writeForkedCodexJsonl(
     }));
   }
 
-  for (const event of events) {
+  const { system, turns } = groupIntoTurns(events);
+
+  // Emit system events (session_meta from init)
+  for (const event of system) {
     const codexLines = toCodexJsonlLines(event, targetUuid, cwd);
     for (const line of codexLines) {
       lines.push(JSON.stringify(line));
     }
+  }
+
+  // Emit each turn with proper Codex structure
+  for (const turn of turns) {
+    const turnId = uuidv4();
+    const turnTs = turn[0]?.timestamp || new Date().toISOString();
+
+    // task_started
+    lines.push(JSON.stringify(reconstructTaskStarted(turnId, turnTs)));
+
+    // turn_context
+    lines.push(JSON.stringify(reconstructTurnContext(turnId, cwd, model)));
+
+    // Turn events (response_items + event_msgs)
+    for (const event of turn) {
+      const codexLines = toCodexJsonlLines(event, targetUuid, cwd);
+      for (const line of codexLines) {
+        lines.push(JSON.stringify(line));
+      }
+    }
+
+    // task_complete
+    const lastMsg = getLastAssistantText(turn);
+    const lastTs = turn[turn.length - 1]?.timestamp || new Date().toISOString();
+    lines.push(JSON.stringify(reconstructTaskComplete(turnId, lastTs, lastMsg)));
   }
 
   fs.writeFileSync(jsonlPath, lines.join('\n') + '\n');

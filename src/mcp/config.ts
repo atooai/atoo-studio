@@ -13,6 +13,24 @@ const IS_DEV = !__mcp_config_dir.includes('/dist/src');
 
 let cachedPath: string | null = null;
 
+/** Returns the command, args, and env needed to launch the MCP server process. */
+export function getMcpServerDef(): { command: string; args: string[]; env: Record<string, string> } {
+  const command = IS_DEV ? 'tsx' : 'node';
+  const serverScript = IS_DEV
+    ? path.join(PROJECT_ROOT, 'src', 'mcp', 'server.ts')
+    : path.join(PROJECT_ROOT, 'dist', 'src', 'mcp', 'server.js');
+
+  return {
+    command,
+    args: [serverScript],
+    env: {
+      CCPROXY_WEB_PORT: String(WEB_PORT),
+      CCPROXY_WEB_PROTO: 'https',
+      NODE_TLS_REJECT_UNAUTHORIZED: '0',
+    },
+  };
+}
+
 export const MCP_SYSTEM_PROMPT = [
   'You have a "ccproxy" MCP server available with tools for interacting with the development UI.',
   'IMPORTANT: Whenever you start ANY service, server, or process that listens on a TCP port',
@@ -47,23 +65,13 @@ export const MCP_SYSTEM_PROMPT = [
 export function getMcpConfigPath(): string {
   if (cachedPath) return cachedPath;
 
-  // In dev mode (tsx), run MCP server from source via tsx so no build step is needed.
-  // In production (compiled), run from dist/ via node.
-  const command = IS_DEV ? 'tsx' : 'node';
-  const serverScript = IS_DEV
-    ? path.join(PROJECT_ROOT, 'src', 'mcp', 'server.ts')
-    : path.join(PROJECT_ROOT, 'dist', 'src', 'mcp', 'server.js');
-
+  const def = getMcpServerDef();
   const config = {
     mcpServers: {
       ccproxy: {
-        command,
-        args: [serverScript],
-        env: {
-          CCPROXY_WEB_PORT: String(WEB_PORT),
-          CCPROXY_WEB_PROTO: 'https',
-          NODE_TLS_REJECT_UNAUTHORIZED: '0',
-        },
+        command: def.command,
+        args: def.args,
+        env: def.env,
       },
     },
   };
