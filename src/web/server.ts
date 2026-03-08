@@ -876,9 +876,11 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   });
 
   // Historical sessions from all agent implementations
-  app.get('/api/historical-sessions', async (_req, res) => {
+  // Optional ?cwd= param to filter by project path (includes worktree-related paths)
+  app.get('/api/historical-sessions', async (req, res) => {
     try {
-      const sessions = await agentRegistry.getHistoricalSessions();
+      const cwd = req.query.cwd as string | undefined;
+      const sessions = await agentRegistry.getHistoricalSessions(cwd);
       res.json(sessions);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

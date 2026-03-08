@@ -323,7 +323,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
     try {
       const [sessions, historical, agentSessions] = await Promise.all([
         api('GET', `/api/projects/${proj.id}/sessions`),
-        api('GET', '/api/historical-sessions').catch(() => []),
+        api('GET', `/api/historical-sessions?cwd=${encodeURIComponent(proj.path)}`).catch(() => []),
         api('GET', '/api/agent-sessions').catch(() => []),
       ]);
 
@@ -392,7 +392,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
 
       const activeIds = new Set([...legacyIds, ...matchingAgentSessions.map((s: any) => s.id)]);
       const historicalSessions = historical
-        .filter((h: any) => h.directory === proj.path && !activeIds.has(h.id))
+        .filter((h: any) => !activeIds.has(h.id))
         .map((h: any) => ({
           id: h.id,
           agentType: h.agentType,

@@ -255,12 +255,16 @@ class FsSessionScanner {
   async getFilesForProject(cwds: string[]): Promise<string[]> {
     await this.scan();
     const cwdSet = new Set(cwds);
+
+    // Filter matching sessions and sort by lastModified descending (most recent first)
+    const matching = Array.from(this.cache.values())
+      .filter(meta => cwdSet.has(meta.directory))
+      .sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+
     const files: string[] = [];
     const seen = new Set<string>();
 
-    for (const meta of this.cache.values()) {
-      if (!cwdSet.has(meta.directory)) continue;
-
+    for (const meta of matching) {
       // Add main session file
       if (!seen.has(meta.jsonlPath)) {
         seen.add(meta.jsonlPath);

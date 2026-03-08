@@ -119,7 +119,7 @@ class AgentRegistry {
     return descriptors;
   }
 
-  async getHistoricalSessions(): Promise<HistoricalSession[]> {
+  async getHistoricalSessions(cwd?: string): Promise<HistoricalSession[]> {
     const allSessions: HistoricalSession[] = [];
     for (const factory of this.factories.values()) {
       const sessions = await factory.getHistoricalSessions();
@@ -127,11 +127,16 @@ class AgentRegistry {
     }
     // Deduplicate by session ID (multiple factories may share the same scanner)
     const seen = new Set<string>();
-    const unique = allSessions.filter(s => {
+    let unique = allSessions.filter(s => {
       if (seen.has(s.id)) return false;
       seen.add(s.id);
       return true;
     });
+    // Filter by project path (includes main project + all worktree paths)
+    if (cwd) {
+      const relatedPaths = new Set(vccDb.getAllRelatedProjectPaths(cwd));
+      unique = unique.filter(s => relatedPaths.has(s.directory));
+    }
     // Sort by date descending (most recent first)
     unique.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
     return unique;

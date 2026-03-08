@@ -29,8 +29,19 @@ export const MCP_SYSTEM_PROMPT = [
   'When you need to recall previous decisions, implementation reasoning, discussed approaches,',
   'or any context from past sessions for this project, use mcp__ccproxy__search_session_history.',
   'It searches across ALL session history files (including subagent sessions) for the current project.',
+  'Results are ordered by most recent session first.',
   'IMPORTANT: Prefer delegating search_session_history calls to a subagent when possible, so the',
   'main conversation context is not polluted with potentially large search results.',
+  '\n## When stuck or unsure\n',
+  'Do not rely on documentation, comments, or README files as a source of truth — they are likely outdated.',
+  'Instead, use mcp__ccproxy__search_session_history to find past discussions about the topic.',
+  'Session history contains the actual reasoning behind decisions, failed approaches, and tradeoffs',
+  'that led to the current code.\n',
+  'Search history before:\n',
+  '- Making architectural decisions that might contradict past choices\n',
+  '- Refactoring code whose purpose isn\'t clear from reading it\n',
+  '- Debugging issues that seem like they were solved before\n',
+  '- Choosing between multiple implementation approaches',
 ].join(' ');
 
 export function getMcpConfigPath(): string {
