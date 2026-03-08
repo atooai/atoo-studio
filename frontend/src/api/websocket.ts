@@ -190,39 +190,56 @@ function handleStatusMessage(msg: any) {
   } else if (msg.type === 'project_files_changed' && msg.projectId) {
     const s = useStore.getState();
     const proj = s.projects.find((p) => p.id === msg.projectId);
-    // Only apply if the update path matches current view (skip main project updates when in worktree)
-    const viewingPath = proj?.worktreePath || proj?.path;
-    const updatePath = msg.projectPath || proj?.path;
-    if (!proj?.worktreePath || updatePath === viewingPath) {
-      if (s.showHidden) {
-        // Watcher sends default (hidden-filtered) tree; re-fetch with showHidden
-        const rootParam = proj?.worktreePath ? `?rootPath=${encodeURIComponent(proj.worktreePath)}&showHidden=true` : '?showHidden=true';
-        api('GET', `/api/projects/${msg.projectId}/files${rootParam}`).then((files: any) => {
-          useStore.getState().updateProject(msg.projectId, (p) => ({ ...p, files }));
-        }).catch(() => {});
-      } else {
-        s.updateProject(msg.projectId, (p) => ({
-          ...p,
-          files: msg.files,
-        }));
-      }
-      if (proj && s.openFiles.length > 0) {
-        refreshOpenFiles(proj.path, s.openFiles);
-      }
+    if (s.showHidden) {
+      // Watcher sends default (hidden-filtered) tree; re-fetch with showHidden
+      api('GET', `/api/projects/${msg.projectId}/files?showHidden=true`).then((files: any) => {
+        useStore.getState().updateProject(msg.projectId, (p) => ({ ...p, files }));
+      }).catch(() => {});
+    } else {
+      s.updateProject(msg.projectId, (p) => ({
+        ...p,
+        files: msg.files,
+      }));
+    }
+    if (proj && s.openFiles.length > 0) {
+      refreshOpenFiles(proj.path, s.openFiles);
     }
   } else if (msg.type === 'project_git_changed' && msg.projectId) {
     const s = useStore.getState();
-    const proj = s.projects.find((p) => p.id === msg.projectId);
-    // Only apply if the update path matches current view (skip main project updates when in worktree)
-    const viewingPath = proj?.worktreePath || proj?.path;
-    const updatePath = msg.projectPath || proj?.path;
-    if (!proj?.worktreePath || updatePath === viewingPath) {
-      s.updateProject(msg.projectId, (p) => ({
-        ...p,
-        gitChanges: msg.gitChanges,
-        gitLog: msg.gitLog,
-        stashes: msg.stashes,
-      }));
+    s.updateProject(msg.projectId, (p) => ({
+      ...p,
+      gitChanges: msg.gitChanges,
+      gitLog: msg.gitLog,
+      stashes: msg.stashes,
+    }));
+  } else if (msg.type === 'worktrees_changed' && msg.parentProjectId) {
+    // Reload environment to pick up added/removed worktree projects
+    const s = useStore.getState();
+    if (s.activeEnvironmentId) {
+      // Dynamic import to avoid circular dependency
+      api('GET', `/api/environments/${s.activeEnvironmentId}/projects`).then((projects: any[]) => {
+        const current = useStore.getState();
+        const newProjects = projects.map((p: any) => {
+          // Preserve existing runtime state for known projects
+          const existing = current.projects.find(ep => ep.id === p.id);
+          if (existing) return { ...existing, ...p, parent_project_id: p.parent_project_id };
+          return {
+            ...p,
+            sessions: [],
+            files: [],
+            gitChanges: [],
+            terminals: [],
+            stashes: [],
+            gitLog: { branches: [], currentBranch: '', commits: [], remotes: [] },
+            activeSessionIdx: 0,
+            activeTerminalIdx: 0,
+            _filesLoaded: false,
+            _gitLoaded: false,
+            _sessionsLoaded: false,
+          };
+        });
+        useStore.setState({ projects: newProjects });
+      }).catch(() => {});
     }
   } else if (msg.type === 'serial_request') {
     store.addSerialRequest({

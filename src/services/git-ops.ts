@@ -113,13 +113,17 @@ export async function gitLog(cwd: string, branch?: string, count: number = 30) {
 }
 
 export async function gitCommitFiles(cwd: string, hash: string) {
-  const output = await git(['diff-tree', '--no-commit-id', '-r', '--name-status', hash], cwd);
+  const output = await git(['diff-tree', '--no-commit-id', '-r', '--name-status', '-M', hash], cwd);
   return output.trim().split('\n').filter(Boolean).map(line => {
     const parts = line.split('\t');
     const statusChar = parts[0]?.[0] || 'M';
-    const filePath = parts[1] || '';
     const statusMap: Record<string, string> = { A: 'A', M: 'M', D: 'D', R: 'R', C: 'C' };
-    return { path: filePath, status: statusMap[statusChar] || 'M', additions: 0, deletions: 0 };
+    const status = statusMap[statusChar] || 'M';
+    // Renames/copies have format: R100\told_path\tnew_path
+    if ((statusChar === 'R' || statusChar === 'C') && parts.length >= 3) {
+      return { path: parts[2], status, oldPath: parts[1], additions: 0, deletions: 0 };
+    }
+    return { path: parts[1] || '', status, additions: 0, deletions: 0 };
   });
 }
 

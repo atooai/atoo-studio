@@ -19,6 +19,17 @@ export function Sidebar() {
   const active = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'running' || s.status === 'waiting').length, 0);
   const openChats = projects.reduce((n, p) => n + p.sessions.filter(s => s.status !== 'ended').length, 0);
 
+  // Group projects: root projects first, then children indented under them
+  const rootProjects = projects.filter(p => !p.parent_project_id);
+  const childrenByParent = new Map<string, typeof projects>();
+  for (const p of projects) {
+    if (p.parent_project_id) {
+      const children = childrenByParent.get(p.parent_project_id) || [];
+      children.push(p);
+      childrenByParent.set(p.parent_project_id, children);
+    }
+  }
+
   return (
     <div id="sidebar" className={sidebarCollapsed ? 'collapsed' : ''}>
       <div className="sidebar-header">
@@ -38,76 +49,25 @@ export function Sidebar() {
         <AddMenu />
       </div>
       <div className="project-list" id="project-list">
-        {projects.map(p => {
-          const status = getProjectStatus(p);
-          const isActive = p.id === activeProjectId;
-          const initials = p.name.substring(0, 2).toUpperCase();
-          // Non-main worktrees (exclude the main repo path)
-          const worktrees = (p.worktrees || []).filter(wt => wt.path !== p.path);
-          const worktreePaths = new Set(worktrees.map(wt => wt.path));
-
-          // Sessions for the main project only (exclude sessions running in worktrees)
-          const mainSessions = p.sessions.filter(s => !s.cwd || !worktreePaths.has(s.cwd));
-          const waitingCount = mainSessions.filter(s => s.status === 'waiting').length;
-          const activeCount = mainSessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
-          const openCh = mainSessions.filter(s => s.status !== 'ended').length;
-          const hasAttention = waitingCount > 0;
-
-          // If project is active and in a worktree, badges go on the worktree sub-item
-          const isInWorktree = isActive && !!p.worktreePath;
+        {rootProjects.map(p => {
+          const children = childrenByParent.get(p.id) || [];
 
           return (
             <React.Fragment key={p.id}>
               <ProjectItem
-                projectId={p.id}
-                peId={p.pe_id}
-                name={p.name}
-                path={p.path}
-                initials={initials}
-                status={hasAttention ? 'waiting' : activeCount > 0 ? 'running' : 'idle'}
-                isActive={isActive && !isInWorktree}
-                hasAttention={hasAttention}
-                waitingCount={waitingCount}
-                activeCount={activeCount}
-                openChats={openCh}
-                sshConnectionId={p.ssh_connection_id}
-                hasWorktrees={worktrees.length > 0}
-                onClick={() => {
-                  if (p.worktreePath) {
-                    // Close worktree to go back to main
-                    (window as any).closeWorktree();
-                  } else {
-                    (window as any).selectProject(p.id, p.pe_id || '');
-                  }
-                }}
+                project={p}
+                isActive={p.id === activeProjectId}
+                hasChildren={children.length > 0}
               />
-              {worktrees.map(wt => {
-                const isActiveWorktree = isActive && p.worktreePath === wt.path;
-                const wtName = wt.branch || wt.path.split('/').pop() || 'worktree';
-                // Count sessions running in this worktree
-                const wtSessions = p.sessions.filter(s => s.cwd === wt.path);
-                const wtWaiting = wtSessions.filter(s => s.status === 'waiting').length;
-                const wtActive = wtSessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
-                const wtOpen = wtSessions.filter(s => s.status !== 'ended').length;
-                const wtStatus = wtSessions.some(s => s.status === 'waiting') ? 'waiting'
-                  : wtSessions.some(s => s.status === 'running') ? 'running' : 'idle';
-                return (
-                  <WorktreeSubItem
-                    key={wt.path}
-                    projectId={p.id}
-                    peId={p.pe_id}
-                    name={wtName}
-                    path={wt.path}
-                    branch={wt.branch}
-                    status={wtStatus}
-                    isActive={isActiveWorktree}
-                    hasAttention={wtWaiting > 0}
-                    waitingCount={wtWaiting}
-                    activeCount={wtActive}
-                    openChats={wtOpen}
-                  />
-                );
-              })}
+              {children.map(child => (
+                <ProjectItem
+                  key={child.id}
+                  project={child}
+                  isActive={child.id === activeProjectId}
+                  isChild={true}
+                  hasChildren={false}
+                />
+              ))}
             </React.Fragment>
           );
         })}
@@ -118,7 +78,6 @@ export function Sidebar() {
 }
 
 function StatusChip({ type, count, label, filter }: { type: string; count: number; label: string; filter: string }) {
-  // TODO: implement filterProjects
   return (
     <div className={`status-chip ${type}`} title={`${label}`}>
       <span className="status-chip-count">{count}</span>
@@ -127,13 +86,30 @@ function StatusChip({ type, count, label, filter }: { type: string; count: numbe
   );
 }
 
-function ProjectItem({ projectId, peId, name, path, initials, status, isActive, hasAttention, waitingCount, activeCount, openChats, sshConnectionId, hasWorktrees, onClick }: any) {
+function ProjectItem({ project: p, isActive, isChild, hasChildren }: { project: any; isActive: boolean; isChild?: boolean; hasChildren: boolean }) {
   const { projects, setProjects, setModal, setCtxMenu, addToast } = useStore();
 
+  const status = getProjectStatus(p);
+  const waitingCount = p.sessions.filter((s: any) => s.status === 'waiting').length;
+  const activeCount = p.sessions.filter((s: any) => s.status === 'running' || s.status === 'waiting').length;
+  const openChats = p.sessions.filter((s: any) => s.status !== 'ended').length;
+  const hasAttention = waitingCount > 0;
+  const initials = p.name.substring(0, 2).toUpperCase();
+
+  const handleClick = () => {
+    (window as any).selectProject(p.id, p.pe_id || '');
+  };
+
   const handleRemove = async () => {
+    // For child projects (worktrees), remove the worktree
+    if (p.parent_project_id) {
+      (window as any).removeWorktree(p.id);
+      return;
+    }
+
     let linkCount = 1;
     try {
-      const envs = await api('GET', `/api/projects/${projectId}/environments`);
+      const envs = await api('GET', `/api/projects/${p.id}/environments`);
       linkCount = Array.isArray(envs) ? envs.length : 1;
     } catch {}
 
@@ -142,20 +118,20 @@ function ProjectItem({ projectId, peId, name, path, initials, status, isActive, 
     setModal({
       type: 'remove-project',
       props: {
-        projectName: name,
+        projectName: p.name,
         isLastLink,
         onRemove: async (deleteFiles: boolean) => {
           try {
             const params = isLastLink
               ? `?deleteProject=true${deleteFiles ? '&deleteFiles=true' : ''}`
               : '';
-            await api('DELETE', `/api/project-links/${peId}${params}`);
+            await api('DELETE', `/api/project-links/${p.pe_id}${params}`);
             const current = useStore.getState().projects;
-            setProjects(current.filter(p => p.id !== projectId));
-            addToast(name, deleteFiles ? 'Project removed and files deleted' : 'Project removed', 'success');
+            setProjects(current.filter(proj => proj.id !== p.id));
+            addToast(p.name, deleteFiles ? 'Project removed and files deleted' : 'Project removed', 'success');
             setModal(null);
           } catch (e: any) {
-            addToast(name, `Failed: ${e.message}`, 'attention');
+            addToast(p.name, `Failed: ${e.message}`, 'attention');
           }
         },
       },
@@ -168,78 +144,52 @@ function ProjectItem({ projectId, peId, name, path, initials, status, isActive, 
       x: e.clientX,
       y: e.clientY,
       items: [
-        { label: 'Remove Project', icon: '✕', danger: true, action: handleRemove },
+        { label: isChild ? 'Remove Worktree' : 'Remove Project', icon: '✕', danger: true, action: handleRemove },
       ],
     });
   };
+
+  if (isChild) {
+    const dirName = p.path.split('/').pop() || p.path;
+    return (
+      <div
+        className={`project-item worktree-sub-item ${isActive ? 'active' : ''} ${hasAttention ? 'has-attention' : ''}`}
+        onClick={handleClick}
+        onContextMenu={handleContextMenu}
+        title={`Worktree: ${p.name}\n${p.path}`}
+      >
+        <span className={`project-dot ${status}`}></span>
+        <div className="project-info">
+          <div className="project-name worktree-name">
+            <span className="worktree-icon">⑂</span>
+            {p.name}
+          </div>
+          <div className="project-path">{dirName}</div>
+        </div>
+        <div className="project-badges">
+          <span className="badge badge-attention">{waitingCount}</span>
+          <span className="badge badge-active">{activeCount}</span>
+          <span className="badge badge-chats">{openChats}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       className={`project-item ${isActive ? 'active' : ''} ${hasAttention ? 'has-attention' : ''}`}
-      onClick={onClick}
+      onClick={handleClick}
       onContextMenu={handleContextMenu}
-      title={name}
+      title={p.name}
     >
       <div className="project-square-icon">
-        {sshConnectionId ? <span style={{ fontSize: '10px' }}>SSH</span> : initials}
+        {p.ssh_connection_id ? <span style={{ fontSize: '10px' }}>SSH</span> : initials}
         <span className={`project-square-notif ${status}`}></span>
       </div>
       <span className={`project-dot ${status}`}></span>
       <div className="project-info">
-        <div className="project-name">{name}{sshConnectionId && <span className="ssh-badge" title="Remote (SSH)"> &#x26D3;</span>}</div>
-        <div className="project-path">{path}</div>
-      </div>
-      <div className="project-badges">
-        <span className="badge badge-attention">{waitingCount}</span>
-        <span className="badge badge-active">{activeCount}</span>
-        <span className="badge badge-chats">{openChats}</span>
-      </div>
-    </div>
-  );
-}
-
-function WorktreeSubItem({ projectId, peId, name, path, branch, status, isActive, hasAttention, waitingCount, activeCount, openChats }: any) {
-  const { setCtxMenu } = useStore();
-
-  const handleClick = () => {
-    if (isActive) return; // already viewing this worktree
-    // First select the parent project, then switch to the worktree
-    (window as any).selectProject(projectId, peId || '');
-    setTimeout(() => {
-      (window as any).switchWorktree(path, branch);
-    }, 100);
-  };
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setCtxMenu({
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        { label: 'Remove Worktree', icon: '✕', danger: true, action: () => {
-          (window as any).selectProject(projectId, peId || '');
-          setTimeout(() => (window as any).removeWorktree(path), 100);
-        }},
-      ],
-    });
-  };
-
-  const dirName = path.split('/').pop() || path;
-
-  return (
-    <div
-      className={`project-item worktree-sub-item ${isActive ? 'active' : ''} ${hasAttention ? 'has-attention' : ''}`}
-      onClick={handleClick}
-      onContextMenu={handleContextMenu}
-      title={`Worktree: ${branch}\n${path}`}
-    >
-      <span className={`project-dot ${status}`}></span>
-      <div className="project-info">
-        <div className="project-name worktree-name">
-          <span className="worktree-icon">⑂</span>
-          {name}
-        </div>
-        <div className="project-path">{dirName}</div>
+        <div className="project-name">{p.name}{p.ssh_connection_id && <span className="ssh-badge" title="Remote (SSH)"> &#x26D3;</span>}</div>
+        <div className="project-path">{p.path}</div>
       </div>
       <div className="project-badges">
         <span className="badge badge-attention">{waitingCount}</span>

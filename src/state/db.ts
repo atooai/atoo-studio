@@ -23,6 +23,7 @@ export interface Project {
   isGit?: boolean;
   ssh_connection_id?: string;
   remote_path?: string;
+  parent_project_id?: string | null;
 }
 
 export interface SshConnection {
@@ -64,6 +65,7 @@ class VccDatabase {
 
     this.initSchema();
     this.migrateProjectsSshColumns();
+    this.migrateProjectsParentColumn();
     this.migrate();
   }
 
@@ -172,6 +174,16 @@ class VccDatabase {
     console.log('[db] Added ssh_connection_id and remote_path columns to projects');
   }
 
+  private migrateProjectsParentColumn(): void {
+    const columns = this.db.prepare("PRAGMA table_info(projects)").all() as any[];
+    const hasParentCol = columns.some((c: any) => c.name === 'parent_project_id');
+    if (hasParentCol || columns.length === 0) return;
+    this.db.exec(`
+      ALTER TABLE projects ADD COLUMN parent_project_id TEXT REFERENCES projects(id) ON DELETE CASCADE;
+    `);
+    console.log('[db] Added parent_project_id column to projects');
+  }
+
   private migrateProjectEnvironmentSchema(): void {
     // Check if project_environment table has an `id` column
     const columns = this.db.prepare("PRAGMA table_info(project_environment)").all() as any[];
@@ -274,20 +286,20 @@ class VccDatabase {
   // ═══════════════════════════════════════════════════
 
   getProject(id: string): Project | undefined {
-    return this.db.prepare('SELECT id, name, path, created_at, ssh_connection_id, remote_path FROM projects WHERE id = ?')
+    return this.db.prepare('SELECT id, name, path, created_at, ssh_connection_id, remote_path, parent_project_id FROM projects WHERE id = ?')
       .get(id) as Project | undefined;
   }
 
   listAllProjects(): Project[] {
-    return this.db.prepare('SELECT id, name, path, created_at, ssh_connection_id, remote_path FROM projects ORDER BY created_at')
+    return this.db.prepare('SELECT id, name, path, created_at, ssh_connection_id, remote_path, parent_project_id FROM projects ORDER BY created_at')
       .all() as Project[];
   }
 
-  createProject(name: string, projectPath: string, opts?: { sshConnectionId?: string; remotePath?: string }): Project {
+  createProject(name: string, projectPath: string, opts?: { sshConnectionId?: string; remotePath?: string; parentProjectId?: string }): Project {
     const id = uuidv4();
     const resolved = opts?.sshConnectionId ? projectPath : path.resolve(projectPath);
-    this.db.prepare('INSERT INTO projects (id, name, path, ssh_connection_id, remote_path) VALUES (?, ?, ?, ?, ?)')
-      .run(id, name, resolved, opts?.sshConnectionId || null, opts?.remotePath || null);
+    this.db.prepare('INSERT INTO projects (id, name, path, ssh_connection_id, remote_path, parent_project_id) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, name, resolved, opts?.sshConnectionId || null, opts?.remotePath || null, opts?.parentProjectId || null);
     return this.getProject(id)!;
   }
 
@@ -296,13 +308,23 @@ class VccDatabase {
     return result.changes > 0;
   }
 
+  getChildProjects(parentId: string): Project[] {
+    return this.db.prepare('SELECT id, name, path, created_at, ssh_connection_id, remote_path, parent_project_id FROM projects WHERE parent_project_id = ? ORDER BY created_at')
+      .all(parentId) as Project[];
+  }
+
+  findProjectByPath(projectPath: string): Project | undefined {
+    return this.db.prepare('SELECT id, name, path, created_at, ssh_connection_id, remote_path, parent_project_id FROM projects WHERE path = ?')
+      .get(projectPath) as Project | undefined;
+  }
+
   // ═══════════════════════════════════════════════════
   // N:N LINKING
   // ═══════════════════════════════════════════════════
 
   getProjectsForEnvironment(envId: string): (Project & { pe_id: string })[] {
     return this.db.prepare(`
-      SELECT p.id, p.name, p.path, p.created_at, p.ssh_connection_id, p.remote_path, pe.id as pe_id
+      SELECT p.id, p.name, p.path, p.created_at, p.ssh_connection_id, p.remote_path, p.parent_project_id, pe.id as pe_id
       FROM projects p
       JOIN project_environment pe ON pe.project_id = p.id
       WHERE pe.environment_id = ?
@@ -329,11 +351,32 @@ class VccDatabase {
     this.db.prepare(
       'INSERT INTO project_environment (id, project_id, environment_id) VALUES (?, ?, ?)'
     ).run(peId, projectId, envId);
+
+    // Also link child projects (worktrees) to the same environment
+    const children = this.getChildProjects(projectId);
+    for (const child of children) {
+      this.linkProject(child.id, envId);
+    }
+
     return peId;
   }
 
   unlinkProject(peId: string): void {
+    const pe = this.getProjectEnvironment(peId);
     this.db.prepare('DELETE FROM project_environment WHERE id = ?').run(peId);
+
+    // Also unlink child projects from this environment
+    if (pe) {
+      const children = this.getChildProjects(pe.project_id);
+      for (const child of children) {
+        const childPe = this.db.prepare(
+          'SELECT id FROM project_environment WHERE project_id = ? AND environment_id = ?'
+        ).get(child.id, pe.environment_id) as { id: string } | undefined;
+        if (childPe) {
+          this.unlinkProject(childPe.id);
+        }
+      }
+    }
   }
 
   getProjectEnvironment(peId: string): { id: string; project_id: string; environment_id: string } | undefined {

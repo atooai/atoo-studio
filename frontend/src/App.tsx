@@ -193,16 +193,6 @@ async function selectEnvironment(envId: string, fromRouter = false) {
     }));
     store.setProjects(mappedProjects);
 
-    // Fetch worktrees for git projects in background
-    for (const p of mappedProjects) {
-      if (p.isGit) {
-        api('GET', `/api/projects/${p.id}/git/worktrees`).then((wts: any[]) => {
-          if (wts && wts.length > 1) {
-            useStore.getState().updateProject(p.id, proj => ({ ...proj, worktrees: wts }));
-          }
-        }).catch(() => {});
-      }
-    }
   } catch (e) {
     console.error('Failed to load projects for environment:', e);
     store.setProjects([]);
@@ -211,6 +201,34 @@ async function selectEnvironment(envId: string, fromRouter = false) {
   if (!fromRouter) {
     history.pushState(null, '', '/vccenv/' + envId);
   }
+}
+
+async function reloadProjects() {
+  const store = useStore.getState();
+  if (!store.activeEnvironmentId) return;
+  try {
+    const projects = await api('GET', `/api/environments/${store.activeEnvironmentId}/projects`);
+    const current = store.projects;
+    const newProjects = projects.map((p: any) => {
+      const existing = current.find(ep => ep.id === p.id);
+      if (existing) return { ...existing, ...p, parent_project_id: p.parent_project_id };
+      return {
+        ...p,
+        sessions: [],
+        files: [],
+        gitChanges: [],
+        terminals: [],
+        stashes: [],
+        gitLog: { branches: [], currentBranch: '', commits: [], remotes: [] },
+        activeSessionIdx: 0,
+        activeTerminalIdx: 0,
+        _filesLoaded: false,
+        _gitLoaded: false,
+        _sessionsLoaded: false,
+      };
+    });
+    store.setProjects(newProjects);
+  } catch {}
 }
 
 async function selectProject(projectId: string, peId?: string, fromRouter = false) {
@@ -249,10 +267,8 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
     history.pushState(null, '', '/project/' + apeId);
   }
 
-  // Determine effective path (worktree or project root)
-  const cwdParam = proj.worktreePath ? `?cwd=${encodeURIComponent(proj.worktreePath)}` : '';
+  const cwdParam = '';
   const rootPathParams = new URLSearchParams();
-  if (proj.worktreePath) rootPathParams.set('rootPath', proj.worktreePath);
   if (useStore.getState().showHidden) rootPathParams.set('showHidden', 'true');
   const rootPathParam = rootPathParams.toString() ? `?${rootPathParams.toString()}` : '';
 
@@ -343,7 +359,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
       });
 
       // Merge running agent sessions (e.g. claude-code-terminal) that match this project
-      const effectivePath = proj.worktreePath || proj.path;
+      const effectivePath = proj.path;
       const legacyIds = new Set(mappedSessions.map((s: any) => s.id));
       const matchingAgentSessions = agentSessions
         .filter((a: any) => a.cwd === effectivePath && !legacyIds.has(a.sessionId) && a.status !== 'exited')
@@ -405,7 +421,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
   if (!proj._terminalsLoaded) {
     try {
       const terminals = await api('GET', '/api/terminals');
-      const projTerminals = terminals.filter((t: any) => t.projectPath === proj.path || (proj.worktreePath && t.projectPath === proj.worktreePath));
+      const projTerminals = terminals.filter((t: any) => t.projectPath === proj.path);
       useStore.getState().updateProject(proj.id, p => {
         const existing = p.terminals || [];
         const newTerminals = [...existing];
@@ -574,7 +590,7 @@ function registerGlobalFunctions() {
       setPendingAgentCreation(true);
       const result = await api('POST', '/api/agent-sessions', {
         agentType,
-        cwd: proj.worktreePath || proj.path,
+        cwd: proj.path,
         skipPermissions: true,
       });
       setPendingAgentCreation(false);
@@ -706,7 +722,7 @@ function registerGlobalFunctions() {
     if (!proj) return;
     try {
       // Just create via API — the WebSocket 'terminal_created' event handles adding to store
-      const result = await api('POST', '/api/terminals', { cwd: proj.worktreePath || proj.path });
+      const result = await api('POST', '/api/terminals', { cwd: proj.path });
       // Set active tab to terminal and select the new terminal once it appears
       store.setActiveTabType('terminal');
       // Wait briefly for the WebSocket event to add the terminal, then set the active index
@@ -791,6 +807,7 @@ function registerGlobalFunctions() {
       await refreshGitData(proj.id);
       store.updateProject(proj.id, p => ({ ...p, _filesLoaded: false }));
       await selectProject(proj.id);
+      store.setStashOpen(true);
       store.addToast(proj.name, 'Stashed changes', 'success');
     } catch (e: any) { store.addToast(proj.name, `Failed: ${e.message}`, 'attention'); }
   };
@@ -862,30 +879,18 @@ function registerGlobalFunctions() {
     } catch (e: any) { store.addToast(proj.name, `Failed: ${e.message}`, 'attention'); }
   };
 
-  async function refreshWorktrees(projectId: string) {
-    try {
-      const wts = await api('GET', `/api/projects/${projectId}/git/worktrees`);
-      useStore.getState().updateProject(projectId, p => ({ ...p, worktrees: wts && wts.length > 1 ? wts : undefined }));
-    } catch {}
-  }
-
-  win.getWorktrees = async () => {
-    const store = useStore.getState();
-    const proj = store.getActiveProject();
-    if (!proj?.isGit) return [];
-    try {
-      return await api('GET', `/api/projects/${proj.id}/git/worktrees`);
-    } catch { return []; }
-  };
-
   win.createWorktree = async () => {
     const store = useStore.getState();
     const proj = store.getActiveProject();
     if (!proj?.isGit) return;
-    const branches = (proj.gitLog?.branches || []).filter((b: string) => !b.startsWith('remotes/'));
+    // Find the root project (if we're in a worktree child, go to parent)
+    const rootProj = proj.parent_project_id
+      ? store.projects.find(p => p.id === proj.parent_project_id) || proj
+      : proj;
+    const branches = (rootProj.gitLog?.branches || []).filter((b: string) => !b.startsWith('remotes/'));
     let usedBranches: string[] = [];
     try {
-      const wts = await api('GET', `/api/projects/${proj.id}/git/worktrees`);
+      const wts = await api('GET', `/api/projects/${rootProj.id}/git/worktrees`);
       usedBranches = (wts || []).map((w: any) => w.branch).filter(Boolean);
     } catch {}
     store.setModal({
@@ -893,70 +898,37 @@ function registerGlobalFunctions() {
       props: {
         branches,
         usedBranches,
-        projectPath: proj.path,
+        projectPath: rootProj.path,
         onConfirm: async (wtPath: string, branch: string, isNewBranch: boolean) => {
           try {
-            await api('POST', `/api/projects/${proj.id}/git/worktrees`, { path: wtPath, branch, newBranch: isNewBranch });
-            await refreshGitData(proj.id);
-            await refreshWorktrees(proj.id);
-            store.addToast(proj.name, `Created worktree at ${wtPath}`, 'success');
-          } catch (e: any) { store.addToast(proj.name, `Failed: ${e.message}`, 'attention'); }
+            await api('POST', `/api/projects/${rootProj.id}/git/worktrees`, { path: wtPath, branch, newBranch: isNewBranch });
+            await refreshGitData(rootProj.id);
+            // Reload environment to pick up the new linked project
+            await reloadProjects();
+            store.addToast(rootProj.name, `Created worktree at ${wtPath}`, 'success');
+          } catch (e: any) { store.addToast(rootProj.name, `Failed: ${e.message}`, 'attention'); }
         },
       },
     });
   };
 
-  win.removeWorktree = async (wtPath: string) => {
+  win.removeWorktree = async (projectId: string) => {
     const store = useStore.getState();
-    const proj = store.getActiveProject();
-    if (!proj?.isGit) return;
-    // If we're in the worktree being removed, close it first
-    if (proj.worktreePath === wtPath) {
-      store.updateProject(proj.id, p => ({ ...p, worktreePath: null, worktreeParentBranch: null, _filesLoaded: false, _gitLoaded: false }));
-    }
+    const proj = store.projects.find(p => p.id === projectId);
+    if (!proj?.parent_project_id) return;
+    const parentProj = store.projects.find(p => p.id === proj.parent_project_id);
+    if (!parentProj) return;
     try {
-      await api('DELETE', `/api/projects/${proj.id}/git/worktrees?path=${encodeURIComponent(wtPath)}`);
-      await refreshGitData(proj.id);
-      await refreshWorktrees(proj.id);
-      // Reload files if we were in the removed worktree
-      if (proj.worktreePath === wtPath) await selectProject(proj.id);
-      store.addToast(proj.name, `Removed worktree`, 'info');
-    } catch (e: any) { store.addToast(proj.name, `Failed: ${e.message}`, 'attention'); }
-  };
-
-  win.switchWorktree = async (wtPath: string, wtBranch: string) => {
-    const store = useStore.getState();
-    const proj = store.getActiveProject();
-    if (!proj) return;
-    const parentBranch = proj.gitLog?.currentBranch || 'main';
-    store.updateProject(proj.id, p => ({
-      ...p,
-      worktreePath: wtPath,
-      worktreeParentBranch: parentBranch,
-      _filesLoaded: false,
-      _gitLoaded: false,
-    }));
-    // Reload project data with worktree path
-    await selectProject(proj.id);
-    store.addToast(proj.name, `Switched to worktree: ${wtBranch}`, 'info');
-  };
-
-  win.closeWorktree = async () => {
-    const store = useStore.getState();
-    const proj = store.getActiveProject();
-    if (!proj?.worktreePath) return;
-    const wtPath = proj.worktreePath;
-    store.updateProject(proj.id, p => ({
-      ...p,
-      worktreePath: null,
-      worktreeParentBranch: null,
-      _filesLoaded: false,
-      _gitLoaded: false,
-    }));
-    // Stop watching the worktree path
-    api('POST', `/api/projects/${proj.id}/unwatch-worktree`, { path: wtPath }).catch(() => {});
-    await selectProject(proj.id);
-    store.addToast(proj.name, `Returned to main project`, 'info');
+      await api('DELETE', `/api/projects/${parentProj.id}/git/worktrees?path=${encodeURIComponent(proj.path)}`);
+      await refreshGitData(parentProj.id);
+      // If we're viewing the removed worktree, switch to parent
+      if (store.activeProjectId === projectId) {
+        await selectProject(parentProj.id, parentProj.pe_id);
+      }
+      // Reload environment to remove the child project
+      await reloadProjects();
+      store.addToast(parentProj.name, `Removed worktree`, 'info');
+    } catch (e: any) { store.addToast(parentProj.name, `Failed: ${e.message}`, 'attention'); }
   };
 
   // File editor
@@ -970,7 +942,7 @@ function registerGlobalFunctions() {
     if (idx >= 0) {
       store.setActiveFileIdx(idx);
     } else {
-      const fullPath = (proj.worktreePath || proj.path) + '/' + filePath;
+      const fullPath = (proj.path) + '/' + filePath;
       try {
         const gitMap: Record<string, string> = {};
         (proj.gitChanges || []).forEach(c => { gitMap[c.file] = c.status; });
@@ -1232,7 +1204,7 @@ function registerGlobalFunctions() {
     }
     try {
       setPendingAgentCreation(true);
-      const result = await api('POST', '/api/agent-sessions/resume', { sessionUuid: sessionId, cwd: proj.worktreePath || proj.path, skipPermissions: true });
+      const result = await api('POST', '/api/agent-sessions/resume', { sessionUuid: sessionId, cwd: proj.path, skipPermissions: true });
       setPendingAgentCreation(false);
       const newSessionId = result.sessionId;
       const newSession = {
@@ -1261,7 +1233,7 @@ function registerGlobalFunctions() {
     if (!proj) return;
     try {
       setPendingAgentCreation(true);
-      const result = await api('POST', '/api/agent-sessions/resume', { sessionUuid, cwd: proj.worktreePath || proj.path, skipPermissions: true });
+      const result = await api('POST', '/api/agent-sessions/resume', { sessionUuid, cwd: proj.path, skipPermissions: true });
       setPendingAgentCreation(false);
       const sessionId = result.sessionId;
       const histEntry = (proj.historicalSessions || []).find(h => h.id === sessionUuid);
@@ -1419,7 +1391,7 @@ function startVSplitDrag(e: MouseEvent, side: string) {
 async function refreshGitData(projectId: string) {
   const proj = useStore.getState().projects.find(p => p.id === projectId);
   if (!proj) return;
-  const cwdParam = proj.worktreePath ? `?cwd=${encodeURIComponent(proj.worktreePath)}` : '';
+  const cwdParam = '';
   try {
     const [status, branches, stashes, log] = await Promise.all([
       api('GET', `/api/projects/${proj.id}/git/status${cwdParam}`),
@@ -1559,7 +1531,7 @@ function buildFileCtxMenu(e: MouseEvent, filePath: string, fileType: string) {
   const items: any[] = [];
   if (!isDir) items.push({ label: 'Open', icon: '◇', action: () => (window as any).openFileInEditor(filePath) });
   items.push({ label: 'Copy Path', icon: '⊡', action: () => {
-    navigator.clipboard?.writeText(proj ? (proj.worktreePath || proj.path) + '/' + filePath : filePath);
+    navigator.clipboard?.writeText(proj ? (proj.path) + '/' + filePath : filePath);
     store.addToast(proj?.name || '', 'Path copied', 'info');
   }});
   if (!isDeleted) {
@@ -1621,7 +1593,7 @@ function ctxRename(filePath: string, proj: any) {
         if (newName === oldName) return;
         const parts = filePath.split('/'); parts.pop();
         const dir = parts.join('/');
-        const effPath = proj.worktreePath || proj.path;
+        const effPath = proj.path;
         const fromFull = effPath + '/' + filePath;
         const toFull = effPath + '/' + (dir ? dir + '/' : '') + newName;
         try {
@@ -1648,7 +1620,7 @@ function ctxDelete(filePath: string, proj: any, isDir = false) {
       danger: true,
       onConfirm: async () => {
         try {
-          await api('DELETE', `/api/files?path=${encodeURIComponent((proj.worktreePath || proj.path) + '/' + filePath)}`);
+          await api('DELETE', `/api/files?path=${encodeURIComponent((proj.path) + '/' + filePath)}`);
           // Close the file if it's open in editor
           const s = useStore.getState();
           const openIdx = s.openFiles.findIndex((f: any) => f.path === filePath);
@@ -1711,7 +1683,7 @@ function ctxNewFile(dirPath: string, proj: any) {
       confirmLabel: 'Create',
       onConfirm: async (name: string) => {
         try {
-          await api('POST', '/api/files/create', { path: (proj.worktreePath || proj.path) + '/' + dirPath + '/' + name, type: 'file' });
+          await api('POST', '/api/files/create', { path: (proj.path) + '/' + dirPath + '/' + name, type: 'file' });
           store.updateProject(proj.id, (p: any) => ({ ...p, _filesLoaded: false }));
           await selectProject(proj.id);
           store.addToast(proj.name, `Created ${name}`, 'success');
@@ -1732,7 +1704,7 @@ function ctxNewFolder(dirPath: string, proj: any) {
       confirmLabel: 'Create',
       onConfirm: async (name: string) => {
         try {
-          await api('POST', '/api/files/create', { path: (proj.worktreePath || proj.path) + '/' + dirPath + '/' + name, type: 'dir' });
+          await api('POST', '/api/files/create', { path: (proj.path) + '/' + dirPath + '/' + name, type: 'dir' });
           store.updateProject(proj.id, (p: any) => ({ ...p, _filesLoaded: false }));
           await selectProject(proj.id);
           store.addToast(proj.name, `Created folder ${name}`, 'success');
@@ -1795,7 +1767,7 @@ async function onDropItem(targetPath: string, targetType: string) {
     const parts = targetPath.split('/'); parts.pop();
     destDir = parts.join('/');
   }
-  const effPath = proj.worktreePath || proj.path;
+  const effPath = proj.path;
   const fromFull = effPath + '/' + dragState.srcPath;
   const toFull = effPath + '/' + (destDir ? destDir + '/' : '') + srcName;
   try {
@@ -1812,7 +1784,7 @@ function onDropRoot() {
   const proj = store.getActiveProject();
   if (!proj) return;
   const srcName = dragState.srcPath.split('/').pop();
-  const effPath2 = proj.worktreePath || proj.path;
+  const effPath2 = proj.path;
   const fromFull = effPath2 + '/' + dragState.srcPath;
   const toFull = effPath2 + '/' + srcName;
   api('POST', '/api/files/move', { from: fromFull, to: toFull }).then(() => {

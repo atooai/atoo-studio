@@ -71,10 +71,10 @@ function CenterTabs({ proj }: { proj: any }) {
   const { activeTabType, setActiveTabType } = useStore();
   const activeSessions = proj.sessions.filter((s: any) => s.status !== 'ended');
   const terminals = proj.terminals || [];
-  const inWorktree = !!proj.worktreePath;
+  const isWorktreeProject = !!proj.parent_project_id;
 
   return (
-    <div className={`center-tabs ${inWorktree ? 'worktree-active' : ''}`}>
+    <div className={`center-tabs ${isWorktreeProject ? 'worktree-active' : ''}`}>
       {activeSessions.map((s: any, i: number) => {
         const isActive = activeTabType === 'session' && i === (proj.activeSessionIdx || 0);
         const warn = s.permissionMode === 'bypassPermissions' ? <span className="tab-warn" title="--dangerously-skip-permissions">⚠</span> : null;

@@ -131,7 +131,7 @@ export function PreviewPanel() {
         label: 'Save to project', icon: '💾',
         action: async () => {
           if (!proj) return;
-          const savePath = `${proj.worktreePath || proj.path}/screenshots/screenshot-${Date.now()}.png`;
+          const savePath = `${proj.path}/screenshots/screenshot-${Date.now()}.png`;
           try {
             await api('POST', '/api/files/binary', { path: savePath, data: base64 });
             addToast(proj.name, 'Screenshot saved to project', 'info');

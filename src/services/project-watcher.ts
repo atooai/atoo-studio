@@ -11,13 +11,15 @@ const DEBOUNCE_MS = 500;
 interface WatchEntry {
   watcher: fs.FSWatcher;
   gitWatcher: fs.FSWatcher | null;
+  worktreesWatcher: fs.FSWatcher | null;
   debounceTimer: ReturnType<typeof setTimeout> | null;
   gitDebounceTimer: ReturnType<typeof setTimeout> | null;
+  worktreesDebounceTimer: ReturnType<typeof setTimeout> | null;
   projectId: string;
   projectPath: string;
 }
 
-const watches = new Map<string, WatchEntry>(); // "projectId" or "projectId:worktreePath" → WatchEntry
+const watches = new Map<string, WatchEntry>();
 
 function broadcastToStatus(msg: any) {
   const data = JSON.stringify(msg);
@@ -94,6 +96,95 @@ async function handleGitChange(entry: WatchEntry) {
   }, DEBOUNCE_MS);
 }
 
+// Reconcile worktree-linked projects: read .git/worktrees/ subdirectories and
+// ensure each worktree has a corresponding child project in the DB.
+function handleWorktreesChange(entry: WatchEntry) {
+  if (entry.worktreesDebounceTimer) clearTimeout(entry.worktreesDebounceTimer);
+  entry.worktreesDebounceTimer = setTimeout(() => {
+    entry.worktreesDebounceTimer = null;
+    reconcileWorktrees(entry.projectId, entry.projectPath);
+  }, DEBOUNCE_MS);
+}
+
+export function reconcileWorktrees(projectId: string, projectPath: string) {
+  const worktreesDir = path.join(projectPath, '.git', 'worktrees');
+  const discoveredPaths = new Map<string, string>(); // wtPath -> branch
+
+  if (fs.existsSync(worktreesDir)) {
+    try {
+      const entries = fs.readdirSync(worktreesDir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isDirectory()) continue;
+        const wtDir = path.join(worktreesDir, ent.name);
+        // Read gitdir to find the worktree path
+        const gitdirFile = path.join(wtDir, 'gitdir');
+        if (!fs.existsSync(gitdirFile)) continue;
+        try {
+          const gitdirContent = fs.readFileSync(gitdirFile, 'utf8').trim();
+          // gitdir points to <worktree-path>/.git — so the worktree path is the parent
+          const wtPath = path.dirname(gitdirContent);
+          // Read branch from HEAD
+          let branch = ent.name;
+          const headFile = path.join(wtDir, 'HEAD');
+          if (fs.existsSync(headFile)) {
+            const headContent = fs.readFileSync(headFile, 'utf8').trim();
+            const match = headContent.match(/^ref: refs\/heads\/(.+)$/);
+            if (match) branch = match[1];
+          }
+          discoveredPaths.set(wtPath, branch);
+        } catch {}
+      }
+    } catch {}
+  }
+
+  // Get existing child projects
+  const existingChildren = vccDb.getChildProjects(projectId);
+  const existingPaths = new Set(existingChildren.map(c => c.path));
+
+  // Get environments this parent is linked to (so we can link new children too)
+  const parentEnvs = vccDb.getEnvironmentsForProject(projectId);
+
+  // Add new worktrees as child projects
+  for (const [wtPath, branch] of discoveredPaths) {
+    if (existingPaths.has(wtPath)) continue;
+    console.log(`[project-watcher] Discovered new worktree: ${wtPath} (${branch})`);
+    const childProject = vccDb.createProject(branch, wtPath, { parentProjectId: projectId });
+    // Link to same environments as parent
+    for (const env of parentEnvs) {
+      vccDb.linkProject(childProject.id, env.id);
+    }
+    // Start watching the child project
+    watchProject(childProject.id, wtPath);
+    // Notify frontend
+    broadcastToStatus({ type: 'worktrees_changed', parentProjectId: projectId });
+  }
+
+  // Remove child projects whose worktree no longer exists
+  for (const child of existingChildren) {
+    if (!discoveredPaths.has(child.path)) {
+      console.log(`[project-watcher] Worktree removed: ${child.path}`);
+      unwatchProject(child.id);
+      vccDb.deleteProject(child.id);
+      broadcastToStatus({ type: 'worktrees_changed', parentProjectId: projectId });
+    }
+  }
+}
+
+function startWorktreesWatcher(entry: WatchEntry): fs.FSWatcher | null {
+  const worktreesDir = path.join(entry.projectPath, '.git', 'worktrees');
+  if (!fs.existsSync(worktreesDir)) return null;
+  try {
+    const watcher = fs.watch(worktreesDir, (_eventType, _filename) => {
+      const e = watches.get(entry.projectId);
+      if (e) handleWorktreesChange(e);
+    });
+    watcher.on('error', () => {});
+    return watcher;
+  } catch {
+    return null;
+  }
+}
+
 export function watchProject(projectId: string, projectPath: string) {
   // Already watching
   if (watches.has(projectId)) return;
@@ -108,28 +199,66 @@ export function watchProject(projectId: string, projectPath: string) {
     });
 
     let gitWatcher: fs.FSWatcher | null = null;
-    const gitDir = path.join(projectPath, '.git');
-    if (fs.existsSync(gitDir)) {
-      try {
-        gitWatcher = fs.watch(gitDir, { recursive: true }, (_eventType, _filename) => {
-          const entry = watches.get(projectId);
-          if (entry) handleGitChange(entry);
-        });
-        gitWatcher.on('error', () => {});
-      } catch {
-        // .git watch failed, not critical
+    const gitPath = path.join(projectPath, '.git');
+    if (fs.existsSync(gitPath)) {
+      const stat = fs.statSync(gitPath);
+      if (stat.isDirectory()) {
+        // Normal project with .git directory
+        try {
+          gitWatcher = fs.watch(gitPath, { recursive: true }, (_eventType, filename) => {
+            const entry = watches.get(projectId);
+            if (!entry) return;
+            handleGitChange(entry);
+            // If change is in the worktrees/ subdir or worktrees dir was created/removed, reconcile
+            if (filename && (filename === 'worktrees' || filename.startsWith('worktrees' + path.sep))) {
+              // Start worktrees watcher if it doesn't exist yet
+              if (!entry.worktreesWatcher) {
+                entry.worktreesWatcher = startWorktreesWatcher(entry);
+              }
+              handleWorktreesChange(entry);
+            }
+          });
+          gitWatcher.on('error', () => {});
+        } catch {}
+      } else if (stat.isFile()) {
+        // Worktree project with .git file pointing to main repo
+        try {
+          const content = fs.readFileSync(gitPath, 'utf8').trim();
+          const match = content.match(/^gitdir:\s*(.+)$/);
+          if (match) {
+            const gitDir = path.resolve(projectPath, match[1]);
+            if (fs.existsSync(gitDir)) {
+              gitWatcher = fs.watch(gitDir, { recursive: true }, () => {
+                const entry = watches.get(projectId);
+                if (entry) handleGitChange(entry);
+              });
+              gitWatcher.on('error', () => {});
+            }
+          }
+        } catch {}
       }
     }
 
     const entry: WatchEntry = {
       watcher,
       gitWatcher,
+      worktreesWatcher: null,
       debounceTimer: null,
       gitDebounceTimer: null,
+      worktreesDebounceTimer: null,
       projectId,
       projectPath,
     };
     watches.set(projectId, entry);
+
+    // Start worktrees watcher if .git/worktrees/ already exists
+    entry.worktreesWatcher = startWorktreesWatcher(entry);
+
+    // Initial reconciliation of worktrees
+    const gitPath2 = path.join(projectPath, '.git');
+    if (fs.existsSync(gitPath2) && fs.statSync(gitPath2).isDirectory()) {
+      reconcileWorktrees(projectId, projectPath);
+    }
 
     watcher.on('error', () => {
       unwatchProject(projectId);
@@ -147,8 +276,10 @@ export function unwatchProject(projectId: string) {
 
   if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
   if (entry.gitDebounceTimer) clearTimeout(entry.gitDebounceTimer);
+  if (entry.worktreesDebounceTimer) clearTimeout(entry.worktreesDebounceTimer);
   try { entry.watcher.close(); } catch {}
   try { entry.gitWatcher?.close(); } catch {}
+  try { entry.worktreesWatcher?.close(); } catch {}
   watches.delete(projectId);
   console.log(`[project-watcher] Stopped watching project ${projectId}`);
 }
@@ -168,74 +299,4 @@ export function unwatchAll() {
 
 export function isWatching(projectId: string): boolean {
   return watches.has(projectId);
-}
-
-export function watchWorktree(projectId: string, worktreePath: string) {
-  const key = `${projectId}:${worktreePath}`;
-  if (watches.has(key)) return;
-
-  try {
-    const watcher = fs.watch(worktreePath, { recursive: true }, (_eventType, filename) => {
-      if (!filename) return;
-      if (filename.startsWith('.git' + path.sep) || filename === '.git') return;
-      const entry = watches.get(key);
-      if (entry) handleFileChange(entry);
-    });
-
-    // Worktrees have a .git file (not dir) pointing to the main repo's .git/worktrees/<name>
-    // Watch that for git status changes
-    let gitWatcher: fs.FSWatcher | null = null;
-    const gitFile = path.join(worktreePath, '.git');
-    if (fs.existsSync(gitFile)) {
-      const stat = fs.statSync(gitFile);
-      if (stat.isFile()) {
-        // Read the gitdir reference
-        try {
-          const content = fs.readFileSync(gitFile, 'utf8').trim();
-          const match = content.match(/^gitdir:\s*(.+)$/);
-          if (match) {
-            const gitDir = path.resolve(worktreePath, match[1]);
-            if (fs.existsSync(gitDir)) {
-              gitWatcher = fs.watch(gitDir, { recursive: true }, () => {
-                const entry = watches.get(key);
-                if (entry) handleGitChange(entry);
-              });
-              gitWatcher.on('error', () => {});
-            }
-          }
-        } catch {}
-      }
-    }
-
-    const entry: WatchEntry = {
-      watcher,
-      gitWatcher,
-      debounceTimer: null,
-      gitDebounceTimer: null,
-      projectId,
-      projectPath: worktreePath,
-    };
-    watches.set(key, entry);
-
-    watcher.on('error', () => {
-      unwatchWorktree(projectId, worktreePath);
-    });
-
-    console.log(`[project-watcher] Watching worktree ${worktreePath} (project ${projectId})`);
-  } catch (err) {
-    console.error(`[project-watcher] Failed to watch worktree ${worktreePath}:`, err);
-  }
-}
-
-export function unwatchWorktree(projectId: string, worktreePath: string) {
-  const key = `${projectId}:${worktreePath}`;
-  const entry = watches.get(key);
-  if (!entry) return;
-
-  if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
-  if (entry.gitDebounceTimer) clearTimeout(entry.gitDebounceTimer);
-  try { entry.watcher.close(); } catch {}
-  try { entry.gitWatcher?.close(); } catch {}
-  watches.delete(key);
-  console.log(`[project-watcher] Stopped watching worktree ${worktreePath}`);
 }

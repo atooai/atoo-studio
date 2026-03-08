@@ -1011,42 +1011,6 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
 .gh-branch-sep { width: 1px; height: 14px; background: var(--border); flex-shrink: 0; }
 
 .gh-branch-bar { flex-wrap: wrap; position: relative; }
-.gh-worktree-list {
-  width: 100%;
-  border-top: 1px solid var(--border-subtle);
-  margin-top: 4px;
-  padding-top: 4px;
-}
-.gh-worktree-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 4px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-}
-.gh-worktree-item.current { background: rgba(91, 138, 245, 0.08); }
-.gh-worktree-item.current .gh-worktree-branch { color: var(--accent-blue); }
-.gh-worktree-branch { font-family: var(--font-mono); font-weight: 500; color: var(--text-primary); }
-.gh-worktree-path { color: var(--text-muted); font-family: var(--font-mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gh-worktree-remove {
-  width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-sm); color: var(--text-muted); font-size: 14px;
-  transition: all var(--transition-fast); flex-shrink: 0;
-}
-.gh-worktree-remove:hover { color: var(--accent-red); background: var(--accent-red-dim); }
-.gh-worktree-item.clickable { cursor: pointer; }
-.gh-worktree-item.clickable:hover { background: rgba(91, 138, 245, 0.12); }
-
-/* Worktree mode header */
-.gh-worktree-mode { background: rgba(166, 127, 230, 0.08); }
-.gh-worktree-caption {
-  font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.gh-worktree-caption strong { color: var(--accent-purple, #a67fe6); font-weight: 600; }
-.gh-close-worktree { color: var(--accent-purple, #a67fe6) !important; font-size: 11px !important; gap: 3px; }
-.gh-close-worktree:hover { background: rgba(166, 127, 230, 0.15) !important; }
 
 /* Worktree active tabs */
 .center-tabs.worktree-active { background: rgba(166, 127, 230, 0.06); border-bottom-color: rgba(166, 127, 230, 0.25); }
@@ -1227,6 +1191,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   min-width: 0;
 }
 .gh-file-path-dir { color: var(--text-muted); }
+.gh-file-path-old { color: var(--text-muted); text-decoration: line-through; margin-right: 2px; }
 
 .gh-file-stats {
   margin-left: auto;

@@ -4,13 +4,6 @@ import { escapeHtml } from '../../utils';
 import { api } from '../../api';
 import type { GitCommit, GitFile } from '../../types';
 
-interface Worktree {
-  path: string;
-  head: string;
-  branch: string;
-  bare?: boolean;
-}
-
 export function GitHistory() {
   const { activeProjectId, projects } = useStore();
   const proj = projects.find(p => p.id === activeProjectId);
@@ -36,31 +29,17 @@ export function GitHistory() {
 }
 
 function BranchBar({ proj }: { proj: any }) {
-  const inWorktree = !!proj.worktreePath;
+  const { projects } = useStore();
+  const isWorktree = !!proj.parent_project_id;
 
-  // Use worktrees from the store (shared with sidebar)
-  const worktrees: Worktree[] = (proj.worktrees && proj.worktrees.length > 1) ? proj.worktrees : [];
-
-  // Find worktree branches for disabling in selector
-  const worktreeBranches = worktrees.map(wt => wt.branch).filter(Boolean);
-
-  if (inWorktree) {
-    // Worktree mode: static caption, close button only
-    const wtBranch = proj.worktreeParentBranch
-      ? worktrees.find(wt => wt.path === proj.worktreePath)?.branch || proj.gitLog.currentBranch
-      : proj.gitLog.currentBranch;
-
-    return (
-      <div className="gh-branch-bar gh-worktree-mode">
-        <span className="gh-branch-icon">&#x2442;</span>
-        <span className="gh-worktree-caption">Worktree: <strong>{wtBranch}</strong></span>
-        <div className="gh-branch-actions">
-          <button className="gh-branch-btn" onClick={() => (window as any).fetchRemote()} title="Fetch">&#x2193;</button>
-          <button className="gh-branch-btn gh-close-worktree" onClick={() => (window as any).closeWorktree()} title="Back to main branch">&#x2716; Close</button>
-        </div>
-      </div>
-    );
-  }
+  // Collect branches used by sibling worktree projects (exclude our own)
+  const parentId = proj.parent_project_id || proj.id;
+  const worktreeBranches = new Set(
+    projects
+      .filter(p => p.parent_project_id === parentId && p.id !== proj.id)
+      .map(p => p.gitLog?.currentBranch)
+      .filter(Boolean)
+  );
 
   return (
     <div className="gh-branch-bar">
@@ -72,8 +51,10 @@ function BranchBar({ proj }: { proj: any }) {
       >
         {(proj.gitLog.branches || []).filter((b: string) => {
           if (b.startsWith('remotes/')) return true;
-          // Hide branches checked out in other worktrees (they're shown in the worktree list)
-          return b === proj.gitLog.currentBranch || !worktreeBranches.includes(b);
+          // Always show our own current branch
+          if (b === proj.gitLog.currentBranch) return true;
+          // Hide branches checked out in other worktrees
+          return !worktreeBranches.has(b);
         }).map((b: string) => {
           const isRemote = b.startsWith('remotes/');
           const display = isRemote ? b.replace('remotes/', '') : b;
@@ -82,30 +63,10 @@ function BranchBar({ proj }: { proj: any }) {
       </select>
       <div className="gh-branch-actions">
         <button className="gh-branch-btn" onClick={() => (window as any).createBranch()} title="New branch">+</button>
-        <button className="gh-branch-btn" onClick={() => (window as any).createWorktree()} title="New worktree">&#x2295;</button>
+        {!isWorktree && <button className="gh-branch-btn" onClick={() => (window as any).createWorktree()} title="New worktree">&#x2295;</button>}
         <button className="gh-branch-btn" onClick={() => (window as any).fetchRemote()} title="Fetch">&#x2193;</button>
-        <button className="gh-branch-btn" onClick={() => (window as any).openRemoteManager()} title="Manage remotes">&#x21C4;</button>
+        {!isWorktree && <button className="gh-branch-btn" onClick={() => (window as any).openRemoteManager()} title="Manage remotes">&#x21C4;</button>}
       </div>
-      {worktrees.length > 0 && (
-        <div className="gh-worktree-list">
-          {worktrees.filter(wt => wt.path !== proj.path).map(wt => (
-            <div
-              key={wt.path}
-              className="gh-worktree-item clickable"
-              onClick={() => (window as any).switchWorktree(wt.path, wt.branch)}
-              title={`Switch to worktree: ${wt.path}`}
-            >
-              <span className="gh-worktree-branch">{wt.branch || '(detached)'}</span>
-              <span className="gh-worktree-path" title={wt.path}>{wt.path.split('/').pop()}</span>
-              <button
-                className="gh-worktree-remove"
-                onClick={(e) => { e.stopPropagation(); (window as any).removeWorktree(wt.path); }}
-                title="Remove worktree"
-              >&times;</button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -191,6 +152,7 @@ function CommitList({ proj }: { proj: any }) {
                     <div key={f.path} className="gh-file-item" onClick={() => (window as any).openFileInEditor(f.path)}>
                       <span className={`gh-file-status ${statusMap[f.status] || ''}`}>{f.status}</span>
                       <span className="gh-file-path">
+                        {f.oldPath && <span className="gh-file-path-old">{f.oldPath} → </span>}
                         {dir && <span className="gh-file-path-dir">{dir}</span>}
                         {name}
                       </span>

@@ -8,7 +8,7 @@ import * as gitOps from '../services/git-ops.js';
 import * as remoteGitOps from '../services/remote-git-ops.js';
 import { sshManager } from '../services/ssh-manager.js';
 import { store } from '../state/store.js';
-import { watchWorktree, unwatchWorktree } from '../services/project-watcher.js';
+import { watchProject, unwatchProject, reconcileWorktrees } from '../services/project-watcher.js';
 
 export const projectsRouter = Router();
 
@@ -90,10 +90,6 @@ projectsRouter.get('/api/projects/:id/files', async (req, res) => {
   try {
     const rootPath = (req.query.rootPath as string) || ctx.cwd;
     const showHidden = req.query.showHidden === 'true';
-    // Auto-watch worktree paths so file/git changes are broadcast
-    if (rootPath !== ctx.cwd && !ctx.connectionId) {
-      watchWorktree(req.params.id, rootPath);
-    }
     if (ctx.connectionId) {
       const tree = await getRemoteFileTree(ctx.connectionId, rootPath);
       res.json(tree);
@@ -751,11 +747,16 @@ projectsRouter.post('/api/projects/:id/git/worktrees', async (req, res) => {
   const ctx = getProjectCwd(req, res);
   if (!ctx) return;
   try {
-    const { path, branch, newBranch } = req.body;
-    if (!path) return res.status(400).json({ error: 'path is required' });
+    const { path: wtPath, branch, newBranch } = req.body;
+    if (!wtPath) return res.status(400).json({ error: 'path is required' });
     ctx.connectionId
-      ? await remoteGitOps.gitWorktreeAdd(ctx.connectionId, ctx.cwd, path, branch, newBranch)
-      : await gitOps.gitWorktreeAdd(ctx.cwd, path, branch, newBranch);
+      ? await remoteGitOps.gitWorktreeAdd(ctx.connectionId, ctx.cwd, wtPath, branch, newBranch)
+      : await gitOps.gitWorktreeAdd(ctx.cwd, wtPath, branch, newBranch);
+    // Reconcile will auto-create the linked project via the watcher,
+    // but also do it immediately so the response is ready
+    if (!ctx.connectionId) {
+      reconcileWorktrees(req.params.id, ctx.cwd);
+    }
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -768,20 +769,17 @@ projectsRouter.delete('/api/projects/:id/git/worktrees', async (req, res) => {
   try {
     const worktreePath = req.query.path as string;
     if (!worktreePath) return res.status(400).json({ error: 'path query parameter required' });
+    // Find and remove the linked child project
+    const childProject = vccDb.findProjectByPath(worktreePath);
+    if (childProject) {
+      unwatchProject(childProject.id);
+      vccDb.deleteProject(childProject.id);
+    }
     ctx.connectionId
       ? await remoteGitOps.gitWorktreeRemove(ctx.connectionId, ctx.cwd, worktreePath)
       : await gitOps.gitWorktreeRemove(ctx.cwd, worktreePath);
-    unwatchWorktree(req.params.id, worktreePath);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
-});
-
-// Stop watching a worktree path (called when closing worktree view)
-projectsRouter.post('/api/projects/:id/unwatch-worktree', (req, res) => {
-  const worktreePath = req.body?.path;
-  if (!worktreePath) return res.status(400).json({ error: 'path required' });
-  unwatchWorktree(req.params.id, worktreePath);
-  res.json({ success: true });
 });

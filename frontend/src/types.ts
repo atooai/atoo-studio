@@ -118,6 +118,7 @@ export interface GitRef {
 export interface GitFile {
   path: string;
   status: string;
+  oldPath?: string;
   additions?: number;
   deletions?: number;
 }
@@ -169,6 +170,7 @@ export interface Project {
   isGit?: boolean;
   ssh_connection_id?: string;
   remote_path?: string;
+  parent_project_id?: string | null;
   sessions: Session[];
   files: FileNode[];
   gitChanges: GitChange[];
@@ -178,9 +180,6 @@ export interface Project {
   historicalSessions?: HistoricalSession[];
   activeSessionIdx: number;
   activeTerminalIdx: number;
-  worktrees?: Array<{ path: string; branch: string; head?: string }>;
-  worktreePath?: string | null;
-  worktreeParentBranch?: string | null;
   _filesLoaded?: boolean;
   _gitLoaded?: boolean;
   _sessionsLoaded?: boolean;
