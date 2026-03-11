@@ -19,6 +19,7 @@ import { getPty, killCliProcess, registerActivitySession } from '../../spawner.j
 import { spawnCodexCliProcess } from './spawner.js';
 import { CodexJsonlWatcher } from './jsonl-watcher.js';
 import { generateNotifyToken, registerNotifyToken, removeNotifyToken } from '../lib/codex/notify.js';
+import { precreateCodexSession } from '../lib/session-precreate.js';
 
 /**
  * Terminal + Chat Read-Only agent for Codex CLI.
@@ -49,27 +50,27 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
   async initialize(options: AgentInitOptions): Promise<void> {
     this.cwd = options.cwd || os.homedir();
 
+    // Determine session UUID: use provided resume UUID, or pre-create a new one
+    const resumeUuid = options.resumeSessionUuid || precreateCodexSession(this.cwd);
+    this.cliSessionId = resumeUuid;
+
     try {
-      // Generate notify token for this session
+      // Notify token is still needed for callbacks (agent-turn-complete, etc.)
       this.notifyToken = generateNotifyToken();
-      const threadIdPromise = registerNotifyToken(this.notifyToken, this.sessionId, this.cwd);
+      registerNotifyToken(this.notifyToken, this.sessionId, this.cwd);
 
       if (options.resumeSessionUuid) {
         this.resumeSessionUuid = options.resumeSessionUuid;
-        this.cliSessionId = options.resumeSessionUuid;
 
         // Read historical events directly from the known file
         this.loadHistoricalFile(options.resumeSessionUuid);
-
-        // Start tailing for new content appended during the resumed session
-        this.startTailing(options.resumeSessionUuid);
       }
 
-      // Spawn the terminal PTY
+      // Spawn the terminal PTY — always with resume since we pre-created the file
       this.envId = spawnCodexCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
-        resumeSessionUuid: options.resumeSessionUuid,
+        resumeSessionUuid: resumeUuid,
         notifyToken: this.notifyToken,
         isChainContinuation: options.isChainContinuation,
       });
@@ -77,16 +78,8 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
       // Register envId → sessionId mapping for activity tracking
       registerActivitySession(this.envId, this.sessionId);
 
-      // For new sessions: wait for first notify callback to discover thread-id,
-      // then start tailing. For resume: thread-id already known, this is a no-op.
-      if (!options.resumeSessionUuid) {
-        threadIdPromise.then((threadId) => {
-          if (this.destroyed) return;
-          this.cliSessionId = threadId;
-          console.log(`[codex-terminal-chatro] Got thread-id via notify: ${threadId}`);
-          this.startTailing(threadId);
-        });
-      }
+      // Start tailing the known session file — UUID is known, no discovery needed
+      this.startTailing(resumeUuid);
 
       this.setStatus('idle');
       this.emit('ready');

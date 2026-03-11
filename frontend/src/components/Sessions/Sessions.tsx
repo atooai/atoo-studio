@@ -241,6 +241,11 @@ function ChainCarousel({ group, agentIcons, projectId, openSessionIds }: {
           {current.kind === 'historical' ? escapeHtml(current.data.title) : current.data.title}
         </div>
         <SessionMeta node={current} />
+        {(current.data.cliSessionId || (current.kind === 'historical' && current.data.id)) && (
+          <div className="session-uuid" title={current.data.cliSessionId || current.data.id}>
+            {current.data.cliSessionId || current.data.id}
+          </div>
+        )}
         {/* Carousel dots */}
         {group.links.length > 1 && (
           <div className="session-chain-dots">
@@ -314,6 +319,12 @@ function SingleSessionCard({ item, agentIcons, projectId, openSessionIds }: {
           {node.kind === 'historical' ? escapeHtml(s.title) : s.title}
         </div>
         <SessionMeta node={node} />
+        {s.cliSessionId && (
+          <div className="session-uuid" title={s.cliSessionId}>{s.cliSessionId}</div>
+        )}
+        {!s.cliSessionId && s.id && node.kind === 'historical' && (
+          <div className="session-uuid" title={s.id}>{s.id}</div>
+        )}
         {parentId && parentTitle && (
           <div className="session-fork-link" onClick={scrollToParent}>
             forked from {parentTitle.length > 30 ? parentTitle.substring(0, 30) + '...' : parentTitle}

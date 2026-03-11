@@ -3903,6 +3903,17 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   gap: 8px;
   margin-top: 2px;
 }
+.session-uuid {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
 .session-resume-btn {
   font-family: var(--font-mono);
   font-size: 10px;

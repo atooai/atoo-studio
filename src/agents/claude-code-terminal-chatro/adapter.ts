@@ -21,6 +21,7 @@ import {
   registerHookToken,
   removeHookToken,
 } from '../lib/claude/hooks.js';
+import { precreateClaudeSession } from '../lib/session-precreate.js';
 
 /**
  * Terminal + Chat Read-Only agent.
@@ -58,18 +59,21 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       this.mode = 'bypassPermissions';
     }
 
+    // Determine session UUID: use provided resume UUID, or pre-create a new one
+    const resumeUuid = options.resumeSessionUuid || precreateClaudeSession(this.cwd);
+    this.cliSessionId = resumeUuid;
+
     try {
       // Pre-load historical messages for resume (before spawning CLI)
       if (options.resumeSessionUuid) {
         this.resumeSessionUuid = options.resumeSessionUuid;
-        this.cliSessionId = options.resumeSessionUuid;
         await this.loadHistoricalMessages(options.resumeSessionUuid);
       }
 
-      // Create JSONL watcher (don't start yet — hooks may give us the exact file)
+      // Create JSONL watcher and start tailing the known file immediately
       this.jsonlWatcher = new JsonlWatcher({
         cwd: this.cwd,
-        resumeUuid: options.resumeSessionUuid,
+        resumeUuid: resumeUuid,
       });
 
       this.jsonlWatcher.on('event', (event: any, metadata?: SubagentMetadata) => {
@@ -80,18 +84,15 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
         console.error(`[terminal-chatro] JSONL watcher error:`, err.message);
       });
 
-      // Set up hooks for reliable session discovery and status tracking
+      // Hook token is still needed for hook callbacks (SessionStart, Stop, etc.)
       this.hookToken = generateHookToken();
-      const sessionUuidPromise = registerHookToken(this.hookToken, this.sessionId, this.cwd);
+      registerHookToken(this.hookToken, this.sessionId, this.cwd);
 
-      // Snapshot existing JSONL files as fallback (before spawn)
-      this.jsonlWatcher.snapshot();
-
-      // Spawn the terminal PTY with hook token
+      // Spawn the terminal PTY — always with --resume since we pre-created the file
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
-        resumeSessionUuid: options.resumeSessionUuid,
+        resumeSessionUuid: resumeUuid,
         hookToken: this.hookToken,
         isChainContinuation: options.isChainContinuation,
       });
@@ -99,26 +100,8 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       // Register envId → sessionId mapping for activity tracking
       registerActivitySession(this.envId, this.sessionId);
 
-      // Race: hook-based discovery vs timeout fallback
-      const HOOK_TIMEOUT = 8000;
-      try {
-        const cliUuid = await Promise.race([
-          sessionUuidPromise,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('hook timeout')), HOOK_TIMEOUT)
-          ),
-        ]);
-        // Hook worked — start tailing the exact file
-        console.log(`[terminal-chatro] Hook-based session discovery: ${cliUuid}`);
-        this.cliSessionId = cliUuid;
-        this.jsonlWatcher.startTailingKnownUuid(cliUuid);
-      } catch {
-        // Hooks not supported or timed out — fall back to directory watching
-        console.warn(`[terminal-chatro] Hook-based discovery failed, falling back to JSONL directory watching`);
-        this.jsonlWatcher.start().catch((err: Error) => {
-          console.error(`[terminal-chatro] JSONL watcher start error:`, err.message);
-        });
-      }
+      // Start tailing the known JSONL file — UUID is known, no discovery needed
+      this.jsonlWatcher.startTailingKnownUuid(resumeUuid);
 
       this.setStatus('idle');
       this.emit('ready');

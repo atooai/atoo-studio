@@ -13,6 +13,7 @@ import type { WireMessage } from '../../events/wire.js';
 import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
 import { generateHookToken, registerHookToken, removeHookToken } from '../lib/claude/hooks.js';
+import { precreateClaudeSession } from '../lib/session-precreate.js';
 
 /**
  * Terminal-only Claude Code agent.
@@ -43,41 +44,25 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
       this.mode = 'bypassPermissions';
     }
 
-    // For resume/chain sessions, we already know the CLI session UUID
-    if (options.resumeSessionUuid) {
-      this.cliSessionId = options.resumeSessionUuid;
-    }
+    // Determine session UUID: use provided resume UUID, or pre-create a new one
+    const resumeUuid = options.resumeSessionUuid || precreateClaudeSession(this.cwd);
+    this.cliSessionId = resumeUuid;
 
     try {
+      // Hook token is still needed for hook callbacks (SessionStart, Stop, etc.)
       this.hookToken = generateHookToken();
-      const sessionUuidPromise = registerHookToken(this.hookToken, this.sessionId, this.cwd);
+      registerHookToken(this.hookToken, this.sessionId, this.cwd);
 
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
-        resumeSessionUuid: options.resumeSessionUuid,
+        resumeSessionUuid: resumeUuid,
         hookToken: this.hookToken,
         isChainContinuation: options.isChainContinuation,
       });
 
       // Register envId → sessionId mapping for activity tracking
       registerActivitySession(this.envId, this.sessionId);
-
-      // Await hook-based session discovery (same pattern as terminal-chatro)
-      if (!this.cliSessionId) {
-        const HOOK_TIMEOUT = 8000;
-        try {
-          this.cliSessionId = await Promise.race([
-            sessionUuidPromise,
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('hook timeout')), HOOK_TIMEOUT)
-            ),
-          ]);
-          console.log(`[claude-terminal] Hook-based session discovery: ${this.cliSessionId}`);
-        } catch {
-          console.warn(`[claude-terminal] Hook timed out — cliSessionId not available for agent ${this.sessionId}`);
-        }
-      }
 
       this.setStatus('idle');
       this.emit('ready');
