@@ -97,7 +97,13 @@ function handleStatusMessage(msg: any) {
       const sessionTitle = store.projects
         .flatMap(p => p.sessions)
         .find(s => s.id === msg.session_id)?.title || 'Agent session';
-      new Notification('Agent needs attention', { body: sessionTitle, icon: '/logo_64x64.png' });
+      const iconUrl = new URL('/logo_64x64.png', location.origin).href;
+      new Notification('Agent needs attention', {
+        body: sessionTitle,
+        icon: iconUrl,
+        badge: iconUrl,
+        tag: `atoo-attention-${msg.session_id}`,
+      });
     }
   } else if (msg.type === 'session_created' && msg.session) {
     if (pendingAgentCreation) return;
