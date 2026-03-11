@@ -7,5 +7,8 @@ frontend/dist/
 *.so
 *.node
 src/serial/native/build/
+src/serial/native/cuse_serial_fixed
+src/serial/native/cuse_serial_new
+src/serial/native/cuse_serial_test
 .overlay-bench/
 overlay-bench.sh
