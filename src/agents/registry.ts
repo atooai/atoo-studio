@@ -79,6 +79,10 @@ class AgentRegistry {
     const entry = this.agents.get(sessionId);
     if (!entry) return;
 
+    // Remove all event listeners BEFORE destroying to prevent
+    // late status broadcasts from reviving the session in the UI
+    entry.agent.removeAllListeners();
+
     // Close all browser WS connections
     for (const ws of entry.browserClients) {
       try { ws.close(); } catch {}
@@ -87,6 +91,10 @@ class AgentRegistry {
 
     await entry.agent.destroy();
     this.agents.delete(sessionId);
+
+    // Clean up status from the global store and broadcast removal
+    store.removeAgentStatus(sessionId);
+
     console.log(`[agent-registry] Agent destroyed: ${sessionId}`);
   }
 

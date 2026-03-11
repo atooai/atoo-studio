@@ -70,6 +70,17 @@ function handleStatusMessage(msg: any) {
     const projects = store.projects.map((proj) => {
       const sess = proj.sessions.find((s) => s.id === msg.session_id);
       if (!sess) return proj;
+      // Never revive a session that's already ended
+      if (sess.status === 'ended') return proj;
+      // Handle agent destruction — mark as ended
+      if (msg.status === 'exited') {
+        return {
+          ...proj,
+          sessions: proj.sessions.map((s) =>
+            s.id === msg.session_id ? { ...s, status: 'ended' as const } : s
+          ),
+        };
+      }
       const newStatus = msg.status === 'active' ? 'running' as const : msg.status === 'waiting' ? 'waiting' as const : 'idle' as const;
       return {
         ...proj,

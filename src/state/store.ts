@@ -201,6 +201,18 @@ class Store {
     }
   }
 
+  removeAgentStatus(sessionId: string): void {
+    this.agentStatuses.delete(sessionId);
+    this.contextInProgressSessions.delete(sessionId);
+    this.contextUsages.delete(sessionId);
+    // Broadcast 'exited' so frontends remove the session from active state
+    const msg = { type: 'agent_status', status: 'exited', session_id: sessionId };
+    const data = JSON.stringify(msg);
+    for (const ws of this.statusClients) {
+      if (ws.readyState === 1) ws.send(data);
+    }
+  }
+
   getAgentStatus(sessionId: string): AgentStatus {
     return this.agentStatuses.get(sessionId) || 'idle';
   }
