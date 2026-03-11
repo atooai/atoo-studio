@@ -81,7 +81,7 @@ function handleStatusMessage(msg: any) {
           ),
         };
       }
-      const newStatus = msg.status === 'active' ? 'running' as const : msg.status === 'waiting' ? 'waiting' as const : 'idle' as const;
+      const newStatus = msg.status === 'active' ? 'active' as const : msg.status === 'attention' ? 'attention' as const : 'open' as const;
       return {
         ...proj,
         sessions: proj.sessions.map((s) =>
@@ -90,6 +90,15 @@ function handleStatusMessage(msg: any) {
       };
     });
     useStore.setState({ projects });
+
+    // Browser notification when attention is triggered
+    if (msg.status === 'attention' && document.hidden && Notification.permission === 'granted') {
+      // Find session title for the notification body
+      const sessionTitle = store.projects
+        .flatMap(p => p.sessions)
+        .find(s => s.id === msg.session_id)?.title || 'Agent session';
+      new Notification('Agent needs attention', { body: sessionTitle, icon: '/logo_64x64.png' });
+    }
   } else if (msg.type === 'session_created' && msg.session) {
     if (pendingAgentCreation) return;
     const s = msg.session;
@@ -102,7 +111,7 @@ function handleStatusMessage(msg: any) {
             {
               id: s.id,
               title: s.title || 'New session',
-              status: (s.status === 'active' ? 'running' : 'idle') as any,
+              status: (s.status === 'active' ? 'active' : 'open') as any,
               startedAt: new Date(s.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
               messages: [],
               lastMessage: '',
@@ -134,7 +143,7 @@ function handleStatusMessage(msg: any) {
                     {
                       id: newSess.id,
                       title: newSess.title || 'New session',
-                      status: (newSess.agent_status === 'active' ? 'running' : newSess.agent_status === 'waiting' ? 'waiting' : 'idle') as any,
+                      status: (newSess.agent_status === 'active' ? 'active' : newSess.agent_status === 'attention' ? 'attention' : 'open') as any,
                       startedAt: new Date(newSess.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
                       messages: [],
                       lastMessage: '',
@@ -368,7 +377,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
     } else if (msg.type === 'thinking') {
       sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
     } else if (msg.type === 'plan_approval') {
-      sess.status = 'waiting';
+      sess.status = 'attention';
       sess._pendingControl = msg;
       sess.messages.push({
         role: 'control_request',
@@ -380,7 +389,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
       });
     } else if (msg.type === 'tool_request') {
       if (msg.responded) return proj;
-      sess.status = 'waiting';
+      sess.status = 'attention';
       sess._pendingControl = msg;
       sess.messages.push({
         role: 'control_request',
@@ -430,7 +439,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
         }
       }
     } else if (msg.type === 'question') {
-      sess.status = 'waiting';
+      sess.status = 'attention';
       sess._pendingControl = msg;
       sess.messages.push({
         role: 'control_request',
@@ -446,9 +455,9 @@ function handleAgentMessage(sessionId: string, msg: any) {
     } else if (msg.type === 'status_update') {
       if (msg.mode) sess.permissionMode = msg.mode;
       if (msg.model) sess.model = msg.model;
-      if (msg.status === 'active') sess.status = 'running';
-      else if (msg.status === 'waiting') sess.status = 'waiting';
-      else if (msg.status === 'idle') sess.status = 'idle';
+      if (msg.status === 'active') sess.status = 'active';
+      else if (msg.status === 'attention') sess.status = 'attention';
+      else if (msg.status === 'open') sess.status = 'open';
     } else if (msg.type === 'context_usage') {
       sess.contextUsage = {
         model: msg.model,
@@ -462,7 +471,7 @@ function handleAgentMessage(sessionId: string, msg: any) {
       sess.contextInProgress = !!msg.inProgress;
       return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
     } else if (msg.type === 'result') {
-      sess.status = 'idle';
+      sess.status = 'open';
     } else if (msg.type === 'system_message') {
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
     } else if (msg.type === 'file_change') {

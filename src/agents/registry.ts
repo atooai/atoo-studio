@@ -1,6 +1,6 @@
 import type WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AgentStatus, AgentDescriptor, HistoricalSession } from './types.js';
+import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AgentDescriptor, HistoricalSession } from './types.js';
 import type { SessionEvent } from '../events/types.js';
 import type { WireMessage } from '../events/wire.js';
 import { store } from '../state/store.js';
@@ -44,11 +44,8 @@ class AgentRegistry {
       this.broadcastToClients(sessionId, msg);
     });
 
-    agent.on('status', (status: AgentStatus) => {
-      // Broadcast status to global status clients (sidebar)
-      const storeStatus = status === 'active' ? 'active' : status === 'waiting' ? 'waiting' : 'idle';
-      store.setAgentStatus(sessionId, storeStatus as any);
-    });
+    // Agent status is now tracked via buffer activity in spawner.ts.
+    // The agent.on('status') event is no longer forwarded to the global store.
 
     agent.on('context_in_progress', (inProgress: boolean) => {
       const e = this.agents.get(sessionId);

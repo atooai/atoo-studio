@@ -79,7 +79,7 @@ function MobileContextBar() {
 }
 
 function getProjectStatusClass(p: any): string {
-  if (p.sessions.some((s: any) => s.status === 'waiting')) return 'waiting';
-  if (p.sessions.some((s: any) => s.status === 'running')) return 'running';
-  return 'idle';
+  if (p.sessions.some((s: any) => s.status === 'attention')) return 'attention';
+  if (p.sessions.some((s: any) => s.status === 'active')) return 'active';
+  return 'open';
 }

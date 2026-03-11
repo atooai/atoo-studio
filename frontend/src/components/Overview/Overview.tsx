@@ -2,9 +2,9 @@ import React from 'react';
 import { useStore } from '../../state/store';
 
 function getProjectStatus(proj: any): string {
-  if (proj.sessions.some((s: any) => s.status === 'waiting')) return 'waiting';
-  if (proj.sessions.some((s: any) => s.status === 'running')) return 'running';
-  return 'idle';
+  if (proj.sessions.some((s: any) => s.status === 'attention')) return 'attention';
+  if (proj.sessions.some((s: any) => s.status === 'active')) return 'active';
+  return 'open';
 }
 
 export function Overview() {
@@ -19,9 +19,9 @@ export function Overview() {
       <div className="overview-grid">
         {projects.map(p => {
           const status = getProjectStatus(p);
-          const hasAttention = p.sessions.some(s => s.status === 'waiting');
-          const waitingCount = p.sessions.filter(s => s.status === 'waiting').length;
-          const activeCount = p.sessions.filter(s => s.status === 'running' || s.status === 'waiting').length;
+          const hasAttention = p.sessions.some(s => s.status === 'attention');
+          const attentionCount = p.sessions.filter(s => s.status === 'attention').length;
+          const activeCount = p.sessions.filter(s => s.status === 'active').length;
           const openChats = p.sessions.filter(s => s.status !== 'ended').length;
 
           return (
@@ -36,13 +36,13 @@ export function Overview() {
               </div>
               <div className="oc-path">{p.path}</div>
               <div className="oc-badges">
-                <span className="badge badge-attention">{waitingCount}</span>
+                <span className="badge badge-attention">{attentionCount}</span>
                 <span className="badge badge-active">{activeCount}</span>
                 <span className="badge badge-chats">{openChats}</span>
               </div>
               <div className="oc-sessions">
                 {p.sessions.slice(0, 3).map(s => {
-                  const dotClass = s.status === 'ended' ? 'ended' : s.status === 'waiting' ? 'waiting' : s.status === 'running' ? 'live' : 'ended';
+                  const dotClass = s.status === 'ended' ? 'ended' : s.status === 'attention' ? 'waiting' : s.status === 'active' ? 'live' : 'ended';
                   return (
                     <div key={s.id} className="oc-session-line">
                       <span className={`oc-session-dot ${dotClass}`}></span>

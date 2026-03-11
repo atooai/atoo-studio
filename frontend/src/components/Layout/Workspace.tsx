@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../../state/store';
+import { sendAgentCommand } from '../../api/websocket';
 import { FileTree } from '../FileTree/FileTree';
 import { GitHistory } from '../Git/GitHistory';
 import { EditorArea } from '../Editor/Editor';
@@ -15,6 +16,32 @@ export function Workspace() {
 
   const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
   const session = activeSessions[proj.activeSessionIdx || 0];
+
+  // Clear attention on user interaction when already viewing the session tab
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSessionInteraction = useCallback(() => {
+    if (!session || session.status !== 'attention' || activeTabType !== 'session') return;
+    // Debounce: clear after 2s of first interaction
+    if (clearTimerRef.current) return;
+    clearTimerRef.current = setTimeout(() => {
+      clearTimerRef.current = null;
+      // Re-check status in case it changed
+      const s = useStore.getState();
+      const p = s.projects.find(p => p.id === activeProjectId);
+      if (!p) return;
+      const active = p.sessions.filter(ss => ss.status !== 'ended');
+      const sess = active[p.activeSessionIdx || 0];
+      if (sess && sess.status === 'attention') {
+        sendAgentCommand(sess.id, { action: 'session_viewed' });
+      }
+    }, 2000);
+  }, [session?.id, session?.status, activeTabType, activeProjectId]);
+
+  useEffect(() => {
+    return () => {
+      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+    };
+  }, []);
 
   const layoutClass = previewVisible ? 'layout-wide' : 'layout-default';
   const rpClass = rightPanelCollapsed ? 'rp-collapsed' : '';
@@ -36,7 +63,7 @@ export function Workspace() {
         <div className="editor-splitter" id="editor-splitter" onMouseDown={(e) => (window as any).startEditorSplitterDrag(e.nativeEvent)}></div>
         <div className="sessions-area">
           <CenterTabs proj={proj} />
-          <div className="center-content" id="center-content">
+          <div className="center-content" id="center-content" onMouseMove={handleSessionInteraction} onClick={handleSessionInteraction}>
             <SessionLoadingOverlay />
             {session && activeTabType === 'session' && (
               <ViewToggle session={session} proj={proj} />

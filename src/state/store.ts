@@ -10,7 +10,7 @@ import type {
 } from './types.js';
 import type WebSocket from 'ws';
 
-export type AgentStatus = 'idle' | 'active' | 'waiting';
+export type AgentStatus = 'open' | 'active' | 'attention';
 
 class Store {
   environments = new Map<string, Environment>();
@@ -214,7 +214,7 @@ class Store {
   }
 
   getAgentStatus(sessionId: string): AgentStatus {
-    return this.agentStatuses.get(sessionId) || 'idle';
+    return this.agentStatuses.get(sessionId) || 'open';
   }
 
   setContextInProgress(sessionId: string, inProgress: boolean): void {

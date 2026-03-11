@@ -151,7 +151,12 @@ async function init() {
   connectStatusWs();
   connectSettingsWs();
 
-  // 5. Listen for popstate
+  // 6. Request browser notification permission
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+
+  // 7. Listen for popstate
   window.addEventListener('popstate', () => handleRoute());
 }
 
@@ -392,7 +397,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
         return {
           id: s.id,
           title: s.title || 'Untitled',
-          status: s.agent_status === 'active' ? 'running' : s.agent_status === 'waiting' ? 'waiting' : 'idle',
+          status: s.agent_status === 'active' ? 'active' : s.agent_status === 'attention' ? 'attention' : 'open',
           startedAt: new Date(s.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
           messages: existing?.messages || [],
           lastMessage: existing?.lastMessage || '',
@@ -423,7 +428,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
           return {
             id: a.sessionId,
             title: existing?.title || 'Terminal session',
-            status: a.status === 'active' ? 'running' as const : a.status === 'waiting' ? 'waiting' as const : 'idle' as const,
+            status: a.status === 'active' ? 'active' as const : a.status === 'attention' ? 'attention' as const : 'open' as const,
             startedAt: existing?.startedAt || new Date(a.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
             messages: existing?.messages || [],
             lastMessage: existing?.lastMessage || '',
@@ -657,7 +662,7 @@ function registerGlobalFunctions() {
       const session = {
         id: sessionId,
         title: 'New session',
-        status: 'waiting' as const,
+        status: 'open' as const,
         startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         messages: [],
         lastMessage: '',
@@ -727,7 +732,7 @@ function registerGlobalFunctions() {
             const session = {
               id: sessionId,
               title: 'Chain continuation',
-              status: 'waiting' as const,
+              status: 'open' as const,
               startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
               messages: [],
               lastMessage: '',
@@ -1271,7 +1276,7 @@ function registerGlobalFunctions() {
     if (!proj) return;
     const session = proj.sessions.find(s => s.id === sessionId);
     if (!session) return;
-    if (session.status === 'running' || session.status === 'waiting') {
+    if (session.status === 'active' || session.status === 'attention') {
       const idx = proj.sessions.filter(s => s.status !== 'ended').indexOf(session);
       if (idx >= 0) win.switchToSession(projId, idx);
       return;
@@ -1288,7 +1293,7 @@ function registerGlobalFunctions() {
         const newSessionId = result.sessionId;
         const defaultViewMode = (result.agentMode === 'terminal') ? 'tui' : 'chat';
         const newSession = {
-          id: newSessionId, title: session.title || 'Resumed session', status: 'waiting' as const,
+          id: newSessionId, title: session.title || 'Resumed session', status: 'open' as const,
           startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
           messages: [], lastMessage: '', viewMode: defaultViewMode as 'chat' | 'tui',
           agentType: result.agentType, agentMode: result.agentMode,
@@ -1336,7 +1341,7 @@ function registerGlobalFunctions() {
         const histEntry = (proj.historicalSessions || []).find(h => h.id === sessionUuid);
         const defaultViewMode = (result.agentMode === 'terminal') ? 'tui' : 'chat';
         const session = {
-          id: sessionId, title: histEntry?.title || result.title || 'Resumed session', status: 'waiting' as const,
+          id: sessionId, title: histEntry?.title || result.title || 'Resumed session', status: 'open' as const,
           startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
           messages: [], lastMessage: '', viewMode: defaultViewMode as 'chat' | 'tui',
           agentType: result.agentType, agentMode: result.agentMode,
@@ -1395,7 +1400,7 @@ function registerGlobalFunctions() {
             const session = {
               id: sessionId,
               title: 'Forked session',
-              status: 'waiting' as const,
+              status: 'open' as const,
               startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
               messages: [],
               lastMessage: '',

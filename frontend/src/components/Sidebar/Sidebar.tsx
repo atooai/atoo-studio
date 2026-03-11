@@ -4,9 +4,9 @@ import { api } from '../../api';
 import { escapeHtml } from '../../utils';
 
 function getProjectStatus(proj: any): string {
-  if (proj.sessions.some((s: any) => s.status === 'waiting')) return 'waiting';
-  if (proj.sessions.some((s: any) => s.status === 'running')) return 'running';
-  return 'idle';
+  if (proj.sessions.some((s: any) => s.status === 'attention')) return 'attention';
+  if (proj.sessions.some((s: any) => s.status === 'active')) return 'active';
+  return 'open';
 }
 
 export function Sidebar() {
@@ -15,8 +15,8 @@ export function Sidebar() {
     setSidebarCollapsed, addToast,
   } = useStore();
 
-  const attention = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'waiting').length, 0);
-  const active = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'running' || s.status === 'waiting').length, 0);
+  const attention = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'attention').length, 0);
+  const active = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'active').length, 0);
   const openChats = projects.reduce((n, p) => n + p.sessions.filter(s => s.status !== 'ended').length, 0);
 
   // Group projects: root projects first, then children indented under them
@@ -98,10 +98,10 @@ function ProjectItem({ project: p, isActive, isChild, hasChildren }: { project: 
   const { projects, setProjects, setModal, setCtxMenu, addToast } = useStore();
 
   const status = getProjectStatus(p);
-  const waitingCount = p.sessions.filter((s: any) => s.status === 'waiting').length;
-  const activeCount = p.sessions.filter((s: any) => s.status === 'running' || s.status === 'waiting').length;
+  const attentionCount = p.sessions.filter((s: any) => s.status === 'attention').length;
+  const activeCount = p.sessions.filter((s: any) => s.status === 'active').length;
   const openChats = p.sessions.filter((s: any) => s.status !== 'ended').length;
-  const hasAttention = waitingCount > 0;
+  const hasAttention = attentionCount > 0;
   const initials = p.name.substring(0, 2).toUpperCase();
 
   const handleClick = () => {
@@ -175,7 +175,7 @@ function ProjectItem({ project: p, isActive, isChild, hasChildren }: { project: 
           <div className="project-path">{dirName}</div>
         </div>
         <div className="project-badges">
-          <span className="badge badge-attention">{waitingCount}</span>
+          <span className="badge badge-attention">{attentionCount}</span>
           <span className="badge badge-active">{activeCount}</span>
           <span className="badge badge-chats">{openChats}</span>
         </div>
@@ -200,7 +200,7 @@ function ProjectItem({ project: p, isActive, isChild, hasChildren }: { project: 
         <div className="project-path">{p.path}</div>
       </div>
       <div className="project-badges">
-        <span className="badge badge-attention">{waitingCount}</span>
+        <span className="badge badge-attention">{attentionCount}</span>
         <span className="badge badge-active">{activeCount}</span>
         <span className="badge badge-chats">{openChats}</span>
       </div>

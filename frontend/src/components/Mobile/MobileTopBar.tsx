@@ -5,7 +5,7 @@ import { useAuthStore } from '../../state/auth-store';
 export function MobileTopBar() {
   const { mobileDrawerOpen, setMobileDrawerOpen, projects } = useStore();
 
-  const attention = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'waiting').length, 0);
+  const attention = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'attention').length, 0);
 
   return (
     <div className="mobile-topbar">

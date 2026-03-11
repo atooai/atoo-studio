@@ -6,8 +6,8 @@ export function MobileDashboard() {
   const { activeProjectId, projects, reportedServices } = useStore();
   const proj = projects.find(p => p.id === activeProjectId);
 
-  const attention = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'waiting').length, 0);
-  const running = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'running').length, 0);
+  const attention = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'attention').length, 0);
+  const running = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'active').length, 0);
   const alive = projects.reduce((n, p) => n + p.sessions.filter(s => s.status !== 'ended').length, 0);
 
   return (

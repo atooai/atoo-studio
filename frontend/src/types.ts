@@ -17,7 +17,7 @@ export interface Environment {
 export interface Session {
   id: string;
   title: string;
-  status: 'running' | 'waiting' | 'idle' | 'ended';
+  status: 'active' | 'attention' | 'open' | 'ended';
   startedAt: string;
   messages: ChatMessage[];
   lastMessage: string;

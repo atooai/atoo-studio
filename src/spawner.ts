@@ -53,6 +53,73 @@ const MAX_SPAWNER_SCROLLBACK = 200_000;
 const spawnerScrollback = new Map<string, string>();
 
 // ═══════════════════════════════════════════════════════
+// Activity tracking — buffer-based status detection
+// ═══════════════════════════════════════════════════════
+
+export type ActivityStatus = 'open' | 'active' | 'attention';
+
+interface ActivityState {
+  lastDataTimestamp: number | null;  // null = never received data
+  attentionAcknowledged: boolean;
+  currentStatus: ActivityStatus;
+}
+
+const activityStates = new Map<string, ActivityState>();
+const INACTIVITY_THRESHOLD_MS = 5000;
+
+function deriveActivityStatus(state: ActivityState): ActivityStatus {
+  if (state.lastDataTimestamp === null) return 'open';
+  const elapsed = Date.now() - state.lastDataTimestamp;
+  if (elapsed < INACTIVITY_THRESHOLD_MS) return 'active';
+  return state.attentionAcknowledged ? 'open' : 'attention';
+}
+
+function broadcastActivityStatus(envId: string, status: ActivityStatus): void {
+  for (const [sessionId, session] of store.sessions.entries()) {
+    if (session.environmentId === envId) {
+      store.setAgentStatus(sessionId, status);
+    }
+  }
+}
+
+function updateActivityStatus(envId: string, state: ActivityState): void {
+  const newStatus = deriveActivityStatus(state);
+  if (newStatus !== state.currentStatus) {
+    state.currentStatus = newStatus;
+    broadcastActivityStatus(envId, newStatus);
+  }
+}
+
+function markActivityData(envId: string): void {
+  let state = activityStates.get(envId);
+  if (!state) {
+    state = { lastDataTimestamp: null, attentionAcknowledged: false, currentStatus: 'open' };
+    activityStates.set(envId, state);
+  }
+  state.lastDataTimestamp = Date.now();
+  state.attentionAcknowledged = false;
+  updateActivityStatus(envId, state);
+}
+
+export function markActivityViewed(envId: string): void {
+  const state = activityStates.get(envId);
+  if (!state) return;
+  state.attentionAcknowledged = true;
+  updateActivityStatus(envId, state);
+}
+
+function removeActivityState(envId: string): void {
+  activityStates.delete(envId);
+}
+
+// Global interval to detect inactivity transitions (active → attention)
+setInterval(() => {
+  for (const [envId, state] of activityStates.entries()) {
+    updateActivityStatus(envId, state);
+  }
+}, 2000);
+
+// ═══════════════════════════════════════════════════════
 // Generic PTY spawn
 // ═══════════════════════════════════════════════════════
 
@@ -96,6 +163,7 @@ export function spawnProcess(options: SpawnOptions): { envId: string; term: ITer
     buf += data;
     if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
     spawnerScrollback.set(envId, buf);
+    markActivityData(envId);
     const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
     if (stripped) console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
   });
@@ -104,6 +172,7 @@ export function spawnProcess(options: SpawnOptions): { envId: string; term: ITer
     console.log(`[spawner] ${logPrefix} (pid=${pid}) exited with code ${exitCode}`);
     spawnedProcesses.delete(envId);
     spawnerScrollback.delete(envId);
+    removeActivityState(envId);
   });
 
   return { envId, term, pid };
@@ -145,6 +214,7 @@ export async function spawnRemoteProcess(options: {
     buf += data;
     if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
     spawnerScrollback.set(envId, buf);
+    markActivityData(envId);
     const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
     if (stripped) console.log(`[spawner:ssh] ${stripped.substring(0, 200)}`);
   });
@@ -153,6 +223,7 @@ export async function spawnRemoteProcess(options: {
     console.log(`[spawner] ${logPrefix} via SSH exited with code ${exitCode}`);
     spawnedProcesses.delete(envId);
     spawnerScrollback.delete(envId);
+    removeActivityState(envId);
   });
 
   return { envId, term };
@@ -180,6 +251,7 @@ export function killCliProcess(envId: string): boolean {
     proc.pty.kill();
     spawnedProcesses.delete(envId);
     spawnerScrollback.delete(envId);
+    removeActivityState(envId);
     console.log(`[spawner] Killed process for ${envId}`);
     return true;
   }
@@ -193,6 +265,7 @@ export function killAllCliProcesses(): void {
   }
   spawnedProcesses.clear();
   spawnerScrollback.clear();
+  activityStates.clear();
 }
 
 export function getPty(envId: string): ITerminal | undefined {
@@ -207,13 +280,16 @@ export function reassignEnvId(oldEnvId: string, newEnvId: string): void {
   const proc = spawnedProcesses.get(oldEnvId);
   if (!proc) return;
   const scrollback = spawnerScrollback.get(oldEnvId) || '';
+  const activity = activityStates.get(oldEnvId);
 
   spawnedProcesses.delete(oldEnvId);
   spawnerScrollback.delete(oldEnvId);
+  activityStates.delete(oldEnvId);
 
   proc.envId = newEnvId;
   spawnedProcesses.set(newEnvId, proc);
   spawnerScrollback.set(newEnvId, scrollback);
+  if (activity) activityStates.set(newEnvId, activity);
 }
 
 export function getEnvIdForSession(sessionId: string): string | undefined {

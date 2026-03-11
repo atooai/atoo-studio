@@ -30,7 +30,7 @@ export function MobileAgents() {
         <div className="mobile-agents-chat-header">
           <button className="mobile-back-btn" onClick={() => setSubView('list')}>&#x2190;</button>
           <div className="mobile-agents-chat-title">&#x1f916; {session.title || 'Session'}</div>
-          <span className={`mobile-tag tag-${session.status === 'running' ? 'green' : session.status === 'waiting' ? 'amber' : 'muted'}`}>
+          <span className={`mobile-tag tag-${session.status === 'active' ? 'green' : session.status === 'attention' ? 'amber' : 'muted'}`}>
             {session.status}
           </span>
         </div>
@@ -65,18 +65,18 @@ export function MobileAgents() {
         >
           <div className="mobile-agent-card-row">
             <div className="mobile-agent-card-icon" style={{
-              background: s.status === 'waiting' ? 'var(--accent-amber-dim)' : 'var(--accent-green-dim)',
+              background: s.status === 'attention' ? 'var(--accent-amber-dim)' : 'var(--accent-green-dim)',
             }}>&#x1f916;</div>
             <div className="mobile-agent-card-body">
               <div className="mobile-agent-card-title">
-                {s.title || 'Session'} <span className={`mobile-status-dot ${s.status === 'running' ? 'green' : s.status === 'waiting' ? 'amber' : 'blue'}`}></span>
+                {s.title || 'Session'} <span className={`mobile-status-dot ${s.status === 'active' ? 'green' : s.status === 'attention' ? 'amber' : 'blue'}`}></span>
               </div>
               <div className="mobile-agent-card-desc">{s.lastMessage || 'No messages yet'}</div>
             </div>
             <span className="mobile-agent-card-chevron">&#x203A;</span>
           </div>
           <div className="mobile-agent-card-meta">
-            <span className={`mobile-tag tag-${s.status === 'running' ? 'green' : s.status === 'waiting' ? 'amber' : 'muted'}`}>{s.status}</span>
+            <span className={`mobile-tag tag-${s.status === 'active' ? 'green' : s.status === 'attention' ? 'amber' : 'muted'}`}>{s.status}</span>
             <span className="mobile-tag tag-blue">{s.messages.length} msgs</span>
             {s.model && <span className="mobile-tag tag-purple">{s.model}</span>}
           </div>

@@ -252,11 +252,11 @@ function SubagentGroup({ messages, session, agentId }: { messages: FilteredMessa
 }
 
 function StatusLine({ session }: { session: Session }) {
-  if (session.status === 'waiting') {
+  if (session.status === 'attention') {
     return <div className="chat-status-line"><span className="waiting-indicator">⏳ Waiting for your input</span></div>;
   }
-  if (session.status === 'running') {
-    return <div className="chat-status-line" style={{ color: 'var(--accent-green)' }}>● Claude is working...</div>;
+  if (session.status === 'active') {
+    return <div className="chat-status-line" style={{ color: 'var(--accent-green)' }}>● Agent is working...</div>;
   }
   return null;
 }

@@ -272,7 +272,7 @@ function SingleSessionCard({ item, agentIcons, projectId, openSessionIds }: {
 
   const isOpen = openSessionIds.has(node.id);
   const isActive = node.kind === 'active' && s.status !== 'ended';
-  const canResume = !isOpen && (node.kind === 'historical' || s.status === 'ended' || s.status === 'idle');
+  const canResume = !isOpen && (node.kind === 'historical' || s.status === 'ended' || s.status === 'open');
 
   const handleClick = () => {
     if (isOpen) return;
@@ -332,8 +332,8 @@ function SessionStatusDot({ node }: { node: RawNode }) {
   }
   const s = node.data;
   const cls = s.status === 'ended' ? 'ended'
-    : s.status === 'waiting' ? 'waiting'
-    : s.status === 'running' ? 'live'
+    : s.status === 'attention' ? 'waiting'
+    : s.status === 'active' ? 'live'
     : 'ended';
   return <div className={`session-status-dot ${cls}`} />;
 }

@@ -14,7 +14,6 @@ import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { WEB_PORT } from '../../../config.js';
-import { store } from '../../../state/store.js';
 
 // ═══════════════════════════════════════════════════════
 // Notify token registry
@@ -71,8 +70,8 @@ export function handleCodexNotifyCallback(token: string, payload: any): void {
       console.log(`[codex-notify] Discovered thread-id for ${entry.agentSessionId}: ${threadId}`);
     }
 
-    // Turn complete → needs attention (amber badge)
-    store.setAgentStatus(entry.agentSessionId, 'waiting');
+    // Agent status is now tracked via buffer activity in spawner.ts.
+    // Codex turn-complete no longer directly sets status.
   }
 }
 

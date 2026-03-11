@@ -12,7 +12,6 @@ import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { WEB_PORT } from '../../../config.js';
-import { store } from '../../../state/store.js';
 
 // ═══════════════════════════════════════════════════════
 // Hook token registry
@@ -72,18 +71,12 @@ export function handleHookCallback(token: string, payload: any): void {
       break;
     }
 
+    // Agent status is now tracked via buffer activity in spawner.ts.
+    // Hook events no longer drive status changes.
     case 'UserPromptSubmit':
-      store.setAgentStatus(entry.agentSessionId, 'active');
-      break;
-
     case 'Stop':
     case 'SubagentStop':
-      store.setAgentStatus(entry.agentSessionId, 'idle');
-      break;
-
     case 'Notification':
-      // Notifications during a session typically mean permission prompts
-      store.setAgentStatus(entry.agentSessionId, 'waiting');
       break;
 
     default:

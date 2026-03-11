@@ -3,6 +3,7 @@ import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { agentRegistry } from '../agents/registry.js';
 import type { AgentCommand } from '../agents/types.js';
+import { getEnvIdForSession, markActivityViewed } from '../spawner.js';
 
 const AGENT_WS_PATH_RE = /^\/ws\/agent\/([^/?]+)/;
 
@@ -96,9 +97,12 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
     case 'send_key':
       agent.sendKey(cmd.key);
       break;
-    case 'session_viewed':
+    case 'session_viewed': {
       agent.markViewed();
+      const envId = getEnvIdForSession(sessionId);
+      if (envId) markActivityViewed(envId);
       break;
+    }
     default:
       console.warn(`[agent-ws] Unknown command action for ${sessionId}:`, (cmd as any).action);
   }
