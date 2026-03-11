@@ -66,7 +66,7 @@ export function getInjectedScript(): string {
     }
 
     try {
-      window.__ccproxy_selectOpened(JSON.stringify({
+      window.__atoo_selectOpened(JSON.stringify({
         rect: getRect(el),
         options: options,
         selectedIndex: el.selectedIndex,
@@ -89,7 +89,7 @@ export function getInjectedScript(): string {
     e.stopImmediatePropagation();
 
     try {
-      window.__ccproxy_pickerOpened(JSON.stringify({
+      window.__atoo_pickerOpened(JSON.stringify({
         type: el.type,
         value: el.value,
         min: el.min || null,
@@ -113,13 +113,13 @@ export function getInjectedScript(): string {
     var title = el.getAttribute('title');
     // Remove native title to prevent browser tooltip
     el.removeAttribute('title');
-    el.dataset.ccproxyTitle = title;
+    el.dataset.atooTitle = title;
     currentTooltipEl = el;
 
     clearTimeout(tooltipTimer);
     tooltipTimer = setTimeout(function() {
       try {
-        window.__ccproxy_tooltipShow(JSON.stringify({
+        window.__atoo_tooltipShow(JSON.stringify({
           text: title,
           rect: getRect(el),
         }));
@@ -130,13 +130,13 @@ export function getInjectedScript(): string {
   document.addEventListener('mouseout', function(e) {
     clearTimeout(tooltipTimer);
     // Restore title attribute
-    if (currentTooltipEl && currentTooltipEl.dataset.ccproxyTitle) {
-      currentTooltipEl.setAttribute('title', currentTooltipEl.dataset.ccproxyTitle);
-      delete currentTooltipEl.dataset.ccproxyTitle;
+    if (currentTooltipEl && currentTooltipEl.dataset.atooTitle) {
+      currentTooltipEl.setAttribute('title', currentTooltipEl.dataset.atooTitle);
+      delete currentTooltipEl.dataset.atooTitle;
       currentTooltipEl = null;
     }
     try {
-      window.__ccproxy_tooltipHide('{}');
+      window.__atoo_tooltipHide('{}');
     } catch (err) { /* binding not available */ }
   }, true);
 
@@ -157,7 +157,7 @@ export function getInjectedScript(): string {
     var img = e.target.closest ? e.target.closest('img') : null;
 
     try {
-      window.__ccproxy_contextMenu(JSON.stringify({
+      window.__atoo_contextMenu(JSON.stringify({
         x: e.clientX,
         y: e.clientY,
         selectedText: selectedText,

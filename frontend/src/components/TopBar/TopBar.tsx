@@ -252,7 +252,7 @@ function EnvSelector() {
             <div
               key={env.id}
               className={`env-dropdown-item ${env.id === activeEnvironmentId ? 'active' : ''}`}
-              onClick={() => { (window as any).navigate('/vccenv/' + env.id); setOpen(false); }}
+              onClick={() => { (window as any).navigate('/env/' + env.id); setOpen(false); }}
             >
               <span className="env-dropdown-icon">◈</span>
               {env.name}

@@ -18,7 +18,7 @@ import { buildUniversalSetterExpression } from './universal-setter.js';
 
 const CHROME_PATH = '/home/furti/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome';
 const FFMPEG_PATH = '/usr/bin/ffmpeg';
-const DOWNLOAD_DIR = path.join(os.tmpdir(), 'ccproxy-downloads');
+const DOWNLOAD_DIR = path.join(os.tmpdir(), 'atoo-studio-downloads');
 
 export interface HeadlessInstance extends PreviewInstanceBase {
   browser: Browser;
@@ -231,13 +231,13 @@ export class HeadlessBackend implements PreviewBackend {
     // Enable Runtime domain for bindings
     await cdpSession.send('Runtime.enable');
 
-    // Register bindings — each creates a window.__ccproxy_* function in the page
+    // Register bindings — each creates a window.__atoo_* function in the page
     const bindings = [
-      '__ccproxy_selectOpened',
-      '__ccproxy_pickerOpened',
-      '__ccproxy_tooltipShow',
-      '__ccproxy_tooltipHide',
-      '__ccproxy_contextMenu',
+      '__atoo_selectOpened',
+      '__atoo_pickerOpened',
+      '__atoo_tooltipShow',
+      '__atoo_tooltipHide',
+      '__atoo_contextMenu',
     ];
 
     for (const name of bindings) {
@@ -259,19 +259,19 @@ export class HeadlessBackend implements PreviewBackend {
       }
 
       switch (name) {
-        case '__ccproxy_selectOpened':
+        case '__atoo_selectOpened':
           broadcastJson(instance, { type: 'select_opened', ...data });
           break;
-        case '__ccproxy_pickerOpened':
+        case '__atoo_pickerOpened':
           broadcastJson(instance, { type: 'picker_opened', ...data });
           break;
-        case '__ccproxy_tooltipShow':
+        case '__atoo_tooltipShow':
           broadcastJson(instance, { type: 'tooltip_show', ...data });
           break;
-        case '__ccproxy_tooltipHide':
+        case '__atoo_tooltipHide':
           broadcastJson(instance, { type: 'tooltip_hide' });
           break;
-        case '__ccproxy_contextMenu':
+        case '__atoo_contextMenu':
           broadcastJson(instance, { type: 'context_menu', ...data });
           break;
       }
@@ -297,7 +297,7 @@ export class HeadlessBackend implements PreviewBackend {
       // to avoid pausing normal requests (empty patterns[] = intercept everything)
       await cdpSession.send('Fetch.enable', {
         handleAuthRequests: true,
-        patterns: [{ urlPattern: '__ccproxy_never_match__' }],
+        patterns: [{ urlPattern: '__atoo_never_match__' }],
       });
     } catch (err: any) {
       console.warn(`[preview/headless] Fetch/auth interception not supported: ${err.message}`);

@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 
-const STORE_DIR = path.join(os.homedir(), '.ccproxy');
+const STORE_DIR = path.join(os.homedir(), '.atoo-studio');
 const AUTH_KEY_PATH = path.join(STORE_DIR, 'auth.key');
 
 let cachedKey: Buffer | null = null;

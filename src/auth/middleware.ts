@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import type { IncomingMessage } from 'http';
 import { SESSION_COOKIE_NAME } from './session.js';
 import { getSessionUser } from './session.js';
-import { vccDb, type User } from '../state/db.js';
+import { db, type User } from '../state/db.js';
 
 // Extend Express Request with user
 declare global {
@@ -16,7 +16,7 @@ declare global {
 /** Middleware: require a valid auth session. Attaches req.user. */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   // Setup mode: if no users exist, return 503
-  if (vccDb.getUserCount() === 0) {
+  if (db.getUserCount() === 0) {
     res.status(503).json({ error: 'Setup required', setupRequired: true });
     return;
   }
@@ -51,7 +51,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 /** Parse session from WebSocket upgrade request headers. Returns user or null. */
 export function authenticateWsUpgrade(req: IncomingMessage): User | null {
   // If no users exist (setup mode), allow all WebSocket connections
-  if (vccDb.getUserCount() === 0) return null;
+  if (db.getUserCount() === 0) return null;
 
   const cookieHeader = req.headers.cookie;
   if (!cookieHeader) return null;
@@ -64,7 +64,7 @@ export function authenticateWsUpgrade(req: IncomingMessage): User | null {
 
 /** Check if auth is required (users exist). */
 export function isAuthEnabled(): boolean {
-  return vccDb.getUserCount() > 0;
+  return db.getUserCount() > 0;
 }
 
 function parseCookieValue(cookieHeader: string, name: string): string | null {

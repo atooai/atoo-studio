@@ -7,7 +7,7 @@ interface FileNode {
   children?: FileNode[];
 }
 
-const SKIP_NAMES = new Set(['.git', '.vcc', 'node_modules', '.next', '.nuxt', 'dist', 'build', '__pycache__', '.venv', 'venv', '.cache', '.parcel-cache', 'coverage', '.svn', '.hg']);
+const SKIP_NAMES = new Set(['.git', '.atoo-studio', 'node_modules', '.next', '.nuxt', 'dist', 'build', '__pycache__', '.venv', 'venv', '.cache', '.parcel-cache', 'coverage', '.svn', '.hg']);
 const MAX_DEPTH = 8;
 const MAX_ENTRIES = 2000;
 

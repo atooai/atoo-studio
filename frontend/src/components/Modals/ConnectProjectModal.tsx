@@ -49,7 +49,7 @@ export function ConnectProjectModal({ onClose }: Props) {
       onClose();
       addToast('Connect', 'Project connected', 'success');
       // Re-select environment to reload projects
-      (window as any).navigate?.('/vccenv/' + activeEnvironmentId);
+      (window as any).navigate?.('/env/' + activeEnvironmentId);
     } catch (e: any) { addToast('Connect', `Failed: ${e.message}`, 'attention'); }
   };
 

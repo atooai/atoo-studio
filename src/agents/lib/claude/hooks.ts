@@ -3,9 +3,9 @@
  * Uses --settings CLI flag to inject hooks per-process, avoiding any
  * modification to the user's global ~/.claude/settings.json.
  *
- * Each spawn receives a unique CCPROXY_HOOK_TOKEN env var. The hook
+ * Each spawn receives a unique ATOO_HOOK_TOKEN env var. The hook
  * callback script sends this token alongside the hook payload so
- * ccproxy can map callbacks to the correct agent session.
+ * Atoo Studio can map callbacks to the correct agent session.
  */
 import fs from 'fs';
 import path from 'path';
@@ -99,8 +99,8 @@ export function removeHookToken(token: string): void {
 // Per-process hooks via --settings flag
 // ═══════════════════════════════════════════════════════
 
-const CCPROXY_DIR = path.join(os.homedir(), '.ccproxy');
-const HOOK_SCRIPT_PATH = path.join(CCPROXY_DIR, 'hook-callback.sh');
+const ATOO_DIR = path.join(os.homedir(), '.atoo-studio');
+const HOOK_SCRIPT_PATH = path.join(ATOO_DIR, 'hook-callback.sh');
 let hookScriptReady = false;
 
 /**
@@ -111,13 +111,13 @@ export function setupHooks(): void {
   if (hookScriptReady) return;
 
   try {
-    fs.mkdirSync(CCPROXY_DIR, { recursive: true });
+    fs.mkdirSync(ATOO_DIR, { recursive: true });
   } catch {}
 
   const script = `#!/bin/bash
 payload=$(cat)
-printf '{"token":"%s","payload":%s}' "$CCPROXY_HOOK_TOKEN" "$payload" | \\
-  curl -s --max-time 5 -k -X POST "https://localhost:\${CCPROXY_WEB_PORT:-${WEB_PORT}}/api/hooks/callback" \\
+printf '{"token":"%s","payload":%s}' "$ATOO_HOOK_TOKEN" "$payload" | \\
+  curl -s --max-time 5 -k -X POST "https://localhost:\${ATOO_WEB_PORT:-${WEB_PORT}}/api/hooks/callback" \\
     -H 'Content-Type: application/json' -d @- || true
 `;
 

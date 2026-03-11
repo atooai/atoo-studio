@@ -22,12 +22,12 @@ export const CDP_PORT_START = 9300;
 export const CDP_PORT_END = 9399;
 
 // Docker preview settings
-export const DOCKER_PREVIEW_IMAGE = 'ccproxy-preview:latest';
-export const DOCKER_PREVIEW_SOCKET_DIR = path.join(os.tmpdir(), 'ccproxy-preview-sockets');
+export const DOCKER_PREVIEW_IMAGE = 'atoo-studio-preview:latest';
+export const DOCKER_PREVIEW_SOCKET_DIR = path.join(os.tmpdir(), 'atoo-studio-preview-sockets');
 import { execSync as _execSync } from 'child_process';
 
 function detectContainerRuntime(): string {
-  if (process.env.CCPROXY_CONTAINER_RUNTIME) return process.env.CCPROXY_CONTAINER_RUNTIME;
+  if (process.env.ATOO_CONTAINER_RUNTIME) return process.env.ATOO_CONTAINER_RUNTIME;
   for (const cmd of ['docker', 'podman']) {
     try {
       _execSync(`${cmd} --version`, { stdio: 'ignore' });

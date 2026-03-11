@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { vccDb } from '../state/db.js';
+import { db } from '../state/db.js';
 import * as gitOps from '../services/git-ops.js';
 import { watchProject } from '../services/project-watcher.js';
 import { isAuthEnabled } from '../auth/middleware.js';
@@ -21,10 +21,10 @@ export function setBroadcastSettingsChange(fn: typeof broadcastSettingsChange) {
 // List environments (filtered by user when auth is enabled)
 environmentsRouter.get('/api/environments', (req, res) => {
   if (isAuthEnabled() && req.user) {
-    const envs = vccDb.listEnvironmentsForUser(req.user.id);
+    const envs = db.listEnvironmentsForUser(req.user.id);
     return res.json(envs);
   }
-  const envs = vccDb.listEnvironments();
+  const envs = db.listEnvironments();
   res.json(envs);
 });
 
@@ -33,22 +33,22 @@ environmentsRouter.post('/api/environments', (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (isAuthEnabled() && req.user) {
-    const env = vccDb.createEnvironmentWithOwner(name, req.user.id);
+    const env = db.createEnvironmentWithOwner(name, req.user.id);
     return res.json(env);
   }
-  const env = vccDb.createEnvironment(name);
+  const env = db.createEnvironment(name);
   res.json(env);
 });
 
 // Delete environment (owner only when auth is enabled)
 environmentsRouter.delete('/api/environments/:id', (req, res) => {
   if (isAuthEnabled() && req.user) {
-    const owner = vccDb.getEnvironmentOwner(req.params.id);
+    const owner = db.getEnvironmentOwner(req.params.id);
     if (owner !== req.user.id) {
       return res.status(403).json({ error: 'Only the environment owner can delete it' });
     }
   }
-  const deleted = vccDb.deleteEnvironment(req.params.id);
+  const deleted = db.deleteEnvironment(req.params.id);
   if (!deleted) return res.status(404).json({ error: 'Environment not found' });
   res.json({ success: true });
 });
@@ -60,11 +60,11 @@ environmentsRouter.delete('/api/environments/:id', (req, res) => {
 // List shares for an environment
 environmentsRouter.get('/api/environments/:id/shares', (req, res) => {
   if (isAuthEnabled() && req.user) {
-    if (!vccDb.canAccessEnvironment(req.user.id, req.params.id)) {
+    if (!db.canAccessEnvironment(req.user.id, req.params.id)) {
       return res.status(403).json({ error: 'Access denied' });
     }
   }
-  const shares = vccDb.listEnvironmentShares(req.params.id);
+  const shares = db.listEnvironmentShares(req.params.id);
   res.json(shares);
 });
 
@@ -74,29 +74,29 @@ environmentsRouter.post('/api/environments/:id/shares', (req, res) => {
   if (!user_id) return res.status(400).json({ error: 'user_id is required' });
 
   if (isAuthEnabled() && req.user) {
-    const owner = vccDb.getEnvironmentOwner(req.params.id);
+    const owner = db.getEnvironmentOwner(req.params.id);
     if (owner !== req.user.id) {
       return res.status(403).json({ error: 'Only the environment owner can share it' });
     }
   }
 
-  const targetUser = vccDb.getUser(user_id);
+  const targetUser = db.getUser(user_id);
   if (!targetUser) return res.status(404).json({ error: 'User not found' });
 
-  vccDb.shareEnvironment(req.params.id, user_id, req.user?.id || 'system');
+  db.shareEnvironment(req.params.id, user_id, req.user?.id || 'system');
   res.json({ ok: true });
 });
 
 // Revoke share
 environmentsRouter.delete('/api/environments/:id/shares/:userId', (req, res) => {
   if (isAuthEnabled() && req.user) {
-    const owner = vccDb.getEnvironmentOwner(req.params.id);
+    const owner = db.getEnvironmentOwner(req.params.id);
     if (owner !== req.user.id) {
       return res.status(403).json({ error: 'Only the environment owner can manage shares' });
     }
   }
 
-  const deleted = vccDb.unshareEnvironment(req.params.id, req.params.userId);
+  const deleted = db.unshareEnvironment(req.params.id, req.params.userId);
   if (!deleted) return res.status(404).json({ error: 'Share not found' });
   res.json({ ok: true });
 });
@@ -107,13 +107,13 @@ environmentsRouter.delete('/api/environments/:id/shares/:userId', (req, res) => 
 
 // Get projects in an environment (with live isGit + pe_id)
 environmentsRouter.get('/api/environments/:id/projects', (req, res) => {
-  if (isAuthEnabled() && req.user && !vccDb.canAccessEnvironment(req.user.id, req.params.id)) {
+  if (isAuthEnabled() && req.user && !db.canAccessEnvironment(req.user.id, req.params.id)) {
     return res.status(403).json({ error: 'Access denied' });
   }
-  const env = vccDb.getEnvironment(req.params.id);
+  const env = db.getEnvironment(req.params.id);
   if (!env) return res.status(404).json({ error: 'Environment not found' });
 
-  const projects = vccDb.getProjectsForEnvironment(req.params.id);
+  const projects = db.getProjectsForEnvironment(req.params.id);
   const withGit = projects.map(p => {
     if (p.ssh_connection_id) {
       // Remote project — skip local fs checks and watching
@@ -130,10 +130,10 @@ environmentsRouter.get('/api/environments/:id/projects', (req, res) => {
 
 // Create project + link to environment
 environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
-  if (isAuthEnabled() && req.user && !vccDb.canAccessEnvironment(req.user.id, req.params.id)) {
+  if (isAuthEnabled() && req.user && !db.canAccessEnvironment(req.user.id, req.params.id)) {
     return res.status(403).json({ error: 'Access denied' });
   }
-  const env = vccDb.getEnvironment(req.params.id);
+  const env = db.getEnvironment(req.params.id);
   if (!env) return res.status(404).json({ error: 'Environment not found' });
 
   const { name, path: projectPath, initGit, remoteUrl, ssh_connection_id, remote_path } = req.body;
@@ -163,11 +163,11 @@ environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
         }
       }
 
-      const project = vccDb.createProject(name, projectPath, {
+      const project = db.createProject(name, projectPath, {
         sshConnectionId: ssh_connection_id,
         remotePath: remote_path || projectPath,
       });
-      const peId = vccDb.linkProject(project.id, req.params.id);
+      const peId = db.linkProject(project.id, req.params.id);
 
       let isGit = false;
       try {
@@ -191,8 +191,8 @@ environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
         }
       }
 
-      const project = vccDb.createProject(name, projectPath);
-      const peId = vccDb.linkProject(project.id, req.params.id);
+      const project = db.createProject(name, projectPath);
+      const peId = db.linkProject(project.id, req.params.id);
 
       let isGit = false;
       try { isGit = fs.existsSync(path.join(resolved, '.git')); } catch {}
@@ -209,43 +209,43 @@ environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
 
 // Connect an existing project from another environment
 environmentsRouter.post('/api/environments/:id/connect-project', (req, res) => {
-  const env = vccDb.getEnvironment(req.params.id);
+  const env = db.getEnvironment(req.params.id);
   if (!env) return res.status(404).json({ error: 'Environment not found' });
 
   const { project_id } = req.body;
   if (!project_id) return res.status(400).json({ error: 'project_id is required' });
 
-  const project = vccDb.getProject(project_id);
+  const project = db.getProject(project_id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
-  const peId = vccDb.linkProject(project_id, req.params.id);
+  const peId = db.linkProject(project_id, req.params.id);
   res.json({ success: true, pe_id: peId });
 });
 
 // Unlink project from environment by PE ID
 environmentsRouter.delete('/api/project-links/:peId', (req, res) => {
-  const pe = vccDb.getProjectEnvironment(req.params.peId);
+  const pe = db.getProjectEnvironment(req.params.peId);
   if (!pe) return res.status(404).json({ error: 'Link not found' });
 
   const deleteProject = req.query.deleteProject === 'true';
   const deleteFiles = req.query.deleteFiles === 'true';
 
-  vccDb.unlinkProject(req.params.peId);
+  db.unlinkProject(req.params.peId);
 
   // Check remaining links
-  const remainingEnvs = vccDb.getEnvironmentsForProject(pe.project_id);
+  const remainingEnvs = db.getEnvironmentsForProject(pe.project_id);
 
   if (remainingEnvs.length === 0 && deleteProject) {
     // Delete working directory if requested
     if (deleteFiles) {
-      const project = vccDb.getProject(pe.project_id);
+      const project = db.getProject(pe.project_id);
       if (project && !project.ssh_connection_id) {
         try {
           fs.rmSync(project.path, { recursive: true, force: true });
         } catch {}
       }
     }
-    vccDb.deleteProject(pe.project_id);
+    db.deleteProject(pe.project_id);
   }
 
   res.json({ success: true, remainingLinks: remainingEnvs.length });
@@ -253,10 +253,10 @@ environmentsRouter.delete('/api/project-links/:peId', (req, res) => {
 
 // Resolve a project-environment link (for URL-based routing)
 environmentsRouter.get('/api/project-links/:peId', (req, res) => {
-  const pe = vccDb.getProjectEnvironment(req.params.peId);
+  const pe = db.getProjectEnvironment(req.params.peId);
   if (!pe) return res.status(404).json({ error: 'Project link not found' });
-  const project = vccDb.getProject(pe.project_id);
-  const environment = vccDb.getEnvironment(pe.environment_id);
+  const project = db.getProject(pe.project_id);
+  const environment = db.getEnvironment(pe.environment_id);
   res.json({ ...pe, project, environment });
 });
 
@@ -265,14 +265,14 @@ environmentsRouter.get('/api/project-links/:peId', (req, res) => {
 // ═══════════════════════════════════════════════════
 
 environmentsRouter.get('/api/environments/:id/settings', (req, res) => {
-  const settings = vccDb.getEnvironmentSettings(req.params.id);
+  const settings = db.getEnvironmentSettings(req.params.id);
   if (!settings) return res.status(404).json({ error: 'Environment not found' });
   res.json(settings);
 });
 
 environmentsRouter.put('/api/environments/:id/settings', (req, res) => {
-  vccDb.updateEnvironmentSettings(req.params.id, req.body);
-  const settings = vccDb.getEnvironmentSettings(req.params.id);
+  db.updateEnvironmentSettings(req.params.id, req.body);
+  const settings = db.getEnvironmentSettings(req.params.id);
   broadcastSettingsChange('environment', req.params.id, settings, (req as any)._settingsWs);
   res.json(settings);
 });
@@ -282,13 +282,13 @@ environmentsRouter.put('/api/environments/:id/settings', (req, res) => {
 // ═══════════════════════════════════════════════════
 
 environmentsRouter.get('/api/project-links/:peId/settings', (req, res) => {
-  const settings = vccDb.getProjectSettings(req.params.peId);
+  const settings = db.getProjectSettings(req.params.peId);
   res.json(settings);
 });
 
 environmentsRouter.put('/api/project-links/:peId/settings', (req, res) => {
-  vccDb.updateProjectSettings(req.params.peId, req.body);
-  const settings = vccDb.getProjectSettings(req.params.peId);
+  db.updateProjectSettings(req.params.peId, req.body);
+  const settings = db.getProjectSettings(req.params.peId);
   broadcastSettingsChange('project', req.params.peId, settings, (req as any)._settingsWs);
   res.json(settings);
 });

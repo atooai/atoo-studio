@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { vccDb } from '../state/db.js';
+import { db } from '../state/db.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { requireAuth, requireAdmin } from '../auth/middleware.js';
 import { destroyAllUserSessions } from '../auth/session.js';
@@ -15,11 +15,11 @@ export const usersRouter = Router();
 
 // GET /api/users — list all users (admin only)
 usersRouter.get('/api/users', requireAdmin, (_req, res) => {
-  const users = vccDb.listUsers();
+  const users = db.listUsers();
   const usersWithMfa = users.map(u => ({
     ...u,
     hasTOTP: hasTotpEnabled(u.id),
-    passkeyCount: vccDb.listPasskeys(u.id).length,
+    passkeyCount: db.listPasskeys(u.id).length,
   }));
   res.json(usersWithMfa);
 });
@@ -40,12 +40,12 @@ usersRouter.post('/api/users', requireAdmin, async (req, res) => {
 
   const { username, display_name, role, password } = parsed.data;
 
-  if (vccDb.getUserByUsername(username)) {
+  if (db.getUserByUsername(username)) {
     return res.status(409).json({ error: 'Username already exists' });
   }
 
   const passwordHash = await hashPassword(password);
-  const user = vccDb.createUser(username, display_name, role, passwordHash);
+  const user = db.createUser(username, display_name, role, passwordHash);
 
   res.json({ id: user.id, username: user.username, display_name: user.display_name, role: user.role });
 });
@@ -62,12 +62,12 @@ usersRouter.put('/api/users/:id', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Invalid input' });
   }
 
-  const user = vccDb.getUser(req.params.id);
+  const user = db.getUser(req.params.id);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  vccDb.updateUser(req.params.id, parsed.data);
+  db.updateUser(req.params.id, parsed.data);
   res.json({ ok: true });
 });
 
@@ -77,13 +77,13 @@ usersRouter.delete('/api/users/:id', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Cannot delete yourself' });
   }
 
-  const user = vccDb.getUser(req.params.id);
+  const user = db.getUser(req.params.id);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
 
   destroyAllUserSessions(req.params.id);
-  vccDb.deleteUser(req.params.id);
+  db.deleteUser(req.params.id);
   res.json({ ok: true });
 });
 
@@ -98,13 +98,13 @@ usersRouter.post('/api/users/:id/reset-password', requireAdmin, async (req, res)
     return res.status(400).json({ error: 'Invalid input' });
   }
 
-  const user = vccDb.getUser(req.params.id);
+  const user = db.getUser(req.params.id);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
 
   const hash = await hashPassword(parsed.data.password);
-  vccDb.updateUserPassword(req.params.id, hash);
+  db.updateUserPassword(req.params.id, hash);
   destroyAllUserSessions(req.params.id);
   res.json({ ok: true });
 });
@@ -117,7 +117,7 @@ usersRouter.post('/api/users/:id/reset-totp', requireAdmin, (req, res) => {
 
 // POST /api/users/:id/reset-passkeys — admin removes all passkeys
 usersRouter.post('/api/users/:id/reset-passkeys', requireAdmin, (req, res) => {
-  vccDb.deleteAllUserPasskeys(req.params.id);
+  db.deleteAllUserPasskeys(req.params.id);
   res.json({ ok: true });
 });
 
@@ -138,7 +138,7 @@ usersRouter.put('/api/users/me/password', requireAuth, async (req, res) => {
   }
 
   const { current_password, new_password } = parsed.data;
-  const user = vccDb.getUser(req.user!.id)!;
+  const user = db.getUser(req.user!.id)!;
 
   const valid = await verifyPassword(current_password, user.password_hash);
   if (!valid) {
@@ -146,7 +146,7 @@ usersRouter.put('/api/users/me/password', requireAuth, async (req, res) => {
   }
 
   const hash = await hashPassword(new_password);
-  vccDb.updateUserPassword(user.id, hash);
+  db.updateUserPassword(user.id, hash);
   res.json({ ok: true });
 });
 
@@ -220,7 +220,7 @@ usersRouter.post('/api/users/me/passkey/register', requireAuth, async (req, res)
 
 // GET /api/users/me/passkeys — list own passkeys
 usersRouter.get('/api/users/me/passkeys', requireAuth, (req, res) => {
-  const passkeys = vccDb.listPasskeys(req.user!.id);
+  const passkeys = db.listPasskeys(req.user!.id);
   res.json(passkeys.map(pk => ({
     id: pk.id,
     device_name: pk.device_name,
@@ -230,7 +230,7 @@ usersRouter.get('/api/users/me/passkeys', requireAuth, (req, res) => {
 
 // DELETE /api/users/me/passkeys/:id — remove a passkey
 usersRouter.delete('/api/users/me/passkeys/:id', requireAuth, (req, res) => {
-  const deleted = vccDb.deletePasskey(req.params.id, req.user!.id);
+  const deleted = db.deletePasskey(req.params.id, req.user!.id);
   if (!deleted) {
     return res.status(404).json({ error: 'Passkey not found' });
   }

@@ -23,7 +23,7 @@ export function WorktreeModal({ branches, usedBranches = [], projectPath, onConf
 
   const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_.-]/g, '-');
   const defaultPath = branch.trim()
-    ? projectPath + '/.vcc/worktrees/' + sanitize(branch.trim())
+    ? projectPath + '/.atoo-studio/worktrees/' + sanitize(branch.trim())
     : '';
 
   const resolvedPath = pathMode === 'default' ? defaultPath : customPath;

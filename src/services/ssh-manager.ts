@@ -360,9 +360,9 @@ class SshManager {
   private async uploadCaCert(id: string): Promise<void> {
     try {
       const certContent = fs.readFileSync(CA_CERT_PATH, 'utf-8');
-      await this.exec(id, 'mkdir -p ~/.ccproxy');
-      await this.sftpWriteFile(id, '.ccproxy/ca.pem', certContent);
-      console.log(`[ssh] Uploaded CA cert to remote ~/.ccproxy/ca.pem`);
+      await this.exec(id, 'mkdir -p ~/.atoo-studio');
+      await this.sftpWriteFile(id, '.atoo-studio/ca.pem', certContent);
+      console.log(`[ssh] Uploaded CA cert to remote ~/.atoo-studio/ca.pem`);
     } catch (err: any) {
       console.warn(`[ssh] Failed to upload CA cert:`, err.message);
     }

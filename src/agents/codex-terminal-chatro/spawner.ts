@@ -24,10 +24,10 @@ export function spawnCodexCliProcess(options: {
 
   // Inject MCP server config via -c flags (per-process, doesn't affect other codex instances)
   const mcp = getMcpServerDef();
-  baseArgs.push('-c', `mcp_servers.ccproxy.command="${mcp.command}"`);
-  baseArgs.push('-c', `mcp_servers.ccproxy.args=${JSON.stringify(mcp.args)}`);
+  baseArgs.push('-c', `mcp_servers.atoo-studio.command="${mcp.command}"`);
+  baseArgs.push('-c', `mcp_servers.atoo-studio.args=${JSON.stringify(mcp.args)}`);
   for (const [key, value] of Object.entries(mcp.env)) {
-    baseArgs.push('-c', `mcp_servers.ccproxy.env.${key}="${value}"`);
+    baseArgs.push('-c', `mcp_servers.atoo-studio.env.${key}="${value}"`);
   }
 
   // Inject system prompt with MCP tool usage instructions
@@ -49,8 +49,8 @@ export function spawnCodexCliProcess(options: {
 
   // Inject notify callback env vars (like Claude's hook token)
   if (options.notifyToken) {
-    env.CCPROXY_HOOK_TOKEN = options.notifyToken;
-    env.CCPROXY_WEB_PORT = String(WEB_PORT);
+    env.ATOO_HOOK_TOKEN = options.notifyToken;
+    env.ATOO_WEB_PORT = String(WEB_PORT);
   }
 
   const { envId } = spawnProcess({

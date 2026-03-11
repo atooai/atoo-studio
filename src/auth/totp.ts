@@ -1,9 +1,9 @@
 import { TOTP, Secret } from 'otpauth';
 import QRCode from 'qrcode';
 import { encrypt, decrypt } from './crypto-key.js';
-import { vccDb } from '../state/db.js';
+import { db } from '../state/db.js';
 
-const ISSUER = 'CCProxy';
+const ISSUER = 'Atoo Studio';
 
 export async function generateTotpSecret(username: string): Promise<{
   secret: string;
@@ -46,30 +46,30 @@ export function verifyTotpToken(secret: string, token: string): boolean {
 
 export function saveTotpSecret(userId: string, secret: string): void {
   const encrypted = encrypt(secret);
-  vccDb.saveTotpSecret(userId, encrypted);
+  db.saveTotpSecret(userId, encrypted);
 }
 
 export function getTotpSecret(userId: string): string | null {
-  const row = vccDb.getTotpSecret(userId);
+  const row = db.getTotpSecret(userId);
   if (!row || !row.verified) return null;
   return decrypt(row.secret_encrypted);
 }
 
 export function getUnverifiedTotpSecret(userId: string): string | null {
-  const row = vccDb.getTotpSecret(userId);
+  const row = db.getTotpSecret(userId);
   if (!row) return null;
   return decrypt(row.secret_encrypted);
 }
 
 export function markTotpVerified(userId: string): void {
-  vccDb.markTotpVerified(userId);
+  db.markTotpVerified(userId);
 }
 
 export function removeTotpSecret(userId: string): void {
-  vccDb.deleteTotpSecret(userId);
+  db.deleteTotpSecret(userId);
 }
 
 export function hasTotpEnabled(userId: string): boolean {
-  const row = vccDb.getTotpSecret(userId);
+  const row = db.getTotpSecret(userId);
   return !!row && !!row.verified;
 }

@@ -133,7 +133,7 @@ async function handleRoute() {
     return;
   }
 
-  const envMatch = path.match(/^\/vccenv\/([^/]+)$/);
+  const envMatch = path.match(/^\/env\/([^/]+)$/);
   if (envMatch) {
     const envId = envMatch[1];
     const store = useStore.getState();
@@ -219,7 +219,7 @@ async function selectEnvironment(envId: string, fromRouter = false) {
   }
 
   if (!fromRouter) {
-    history.pushState(null, '', '/vccenv/' + envId);
+    history.pushState(null, '', '/env/' + envId);
   }
 }
 
@@ -586,7 +586,7 @@ function registerGlobalFunctions() {
     store.setActiveProjectId(null);
     store.setActiveProjectEnvironmentId(null);
     if (store.activeEnvironmentId) {
-      history.pushState(null, '', '/vccenv/' + store.activeEnvironmentId);
+      history.pushState(null, '', '/env/' + store.activeEnvironmentId);
     }
   };
   win.navigate = (path: string, replace = false) => {

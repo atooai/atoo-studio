@@ -262,7 +262,7 @@ class Store {
       })
     ).toString('base64url');
     const signature = crypto
-      .createHmac('sha256', 'ccproxy-local-secret')
+      .createHmac('sha256', 'atoo-studio-local-secret')
       .update(`${header}.${payload}`)
       .digest('base64url');
     return `sk-ant-si-${header}.${payload}.${signature}`;

@@ -32,12 +32,12 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NATIVE_DIR="$SCRIPT_DIR/src/serial/native"
 BUILD_DIR="$NATIVE_DIR/build/Release"
-# Install to ~/.ccproxy/bin/ so node-gyp rebuilds don't wipe capabilities/suid
+# Install to ~/.atoo-studio/bin/ so node-gyp rebuilds don't wipe capabilities/suid
 INSTALL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
 INSTALL_HOME="$(eval echo "~$INSTALL_USER")"
-INSTALL_DIR="$INSTALL_HOME/.ccproxy/bin"
+INSTALL_DIR="$INSTALL_HOME/.atoo-studio/bin"
 
-echo "=== Setting up CUSE for ccproxy ==="
+echo "=== Setting up CUSE for atoo-studio ==="
 
 # Detect container environment
 VIRT=""
@@ -121,7 +121,7 @@ if [ "$IS_CONTAINER" = true ]; then
   else
     echo "  /dev/cuse is NOT available. Complete the host setup above first."
     echo ""
-    echo "  Note: Without CUSE, ccproxy will still work using PTY fallback,"
+    echo "  Note: Without CUSE, atoo-studio will still work using PTY fallback,"
     echo "  but DTR/RTS control signals won't be forwarded. You'll need to"
     echo "  use the BOOT button on your device when flashing."
     exit 1
@@ -190,7 +190,7 @@ else
       echo "    Or rebuild kernel with CONFIG_CUSE=m"
       echo "  - Running inside a container (modprobe is restricted)"
       echo ""
-      echo "Without CUSE, ccproxy will use PTY fallback (no DTR/RTS signals)."
+      echo "Without CUSE, atoo-studio will use PTY fallback (no DTR/RTS signals)."
       echo "You'll need to use the BOOT button on your device when flashing."
       exit 1
     fi
@@ -198,8 +198,8 @@ else
 
   # Persist across reboots
   if [ -d /etc/modules-load.d ]; then
-    echo "cuse" > /etc/modules-load.d/ccproxy-cuse.conf
-    echo "Persisted cuse module load to /etc/modules-load.d/ccproxy-cuse.conf"
+    echo "cuse" > /etc/modules-load.d/atoo-studio-cuse.conf
+    echo "Persisted cuse module load to /etc/modules-load.d/atoo-studio-cuse.conf"
   fi
 fi
 
@@ -214,7 +214,7 @@ gcc -Wall -Wextra -O2 \
 
 echo "Built: $BUILD_DIR/cuse_serial"
 
-# 5. Install to ~/.ccproxy/bin/ so node-gyp rebuilds don't wipe capabilities
+# 5. Install to ~/.atoo-studio/bin/ so node-gyp rebuilds don't wipe capabilities
 echo "Installing cuse_serial to $INSTALL_DIR/ ..."
 mkdir -p "$INSTALL_DIR"
 cp "$BUILD_DIR/cuse_serial" "$INSTALL_DIR/cuse_serial"
@@ -232,7 +232,7 @@ else
   echo "    sudo chown root:root $INSTALL_DIR/cuse_serial"
   echo "    sudo chmod u+s $INSTALL_DIR/cuse_serial"
   echo ""
-  echo "  Or run ccproxy itself as root (not recommended)."
+  echo "  Or run atoo-studio itself as root (not recommended)."
   echo ""
 
   # In container mode, set suid as fallback since setcap doesn't work
@@ -246,7 +246,7 @@ fi
 
 # 7. Add udev rule so the created /dev/ttyVS* devices are world-accessible
 if command -v udevadm &>/dev/null; then
-  UDEV_RULE="/etc/udev/rules.d/99-ccproxy-serial.rules"
+  UDEV_RULE="/etc/udev/rules.d/99-atoo-studio-serial.rules"
   echo 'KERNEL=="ttyVS[0-9]*", MODE="0666"' > "$UDEV_RULE"
   udevadm control --reload-rules 2>/dev/null || true
   echo "Installed udev rule: $UDEV_RULE"

@@ -345,7 +345,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     const instance = previewManager.get(decodeURIComponent(projectId), decodeURIComponent(tabId));
     if (!instance) return res.status(404).json({ error: 'Preview instance not found' });
 
-    const tmpDir = path.join(os.tmpdir(), 'ccproxy-uploads', `${projectId}_${tabId}`);
+    const tmpDir = path.join(os.tmpdir(), 'atoo-studio-uploads', `${projectId}_${tabId}`);
     fs.mkdirSync(tmpDir, { recursive: true });
 
     const filePaths: string[] = [];
@@ -608,7 +608,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         res.status(200).send(`
           <html>
             <body style="font-family:monospace;padding:2em;background:#1a1a2e;color:#e0e0e0">
-              <h1>CCProxy</h1>
+              <h1>Atoo Studio</h1>
               <p>Frontend not built yet. Run <code>cd frontend && npm run build</code></p>
               <p>Or use the API directly:</p>
               <ul>

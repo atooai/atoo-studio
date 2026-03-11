@@ -5,7 +5,7 @@ import readline from 'readline';
 
 export interface FsSessionMeta {
   uuid: string;           // Filename UUID (the --resume target)
-  dirHash: string;        // e.g., "-home-furti-ccproxy"
+  dirHash: string;        // e.g., "-home-furti-myproject"
   directory: string;      // Resolved from cwd field in JSONL
   title: string;          // First user message text, truncated
   lastModified: string;   // File mtime (ISO)
@@ -297,7 +297,7 @@ class FsSessionScanner {
 }
 
 /**
- * Convert dir hash back to path: "-home-furti-ccproxy" → "/home/furti/ccproxy"
+ * Convert dir hash back to path: "-home-furti-myproject" → "/home/furti/myproject"
  * Validates with fs.existsSync().
  */
 function dirHashToPath(dirHash: string): string {

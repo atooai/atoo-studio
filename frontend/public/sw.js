@@ -1,7 +1,7 @@
 // Minimal service worker required for PWA installability.
 // Network-first: always fetch from server, fall back to cache for offline.
 
-const CACHE = 'vcc-v1';
+const CACHE = 'atoo-studio-v1';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));

@@ -17,7 +17,7 @@ import {
   broadcastBinary,
 } from './preview-backend.js';
 
-const DOWNLOAD_DIR = path.join(os.tmpdir(), 'ccproxy-downloads');
+const DOWNLOAD_DIR = path.join(os.tmpdir(), 'atoo-studio-downloads');
 const CONTAINER_HEALTH_TIMEOUT = 15000;
 const CONTAINER_HEALTH_INTERVAL = 500;
 const CONTAINER_SOCKET_DIR = '/sockets';
@@ -51,7 +51,7 @@ export class DockerBackend implements PreviewBackend {
     // Remove stale containers
     try {
       const ids = execSync(
-        `${DOCKER_RUNTIME} ps -a --filter label=ccproxy=preview -q 2>/dev/null || true`,
+        `${DOCKER_RUNTIME} ps -a --filter label=atoo-studio=preview -q 2>/dev/null || true`,
         { encoding: 'utf-8' },
       ).trim();
       if (ids) {
@@ -100,7 +100,7 @@ export class DockerBackend implements PreviewBackend {
     const height = opts.height || 1080;
     const quality = opts.quality || 80;
     const protocol = opts.protocol || 'http';
-    const containerName = `ccproxy-preview-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    const containerName = `atoo-studio-preview-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
     const targetUrl = this.buildTargetUrl(opts);
 
     const dlDir = path.join(DOWNLOAD_DIR, key.replace('/', '_'));
@@ -117,7 +117,7 @@ export class DockerBackend implements PreviewBackend {
     const args = [
       'run', '-d',
       '--name', containerName,
-      '--label', 'ccproxy=preview',
+      '--label', 'atoo-studio=preview',
       '-e', `TARGET_URL=${targetUrl}`,
       '-e', `WIDTH=${width}`,
       '-e', `HEIGHT=${height}`,

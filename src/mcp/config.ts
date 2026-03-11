@@ -4,7 +4,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { WEB_PORT, PROJECT_ROOT } from '../config.js';
 
-const CONFIG_DIR = path.join(os.homedir(), '.ccproxy');
+const CONFIG_DIR = path.join(os.homedir(), '.atoo-studio');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config.json');
 
 // Detect dev mode: when running via tsx, __filename is in src/; when compiled, it's in dist/src/
@@ -24,35 +24,35 @@ export function getMcpServerDef(): { command: string; args: string[]; env: Recor
     command,
     args: [serverScript],
     env: {
-      CCPROXY_WEB_PORT: String(WEB_PORT),
-      CCPROXY_WEB_PROTO: 'https',
+      ATOO_WEB_PORT: String(WEB_PORT),
+      ATOO_WEB_PROTO: 'https',
       NODE_TLS_REJECT_UNAUTHORIZED: '0',
     },
   };
 }
 
 export const MCP_SYSTEM_PROMPT = [
-  'You have a "ccproxy" MCP server available with tools for interacting with the development UI.',
+  'You have a "atoo-studio" MCP server available with tools for interacting with the development UI.',
   'IMPORTANT: Whenever you start ANY service, server, or process that listens on a TCP port',
   '(dev servers, databases, API servers, preview servers, etc.), you MUST immediately discover',
-  'and call the mcp__ccproxy__report_tcp_services tool to report it. Search your deferred tools',
-  'for "ccproxy" or "report_tcp" to find it. Never skip this step.',
-  'When you need to start an HTTPS server, use mcp__ccproxy__generate_certificate to generate',
+  'and call the mcp__atoo-studio__report_tcp_services tool to report it. Search your deferred tools',
+  'for "atoo-studio" or "report_tcp" to find it. Never skip this step.',
+  'When you need to start an HTTPS server, use mcp__atoo-studio__generate_certificate to generate',
   'TLS cert files signed by the proxy CA. Specify the output directory and hostnames — the tool',
   'writes cert.pem, key.pem, and ca.pem there. The preview browser trusts this CA.',
   'When you need to interact with a serial device (ESP32, Arduino, etc.) connected to the user\'s',
-  'machine, use mcp__ccproxy__request_serial_device to get a virtual serial port path. The user',
+  'machine, use mcp__atoo-studio__request_serial_device to get a virtual serial port path. The user',
   'will be prompted to connect the device in their browser. Once connected, use the returned path',
   'with any serial tool (screen, minicom, esptool.py, idf.py monitor, etc.).',
   'When you need to recall previous decisions, implementation reasoning, discussed approaches,',
-  'or any context from past sessions for this project, use mcp__ccproxy__search_session_history.',
+  'or any context from past sessions for this project, use mcp__atoo-studio__search_session_history.',
   'It searches across ALL session history files (including subagent sessions) for the current project.',
   'Results are ordered by most recent session first.',
   'IMPORTANT: Prefer delegating search_session_history calls to a subagent when possible, so the',
   'main conversation context is not polluted with potentially large search results.',
   '\n## When stuck or unsure\n',
   'Do not rely on documentation, comments, or README files as a source of truth — they are likely outdated.',
-  'Instead, use mcp__ccproxy__search_session_history to find past discussions about the topic.',
+  'Instead, use mcp__atoo-studio__search_session_history to find past discussions about the topic.',
   'Session history contains the actual reasoning behind decisions, failed approaches, and tradeoffs',
   'that led to the current code.\n',
   'Search history before:\n',
@@ -68,7 +68,7 @@ export function getMcpConfigPath(): string {
   const def = getMcpServerDef();
   const config = {
     mcpServers: {
-      ccproxy: {
+      'atoo-studio': {
         command: def.command,
         args: def.args,
         env: def.env,

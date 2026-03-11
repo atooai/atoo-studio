@@ -11,7 +11,7 @@ import { createWebServer } from './web/server.js';
 import { killAllCliProcesses } from './spawner.js';
 import { PROXY_PORT, WEB_PORT, CA_CERT_PATH, CA_KEY_PATH, WEB_CERT_PATH, WEB_KEY_PATH } from './config.js';
 import { fsMonitor } from './fs-monitor.js';
-import { vccDb } from './state/db.js';
+import { db } from './state/db.js';
 import { agentRegistry } from './agents/registry.js';
 import { ClaudeCodeAgentFactory } from './agents/claude-code/index.js';
 import { ClaudeCodeTerminalAgentFactory } from './agents/claude-code-terminal/index.js';
@@ -22,7 +22,7 @@ import { previewManager } from './services/preview-manager.js';
 
 
 async function main() {
-  console.log('=== CCProxy ===');
+  console.log('=== Atoo Studio ===');
   console.log('');
 
   // 1. Load CA certificate
@@ -74,7 +74,7 @@ async function main() {
   console.log('');
 
   // Auto-reconnect saved SSH connections
-  const savedSshConns = vccDb.listSshConnections();
+  const savedSshConns = db.listSshConnections();
   for (const conn of savedSshConns) {
     sshManager.connect(conn).then(() => {
       console.log(`[init] SSH auto-reconnected: ${conn.label}`);
@@ -90,7 +90,7 @@ async function main() {
     fsMonitor.disconnect();
     sshManager.disconnectAll();
     killAllCliProcesses();
-    vccDb.close();
+    db.close();
     proxyServer.close();
     webServer.close();
     process.exit(0);
@@ -101,7 +101,7 @@ async function main() {
     fsMonitor.disconnect();
     sshManager.disconnectAll();
     killAllCliProcesses();
-    vccDb.close();
+    db.close();
     proxyServer.close();
     webServer.close();
     process.exit(0);

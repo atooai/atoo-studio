@@ -11,9 +11,9 @@ import type {
   ChangeOperation,
 } from './fs-monitor-types.js';
 
-const CCPROXY_DIR = path.join(os.homedir(), '.ccproxy');
-const SOCKET_PATH = path.join(CCPROXY_DIR, 'preload.sock');
-const OBJECTS_DIR = path.join(CCPROXY_DIR, 'objects');
+const ATOO_DIR = path.join(os.homedir(), '.atoo-studio');
+const SOCKET_PATH = path.join(ATOO_DIR, 'preload.sock');
+const OBJECTS_DIR = path.join(ATOO_DIR, 'objects');
 
 type ChangeListener = (change: FileChange) => void;
 
@@ -45,10 +45,10 @@ function shouldExcludeInotify(filePath: string): boolean {
   // Skip hidden dirs/files (except specific ones), node_modules, etc.
   if (base === 'node_modules') return true;
   if (base === '.git') return true;
-  if (base === '.ccproxy') return true;
+  if (base === '.atoo-studio') return true;
   if (filePath.includes('/node_modules/')) return true;
   if (filePath.includes('/.git/')) return true;
-  if (filePath.includes('/.ccproxy/')) return true;
+  if (filePath.includes('/.atoo-studio/')) return true;
   return false;
 }
 
@@ -87,7 +87,7 @@ export class FsMonitor {
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       // Ensure directories exist
-      fs.mkdirSync(CCPROXY_DIR, { recursive: true });
+      fs.mkdirSync(ATOO_DIR, { recursive: true });
       fs.mkdirSync(OBJECTS_DIR, { recursive: true });
 
       // Remove stale socket

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Install system dependencies for ccproxy (headless mode).
+# Install system dependencies for atoo-studio (headless mode).
 # Must be run as root (sudo ./setup.sh).
 #
 # NOTE: If using Docker preview mode (docker/preview/build.sh), these
@@ -13,7 +13,7 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-echo "=== ccproxy system setup ==="
+echo "=== atoo-studio system setup ==="
 
 # --- Chrome / Puppeteer dependencies ---
 echo ""
@@ -56,4 +56,4 @@ echo "All dependencies installed (Chrome libs, ffmpeg)."
 
 echo ""
 echo "=== Setup complete ==="
-echo "You can now run: npx ccproxy"
+echo "You can now run: npx atoo-studio"

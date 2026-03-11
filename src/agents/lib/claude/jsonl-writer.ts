@@ -28,7 +28,7 @@ import type {
 
 /**
  * Convert an absolute directory path to the Claude project dir hash format.
- * Replaces '/' with '-', e.g. /home/furti/ccproxy -> -home-furti-ccproxy
+ * Replaces '/' with '-', e.g. /home/furti/myproject -> -home-furti-myproject
  */
 function projectDirHash(directory: string): string {
   return directory.replace(/\//g, '-');

@@ -2,8 +2,8 @@
  * Codex CLI notification integration.
  *
  * Uses codex's `notify` config to receive agent-turn-complete callbacks.
- * Each spawn receives a unique CCPROXY_HOOK_TOKEN env var. The notify
- * callback script sends this token alongside the payload so ccproxy
+ * Each spawn receives a unique ATOO_HOOK_TOKEN env var. The notify
+ * callback script sends this token alongside the payload so Atoo Studio
  * can map callbacks to the correct agent session.
  *
  * Unlike Claude hooks (stdin-based, multiple event types), Codex notify
@@ -84,8 +84,8 @@ export function removeNotifyToken(token: string): void {
 // Notify callback script + codex config setup
 // ═══════════════════════════════════════════════════════
 
-const CCPROXY_DIR = path.join(os.homedir(), '.ccproxy');
-const NOTIFY_SCRIPT_PATH = path.join(CCPROXY_DIR, 'codex-notify-callback.sh');
+const ATOO_DIR = path.join(os.homedir(), '.atoo-studio');
+const NOTIFY_SCRIPT_PATH = path.join(ATOO_DIR, 'codex-notify-callback.sh');
 let notifyScriptReady = false;
 
 /**
@@ -95,14 +95,14 @@ let notifyScriptReady = false;
 export function setupCodexNotify(): void {
   if (notifyScriptReady) return;
 
-  try { fs.mkdirSync(CCPROXY_DIR, { recursive: true }); } catch {}
+  try { fs.mkdirSync(ATOO_DIR, { recursive: true }); } catch {}
 
   // Codex passes payload as $1 (CLI arg), not stdin.
-  // When CCPROXY_HOOK_TOKEN is unset (standalone codex), exit silently.
+  // When ATOO_HOOK_TOKEN is unset (standalone codex), exit silently.
   const script = `#!/bin/bash
-[ -z "$CCPROXY_HOOK_TOKEN" ] && exit 0
-printf '{"token":"%s","payload":%s}' "$CCPROXY_HOOK_TOKEN" "$1" | \\
-  curl -s --max-time 5 -k -X POST "https://localhost:\${CCPROXY_WEB_PORT:-${WEB_PORT}}/api/codex/notify-callback" \\
+[ -z "$ATOO_HOOK_TOKEN" ] && exit 0
+printf '{"token":"%s","payload":%s}' "$ATOO_HOOK_TOKEN" "$1" | \\
+  curl -s --max-time 5 -k -X POST "https://localhost:\${ATOO_WEB_PORT:-${WEB_PORT}}/api/codex/notify-callback" \\
     -H 'Content-Type: application/json' -d @-
 `;
 

@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const certsDir = path.join(__dirname, '..', 'certs');
 
 function generateCA() {
-  console.log('Generating CCProxy CA certificate...');
+  console.log('Generating Atoo Studio CA certificate...');
 
   fs.mkdirSync(certsDir, { recursive: true });
 
@@ -21,8 +21,8 @@ function generateCA() {
   cert.validity.notAfter.setFullYear(cert.validity.notAfter.getFullYear() + 10);
 
   const attrs = [
-    { name: 'commonName', value: 'CCProxy Local CA' },
-    { name: 'organizationName', value: 'CCProxy' },
+    { name: 'commonName', value: 'Atoo Studio Local CA' },
+    { name: 'organizationName', value: 'Atoo Studio' },
   ];
 
   cert.setSubject(attrs);

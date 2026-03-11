@@ -14,7 +14,7 @@ const DEBOUNCE_MS = 50;
 
 /**
  * Convert a cwd path to Claude CLI's dir-hash format.
- * "/home/furti/ccproxy" → "-home-furti-ccproxy"
+ * "/home/furti/myproject" → "-home-furti-myproject"
  */
 function cwdToDirHash(cwd: string): string {
   return cwd.replace(/\//g, '-');

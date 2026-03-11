@@ -4,11 +4,11 @@ import fs from 'fs';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 
-const STORE_DIR = path.join(os.homedir(), '.ccproxy');
-const DB_PATH = path.join(STORE_DIR, 'vcc.db');
+const STORE_DIR = path.join(os.homedir(), '.atoo-studio');
+const DB_PATH = path.join(STORE_DIR, 'atoo-studio.db');
 const OLD_PROJECTS_FILE = path.join(STORE_DIR, 'projects.json');
 
-export interface VccEnvironment {
+export interface StudioEnvironment {
   id: string;
   name: string;
   created_at: string;
@@ -95,7 +95,7 @@ export interface ProjectSettings {
   [key: string]: any;
 }
 
-class VccDatabase {
+class StudioDatabase {
   private db: Database.Database;
 
   constructor() {
@@ -118,7 +118,7 @@ class VccDatabase {
 
   private initSchema(): void {
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS vcc_environments (
+      CREATE TABLE IF NOT EXISTS environments (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -134,13 +134,13 @@ class VccDatabase {
       CREATE TABLE IF NOT EXISTS project_environment (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        environment_id TEXT NOT NULL REFERENCES vcc_environments(id) ON DELETE CASCADE,
+        environment_id TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
         linked_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (project_id, environment_id)
       );
 
       CREATE TABLE IF NOT EXISTS environment_settings (
-        environment_id TEXT PRIMARY KEY REFERENCES vcc_environments(id) ON DELETE CASCADE,
+        environment_id TEXT PRIMARY KEY REFERENCES environments(id) ON DELETE CASCADE,
         sidebar_width TEXT DEFAULT '260px',
         sidebar_collapsed INTEGER DEFAULT 0
       );
@@ -174,7 +174,7 @@ class VccDatabase {
     // Migrate from projects.json if it exists and DB is empty
     if (!fs.existsSync(OLD_PROJECTS_FILE)) return;
 
-    const envCount = this.db.prepare('SELECT COUNT(*) as cnt FROM vcc_environments').get() as any;
+    const envCount = this.db.prepare('SELECT COUNT(*) as cnt FROM environments').get() as any;
     if (envCount.cnt > 0) return;
 
     console.log('[db] Migrating from projects.json...');
@@ -187,7 +187,7 @@ class VccDatabase {
       const envId = uuidv4();
       const txn = this.db.transaction(() => {
         // Create "Default" environment
-        this.db.prepare('INSERT INTO vcc_environments (id, name) VALUES (?, ?)').run(envId, 'Default');
+        this.db.prepare('INSERT INTO environments (id, name) VALUES (?, ?)').run(envId, 'Default');
         this.db.prepare('INSERT INTO environment_settings (environment_id) VALUES (?)').run(envId);
 
         // Import projects
@@ -273,7 +273,7 @@ class VccDatabase {
         CREATE TABLE project_environment (
           id TEXT PRIMARY KEY,
           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-          environment_id TEXT NOT NULL REFERENCES vcc_environments(id) ON DELETE CASCADE,
+          environment_id TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
           linked_at TEXT NOT NULL DEFAULT (datetime('now')),
           UNIQUE (project_id, environment_id)
         );
@@ -311,32 +311,32 @@ class VccDatabase {
   // ENVIRONMENTS
   // ═══════════════════════════════════════════════════
 
-  listEnvironments(): VccEnvironment[] {
+  listEnvironments(): StudioEnvironment[] {
     return this.db.prepare(`
       SELECT e.id, e.name, e.created_at,
         (SELECT COUNT(*) FROM project_environment pe WHERE pe.environment_id = e.id) as project_count
-      FROM vcc_environments e
+      FROM environments e
       ORDER BY e.created_at
-    `).all() as VccEnvironment[];
+    `).all() as StudioEnvironment[];
   }
 
-  getEnvironment(id: string): VccEnvironment | undefined {
+  getEnvironment(id: string): StudioEnvironment | undefined {
     return this.db.prepare(`
       SELECT e.id, e.name, e.created_at,
         (SELECT COUNT(*) FROM project_environment pe WHERE pe.environment_id = e.id) as project_count
-      FROM vcc_environments e WHERE e.id = ?
-    `).get(id) as VccEnvironment | undefined;
+      FROM environments e WHERE e.id = ?
+    `).get(id) as StudioEnvironment | undefined;
   }
 
-  createEnvironment(name: string): VccEnvironment {
+  createEnvironment(name: string): StudioEnvironment {
     const id = uuidv4();
-    this.db.prepare('INSERT INTO vcc_environments (id, name) VALUES (?, ?)').run(id, name);
+    this.db.prepare('INSERT INTO environments (id, name) VALUES (?, ?)').run(id, name);
     this.db.prepare('INSERT INTO environment_settings (environment_id) VALUES (?)').run(id);
     return this.getEnvironment(id)!;
   }
 
   deleteEnvironment(id: string): boolean {
-    const result = this.db.prepare('DELETE FROM vcc_environments WHERE id = ?').run(id);
+    const result = this.db.prepare('DELETE FROM environments WHERE id = ?').run(id);
     return result.changes > 0;
   }
 
@@ -391,13 +391,13 @@ class VccDatabase {
     `).all(envId) as (Project & { pe_id: string })[];
   }
 
-  getEnvironmentsForProject(projectId: string): VccEnvironment[] {
+  getEnvironmentsForProject(projectId: string): StudioEnvironment[] {
     return this.db.prepare(`
       SELECT e.id, e.name, e.created_at
-      FROM vcc_environments e
+      FROM environments e
       JOIN project_environment pe ON pe.environment_id = e.id
       WHERE pe.project_id = ?
-    `).all(projectId) as VccEnvironment[];
+    `).all(projectId) as StudioEnvironment[];
   }
 
   linkProject(projectId: string, envId: string): string {
@@ -648,7 +648,7 @@ class VccDatabase {
 
       CREATE TABLE IF NOT EXISTS environment_shares (
         id TEXT PRIMARY KEY,
-        environment_id TEXT NOT NULL REFERENCES vcc_environments(id) ON DELETE CASCADE,
+        environment_id TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         shared_by TEXT NOT NULL REFERENCES users(id),
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -656,12 +656,12 @@ class VccDatabase {
       );
     `);
 
-    // Add owner_user_id column to vcc_environments if missing
-    const columns = this.db.prepare("PRAGMA table_info(vcc_environments)").all() as any[];
+    // Add owner_user_id column to environments if missing
+    const columns = this.db.prepare("PRAGMA table_info(environments)").all() as any[];
     const hasOwnerCol = columns.some((c: any) => c.name === 'owner_user_id');
     if (!hasOwnerCol && columns.length > 0) {
-      this.db.exec('ALTER TABLE vcc_environments ADD COLUMN owner_user_id TEXT REFERENCES users(id)');
-      console.log('[db] Added owner_user_id column to vcc_environments');
+      this.db.exec('ALTER TABLE environments ADD COLUMN owner_user_id TEXT REFERENCES users(id)');
+      console.log('[db] Added owner_user_id column to environments');
     }
   }
 
@@ -806,31 +806,31 @@ class VccDatabase {
   // ENVIRONMENT OWNERSHIP & SHARING
   // ═══════════════════════════════════════════════════
 
-  listEnvironmentsForUser(userId: string): VccEnvironment[] {
+  listEnvironmentsForUser(userId: string): StudioEnvironment[] {
     return this.db.prepare(`
       SELECT e.id, e.name, e.created_at, e.owner_user_id,
         (SELECT COUNT(*) FROM project_environment pe WHERE pe.environment_id = e.id) as project_count
-      FROM vcc_environments e
+      FROM environments e
       WHERE e.owner_user_id = ?
         OR e.id IN (SELECT environment_id FROM environment_shares WHERE user_id = ?)
       ORDER BY e.created_at
-    `).all(userId, userId) as VccEnvironment[];
+    `).all(userId, userId) as StudioEnvironment[];
   }
 
-  createEnvironmentWithOwner(name: string, ownerUserId: string): VccEnvironment {
+  createEnvironmentWithOwner(name: string, ownerUserId: string): StudioEnvironment {
     const id = uuidv4();
-    this.db.prepare('INSERT INTO vcc_environments (id, name, owner_user_id) VALUES (?, ?, ?)').run(id, name, ownerUserId);
+    this.db.prepare('INSERT INTO environments (id, name, owner_user_id) VALUES (?, ?, ?)').run(id, name, ownerUserId);
     this.db.prepare('INSERT INTO environment_settings (environment_id) VALUES (?)').run(id);
     return this.getEnvironment(id)!;
   }
 
   assignUnownedEnvironments(userId: string): void {
-    this.db.prepare('UPDATE vcc_environments SET owner_user_id = ? WHERE owner_user_id IS NULL').run(userId);
+    this.db.prepare('UPDATE environments SET owner_user_id = ? WHERE owner_user_id IS NULL').run(userId);
   }
 
   canAccessEnvironment(userId: string, envId: string): boolean {
     const row = this.db.prepare(`
-      SELECT 1 FROM vcc_environments
+      SELECT 1 FROM environments
       WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT environment_id FROM environment_shares WHERE user_id = ?))
     `).get(envId, userId, userId);
     return !!row;
@@ -839,7 +839,7 @@ class VccDatabase {
   canAccessProject(userId: string, projectId: string): boolean {
     const row = this.db.prepare(`
       SELECT 1 FROM project_environment pe
-      JOIN vcc_environments e ON e.id = pe.environment_id
+      JOIN environments e ON e.id = pe.environment_id
       WHERE pe.project_id = ?
         AND (e.owner_user_id = ? OR e.id IN (SELECT environment_id FROM environment_shares WHERE user_id = ?))
       LIMIT 1
@@ -848,7 +848,7 @@ class VccDatabase {
   }
 
   getEnvironmentOwner(envId: string): string | null {
-    const row = this.db.prepare('SELECT owner_user_id FROM vcc_environments WHERE id = ?').get(envId) as { owner_user_id: string | null } | undefined;
+    const row = this.db.prepare('SELECT owner_user_id FROM environments WHERE id = ?').get(envId) as { owner_user_id: string | null } | undefined;
     return row?.owner_user_id || null;
   }
 
@@ -889,4 +889,4 @@ class VccDatabase {
   }
 }
 
-export const vccDb = new VccDatabase();
+export const db = new StudioDatabase();

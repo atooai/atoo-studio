@@ -29,7 +29,7 @@ export function SetupPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1 className="auth-title">CCProxy</h1>
+        <h1 className="auth-title">Atoo Studio</h1>
         <p className="auth-subtitle">Create your admin account to get started</p>
 
         <form onSubmit={handleSubmit}>

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { vccDb } from '../state/db.js';
+import { db } from '../state/db.js';
 import { sshManager } from '../services/ssh-manager.js';
 import { obfuscate } from '../services/obfuscation.js';
 
@@ -33,7 +33,7 @@ sshRouter.post('/api/ssh/connect', async (req, res) => {
       if (passphrase) config.passphrase_obfuscated = obfuscate(passphrase);
     }
 
-    const dbRecord = vccDb.createSshConnection(config);
+    const dbRecord = db.createSshConnection(config);
 
     // Attempt live connection
     await sshManager.connect(dbRecord);
@@ -68,7 +68,7 @@ sshRouter.post('/api/ssh/generate-keypair', (_req, res) => {
     // Convert PEM public key to OpenSSH format for authorized_keys
     const pubKeyObj = crypto.createPublicKey(publicKey);
     const sshPublicKey = pubKeyObj.export({ type: 'spki', format: 'der' });
-    const opensshPubKey = `ssh-ed25519 ${Buffer.from(sshPublicKey).toString('base64')} ccproxy-generated`;
+    const opensshPubKey = `ssh-ed25519 ${Buffer.from(sshPublicKey).toString('base64')} atoo-studio-generated`;
 
     res.json({ privateKey, publicKey: opensshPubKey });
   } catch (err: any) {
@@ -89,7 +89,7 @@ sshRouter.post('/api/ssh/:id/disconnect', async (req, res) => {
 // Connection status
 sshRouter.get('/api/ssh/:id/status', (req, res) => {
   const status = sshManager.getStatus(req.params.id);
-  const dbRecord = vccDb.getSshConnection(req.params.id);
+  const dbRecord = db.getSshConnection(req.params.id);
   res.json({
     ...status,
     label: dbRecord?.label,
@@ -101,7 +101,7 @@ sshRouter.get('/api/ssh/:id/status', (req, res) => {
 
 // List all connections (with live status)
 sshRouter.get('/api/ssh/connections', (_req, res) => {
-  const connections = vccDb.listSshConnections();
+  const connections = db.listSshConnections();
   const result = connections.map(c => ({
     id: c.id,
     label: c.label,
@@ -149,7 +149,7 @@ sshRouter.post('/api/ssh/:id/browse/mkdir', async (req, res) => {
 sshRouter.delete('/api/ssh/:id', async (req, res) => {
   try {
     await sshManager.disconnect(req.params.id);
-    vccDb.deleteSshConnection(req.params.id);
+    db.deleteSshConnection(req.params.id);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -158,7 +158,7 @@ sshRouter.delete('/api/ssh/:id', async (req, res) => {
 
 // Reconnect to a saved connection
 sshRouter.post('/api/ssh/:id/reconnect', async (req, res) => {
-  const dbRecord = vccDb.getSshConnection(req.params.id);
+  const dbRecord = db.getSshConnection(req.params.id);
   if (!dbRecord) return res.status(404).json({ error: 'Connection not found' });
 
   try {

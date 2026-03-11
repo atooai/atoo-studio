@@ -2,15 +2,15 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const WEB_PORT = process.env.CCPROXY_WEB_PORT || '3010';
-const WEB_PROTO = process.env.CCPROXY_WEB_PROTO || 'https';
+const WEB_PORT = process.env.ATOO_WEB_PORT || '3010';
+const WEB_PROTO = process.env.ATOO_WEB_PROTO || 'https';
 
 const PROTOCOLS = [
   'http', 'https', 'ws', 'wss', 'tcp', 'grpc', 'smtp', 'imap', 'ftp', 'other',
 ] as const;
 
 const server = new McpServer({
-  name: 'ccproxy',
+  name: 'atoo-studio',
   version: '1.0.0',
 });
 
@@ -36,16 +36,16 @@ server.tool(
       if (!res.ok) {
         return { content: [{ type: 'text' as const, text: `Warning: failed to report services (HTTP ${res.status})` }] };
       }
-      return { content: [{ type: 'text' as const, text: `Reported ${services.length} service(s) to ccproxy UI.` }] };
+      return { content: [{ type: 'text' as const, text: `Reported ${services.length} service(s) to atoo-studio UI.` }] };
     } catch (err: any) {
-      return { content: [{ type: 'text' as const, text: `Warning: could not reach ccproxy (${err.message}). Services may not appear in UI.` }] };
+      return { content: [{ type: 'text' as const, text: `Warning: could not reach atoo-studio (${err.message}). Services may not appear in UI.` }] };
     }
   },
 );
 
 server.tool(
   'generate_certificate',
-  `Generate TLS certificate files signed by the ccproxy CA. Use this when you need to start an HTTPS server — the generated cert will be trusted by the preview browser. Writes cert.pem, key.pem, and ca.pem to the specified directory.`,
+  `Generate TLS certificate files signed by the atoo-studio CA. Use this when you need to start an HTTPS server — the generated cert will be trusted by the preview browser. Writes cert.pem, key.pem, and ca.pem to the specified directory.`,
   {
     hostnames: z.array(z.string()).min(1).describe('Hostnames/domains for the certificate SAN (e.g. ["localhost", "myapp.local"])'),
     output_dir: z.string().describe('Absolute path to the directory where cert.pem, key.pem, and ca.pem will be written'),

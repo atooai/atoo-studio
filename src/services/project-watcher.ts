@@ -3,7 +3,7 @@ import path from 'path';
 import { getFileTree } from './fs-browser.js';
 import * as gitOps from './git-ops.js';
 import { store } from '../state/store.js';
-import { vccDb } from '../state/db.js';
+import { db } from '../state/db.js';
 
 // Debounce interval for filesystem events (ms)
 const DEBOUNCE_MS = 500;
@@ -138,25 +138,25 @@ export function reconcileWorktrees(projectId: string, projectPath: string) {
   }
 
   // Get existing child projects
-  const existingChildren = vccDb.getChildProjects(projectId);
+  const existingChildren = db.getChildProjects(projectId);
   const existingPaths = new Set(existingChildren.map(c => c.path));
 
   // Get environments this parent is linked to (so we can link new children too)
-  const parentEnvs = vccDb.getEnvironmentsForProject(projectId);
+  const parentEnvs = db.getEnvironmentsForProject(projectId);
 
   // Record all discovered worktree paths in history (idempotent)
   for (const [wtPath] of discoveredPaths) {
-    vccDb.recordWorktreePath(projectId, wtPath);
+    db.recordWorktreePath(projectId, wtPath);
   }
 
   // Add new worktrees as child projects
   for (const [wtPath, branch] of discoveredPaths) {
     if (existingPaths.has(wtPath)) continue;
     console.log(`[project-watcher] Discovered new worktree: ${wtPath} (${branch})`);
-    const childProject = vccDb.createProject(branch, wtPath, { parentProjectId: projectId });
+    const childProject = db.createProject(branch, wtPath, { parentProjectId: projectId });
     // Link to same environments as parent
     for (const env of parentEnvs) {
-      vccDb.linkProject(childProject.id, env.id);
+      db.linkProject(childProject.id, env.id);
     }
     // Start watching the child project
     watchProject(childProject.id, wtPath);
@@ -169,7 +169,7 @@ export function reconcileWorktrees(projectId: string, projectPath: string) {
     if (!discoveredPaths.has(child.path)) {
       console.log(`[project-watcher] Worktree removed: ${child.path}`);
       unwatchProject(child.id);
-      vccDb.deleteProject(child.id);
+      db.deleteProject(child.id);
       broadcastToStatus({ type: 'worktrees_changed', parentProjectId: projectId });
     }
   }
@@ -290,7 +290,7 @@ export function unwatchProject(projectId: string) {
 }
 
 export function watchEnvironmentProjects(envId: string) {
-  const projects = vccDb.getProjectsForEnvironment(envId);
+  const projects = db.getProjectsForEnvironment(envId);
   for (const proj of projects) {
     watchProject(proj.id, proj.path);
   }

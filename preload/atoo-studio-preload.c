@@ -1,13 +1,13 @@
 /*
- * ccproxy-preload.c — LD_PRELOAD shared library for Copy-on-Write filesystem monitoring.
+ * atoo-studio-preload.c — LD_PRELOAD shared library for Copy-on-Write filesystem monitoring.
  *
  * Intercepts libc file operations (open, rename, unlink, truncate) to:
  *   1. Snapshot the original file before modification
  *   2. Report the event to the TypeScript monitor via Unix socket
  *
  * Environment variables:
- *   CCPROXY_SESSION_ID   — session/tracking identifier
- *   CCPROXY_SOCKET_PATH  — path to Unix domain socket (default: ~/.ccproxy/preload.sock)
+ *   ATOO_SESSION_ID   — session/tracking identifier
+ *   ATOO_SOCKET_PATH  — path to Unix domain socket (default: ~/.atoo-studio/preload.sock)
  *
  * Graceful degradation: if socket or env vars are unavailable, all intercepted
  * functions pass through to real implementations with near-zero overhead.
@@ -49,7 +49,7 @@ static int     (*real_ftruncate)(int, off_t)                  = NULL;
 static char         g_session_id[256];
 static char         g_socket_path[PATH_MAX];
 static char         g_snapshot_dir[PATH_MAX];
-static char         g_ccproxy_dir[PATH_MAX];   /* ~/.ccproxy/ for exclusion */
+static char         g_atoo_dir[PATH_MAX];   /* ~/.atoo-studio/ for exclusion */
 static int          g_sock_fd = -1;
 static int          g_initialized = 0;
 static uint64_t     g_counter = 0;
@@ -156,7 +156,7 @@ static int ensure_socket(void) {
 
 static int is_excluded(const char *abspath) {
     /* Skip our own snapshot/object directories */
-    if (strncmp(abspath, g_ccproxy_dir, strlen(g_ccproxy_dir)) == 0) return 1;
+    if (strncmp(abspath, g_atoo_dir, strlen(g_atoo_dir)) == 0) return 1;
     /* Skip virtual filesystems */
     if (strncmp(abspath, "/proc/", 6) == 0) return 1;
     if (strncmp(abspath, "/sys/", 5) == 0) return 1;
@@ -291,22 +291,22 @@ static int json_escape(const char *src, char *dst, size_t dstsz) {
  */
 static void snapshot_and_report(const char *op, const char *abspath, const char *old_path) {
     if (!g_initialized) {
-        fprintf(stderr, "[ccproxy-preload] SKIP (not initialized): %s %s\n", op, abspath);
+        fprintf(stderr, "[atoo-studio-preload] SKIP (not initialized): %s %s\n", op, abspath);
         return;
     }
     if (is_excluded(abspath)) {
-        fprintf(stderr, "[ccproxy-preload] SKIP (excluded): %s %s\n", op, abspath);
+        fprintf(stderr, "[atoo-studio-preload] SKIP (excluded): %s %s\n", op, abspath);
         return;
     }
     /* Don't exclude based on old_path — atomic writes rename from /tmp/ to final path */
 
-    fprintf(stderr, "[ccproxy-preload] EVENT: %s %s (old=%s)\n", op, abspath, old_path ? old_path : "none");
+    fprintf(stderr, "[atoo-studio-preload] EVENT: %s %s (old=%s)\n", op, abspath, old_path ? old_path : "none");
 
     pthread_mutex_lock(&g_mutex);
 
     /* Check if already snapshotted this path */
     if (set_contains(&g_snapped, abspath)) {
-        fprintf(stderr, "[ccproxy-preload] SKIP (already snapshotted): %s\n", abspath);
+        fprintf(stderr, "[atoo-studio-preload] SKIP (already snapshotted): %s\n", abspath);
         pthread_mutex_unlock(&g_mutex);
         return;
     }
@@ -362,12 +362,12 @@ static void snapshot_and_report(const char *op, const char *abspath, const char 
     if (ensure_socket() == 0) {
         ssize_t wr = write(g_sock_fd, msg, (size_t)len);
         if (wr < 0) {
-            fprintf(stderr, "[ccproxy-preload] SOCKET WRITE FAILED: %s\n", strerror(errno));
+            fprintf(stderr, "[atoo-studio-preload] SOCKET WRITE FAILED: %s\n", strerror(errno));
             /* Connection lost, close and let next call retry */
             close(g_sock_fd);
             g_sock_fd = -1;
         } else {
-            fprintf(stderr, "[ccproxy-preload] SENT %zd bytes to socket\n", wr);
+            fprintf(stderr, "[atoo-studio-preload] SENT %zd bytes to socket\n", wr);
         }
     }
 
@@ -393,28 +393,28 @@ static void preload_init(void) {
     real_ftruncate  = dlsym(RTLD_NEXT, "ftruncate");
 
     /* Read config from environment */
-    const char *sid = getenv("CCPROXY_SESSION_ID");
+    const char *sid = getenv("ATOO_SESSION_ID");
     if (!sid || !sid[0]) return; /* Not configured — pass through */
 
     strncpy(g_session_id, sid, sizeof(g_session_id) - 1);
 
-    const char *sock = getenv("CCPROXY_SOCKET_PATH");
+    const char *sock = getenv("ATOO_SOCKET_PATH");
     if (sock && sock[0]) {
         strncpy(g_socket_path, sock, sizeof(g_socket_path) - 1);
     } else {
         const char *home = getenv("HOME");
         if (!home) return;
-        snprintf(g_socket_path, sizeof(g_socket_path), "%s/.ccproxy/preload.sock", home);
+        snprintf(g_socket_path, sizeof(g_socket_path), "%s/.atoo-studio/preload.sock", home);
     }
 
-    /* Set up ccproxy dir for exclusion */
+    /* Set up atoo-studio dir for exclusion */
     const char *home = getenv("HOME");
     if (home) {
-        snprintf(g_ccproxy_dir, sizeof(g_ccproxy_dir), "%s/.ccproxy/", home);
+        snprintf(g_atoo_dir, sizeof(g_atoo_dir), "%s/.atoo-studio/", home);
     }
 
     /* Set up snapshot directory */
-    snprintf(g_snapshot_dir, sizeof(g_snapshot_dir), "%s/.ccproxy/snapshots/%s",
+    snprintf(g_snapshot_dir, sizeof(g_snapshot_dir), "%s/.atoo-studio/snapshots/%s",
              home ? home : "/tmp", g_session_id);
 
     /* Create snapshot directory (best effort) */
@@ -427,7 +427,7 @@ static void preload_init(void) {
     g_sock_fd = connect_socket();
 
     g_initialized = 1;
-    fprintf(stderr, "[ccproxy-preload] INIT pid=%d session=%s socket=%s connected=%d\n",
+    fprintf(stderr, "[atoo-studio-preload] INIT pid=%d session=%s socket=%s connected=%d\n",
             (int)getpid(), g_session_id, g_socket_path, g_sock_fd >= 0);
 }
 

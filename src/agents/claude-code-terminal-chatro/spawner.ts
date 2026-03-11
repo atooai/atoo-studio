@@ -28,8 +28,8 @@ export function spawnTerminalCliProcess(options: {
   delete env.CLAUDECODE;
 
   if (options.hookToken) {
-    env.CCPROXY_HOOK_TOKEN = options.hookToken;
-    env.CCPROXY_WEB_PORT = String(WEB_PORT);
+    env.ATOO_HOOK_TOKEN = options.hookToken;
+    env.ATOO_WEB_PORT = String(WEB_PORT);
   }
 
   const { envId } = spawnProcess({

@@ -73,8 +73,8 @@ export function isCuseAvailable(): boolean {
 }
 
 function findCuseBinarySync(): string | null {
-  // Preferred: installed by setup-cuse.sh to ~/.ccproxy/bin/ (survives node-gyp rebuilds)
-  const installedPath = path.join(os.homedir(), '.ccproxy', 'bin', 'cuse_serial');
+  // Preferred: installed by setup-cuse.sh to ~/.atoo-studio/bin/ (survives node-gyp rebuilds)
+  const installedPath = path.join(os.homedir(), '.atoo-studio', 'bin', 'cuse_serial');
   if (fs.existsSync(installedPath)) return installedPath;
 
   // Check /usr/local/bin

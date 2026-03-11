@@ -1,5 +1,5 @@
 // Simple XOR + base64 obfuscation — NOT encryption, just prevents casual reading
-const XOR_KEY = 'ccproxy-ssh-obfuscation-key-2024';
+const XOR_KEY = 'atoo-studio-ssh-obfuscation-key-2024';
 
 export function obfuscate(plaintext: string): string {
   const buf = Buffer.from(plaintext, 'utf-8');

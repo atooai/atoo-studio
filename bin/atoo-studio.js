@@ -17,25 +17,25 @@ if (process.platform === 'linux') {
   try {
     execSync('ldconfig -p | grep -q libatk-1.0', { stdio: 'ignore' });
   } catch {
-    warnings.push('[ccproxy] Missing Chrome dependencies — browser preview/streaming will not work.');
+    warnings.push('[atoo-studio] Missing Chrome dependencies — browser preview/streaming will not work.');
   }
 
   // CUSE for serial control signals (DTR/RTS)
-  const cusebin = path.join(process.env.HOME || '', '.ccproxy', 'bin', 'cuse_serial');
+  const cusebin = path.join(process.env.HOME || '', '.atoo-studio', 'bin', 'cuse_serial');
   if (!fs.existsSync('/dev/cuse') || !fs.existsSync(cusebin)) {
-    warnings.push('[ccproxy] CUSE not set up — serial control commands may not work (e.g. auto-reset sequences).');
+    warnings.push('[atoo-studio] CUSE not set up — serial control commands may not work (e.g. auto-reset sequences).');
   }
 
   if (warnings.length > 0) {
     for (const w of warnings) console.warn(w);
-    console.warn('[ccproxy] Run:  sudo ./setup.sh  and  sudo ./setup-cuse.sh');
+    console.warn('[atoo-studio] Run:  sudo ./setup.sh  and  sudo ./setup-cuse.sh');
     console.warn('');
   }
 }
 
 // Auto-run setup (generate CA cert) if certs don't exist yet
 if (!fs.existsSync(path.join(certsDir, 'ca.pem'))) {
-  console.log('[ccproxy] First run — generating CA certificate...');
+  console.log('[atoo-studio] First run — generating CA certificate...');
   const { default: forge } = await import('node-forge');
 
   fs.mkdirSync(certsDir, { recursive: true });
@@ -49,8 +49,8 @@ if (!fs.existsSync(path.join(certsDir, 'ca.pem'))) {
   cert.validity.notAfter.setFullYear(cert.validity.notAfter.getFullYear() + 10);
 
   const attrs = [
-    { name: 'commonName', value: 'CCProxy Local CA' },
-    { name: 'organizationName', value: 'CCProxy' },
+    { name: 'commonName', value: 'Atoo Studio Local CA' },
+    { name: 'organizationName', value: 'Atoo Studio' },
   ];
   cert.setSubject(attrs);
   cert.setIssuer(attrs);
@@ -63,12 +63,12 @@ if (!fs.existsSync(path.join(certsDir, 'ca.pem'))) {
 
   fs.writeFileSync(path.join(certsDir, 'ca.pem'), forge.pki.certificateToPem(cert));
   fs.writeFileSync(path.join(certsDir, 'ca-key.pem'), forge.pki.privateKeyToPem(keys.privateKey), { mode: 0o600 });
-  console.log('[ccproxy] CA certificate generated.');
+  console.log('[atoo-studio] CA certificate generated.');
 }
 
 // Auto-build Docker preview image if Docker/Podman is available but image is missing
 {
-  let runtime = process.env.CCPROXY_CONTAINER_RUNTIME || '';
+  let runtime = process.env.ATOO_CONTAINER_RUNTIME || '';
   if (!runtime) {
     for (const cmd of ['docker', 'podman']) {
       try { execSync(`${cmd} --version`, { stdio: 'ignore' }); runtime = cmd; break; } catch {}
@@ -82,19 +82,19 @@ if (!fs.existsSync(path.join(certsDir, 'ca.pem'))) {
     if (hasRuntime) {
       let hasImage = false;
       try {
-        execSync(`${runtime} image inspect ccproxy-preview:latest`, { stdio: 'ignore' });
+        execSync(`${runtime} image inspect atoo-studio-preview:latest`, { stdio: 'ignore' });
         hasImage = true;
       } catch {}
 
       if (!hasImage) {
         const buildScript = path.join(projectRoot, 'docker', 'preview', 'build.sh');
         if (fs.existsSync(buildScript)) {
-          console.log(`[ccproxy] Preview image not found — building ccproxy-preview:latest with ${runtime}...`);
+          console.log(`[atoo-studio] Preview image not found — building atoo-studio-preview:latest with ${runtime}...`);
           try {
-            execSync(`CCPROXY_CONTAINER_RUNTIME=${runtime} bash "${buildScript}"`, { cwd: projectRoot, stdio: 'inherit' });
-            console.log('[ccproxy] Docker preview image built successfully.');
+            execSync(`ATOO_CONTAINER_RUNTIME=${runtime} bash "${buildScript}"`, { cwd: projectRoot, stdio: 'inherit' });
+            console.log('[atoo-studio] Docker preview image built successfully.');
           } catch (err) {
-            console.warn('[ccproxy] Docker preview image build failed — falling back to headless mode.');
+            console.warn('[atoo-studio] Docker preview image build failed — falling back to headless mode.');
           }
         }
       }

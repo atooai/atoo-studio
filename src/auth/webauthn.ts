@@ -8,9 +8,9 @@ import {
 } from '@simplewebauthn/server';
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 import { v4 as uuidv4 } from 'uuid';
-import { vccDb, type User, type Passkey } from '../state/db.js';
+import { db, type User, type Passkey } from '../state/db.js';
 
-const RP_NAME = 'CCProxy';
+const RP_NAME = 'Atoo Studio';
 
 // In-memory challenge store (short-lived, keyed by usedId)
 const challenges = new Map<string, { challenge: string; expires: number }>();
@@ -30,7 +30,7 @@ function getChallenge(userId: string): string | null {
 }
 
 export async function getRegistrationOptions(user: User, rpID: string) {
-  const existingPasskeys = vccDb.listPasskeys(user.id);
+  const existingPasskeys = db.listPasskeys(user.id);
 
   const options = await generateRegistrationOptions({
     rpName: RP_NAME,
@@ -78,7 +78,7 @@ export async function verifyAndSaveRegistration(
 
   const { credential } = verification.registrationInfo;
 
-  vccDb.createPasskey({
+  db.createPasskey({
     id: uuidv4(),
     user_id: user.id,
     credential_id: credential.id,
@@ -92,7 +92,7 @@ export async function verifyAndSaveRegistration(
 }
 
 export async function getAuthOptions(userId: string, rpID: string) {
-  const passkeys = vccDb.listPasskeys(userId);
+  const passkeys = db.listPasskeys(userId);
 
   const options = await generateAuthenticationOptions({
     rpID,
@@ -118,7 +118,7 @@ export async function verifyAuth(
 
   // Find the credential being used
   const credentialId = response.id;
-  const passkey = vccDb.findPasskeyByCredentialId(credentialId);
+  const passkey = db.findPasskeyByCredentialId(credentialId);
   if (!passkey || passkey.user_id !== userId) return false;
 
   let verification: VerifiedAuthenticationResponse;
@@ -142,10 +142,10 @@ export async function verifyAuth(
   if (!verification.verified) return false;
 
   // Update counter
-  vccDb.updatePasskeyCounter(passkey.id, verification.authenticationInfo.newCounter);
+  db.updatePasskeyCounter(passkey.id, verification.authenticationInfo.newCounter);
   return true;
 }
 
 export function getUsersWithPasskeys(): string[] {
-  return vccDb.getUserIdsWithPasskeys();
+  return db.getUserIdsWithPasskeys();
 }

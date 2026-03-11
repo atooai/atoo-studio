@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import archiver from 'archiver';
-import { vccDb } from '../state/db.js';
+import { db } from '../state/db.js';
 import { getFileTree, readFileContent } from '../services/fs-browser.js';
 import { getRemoteFileTree, readRemoteFileContent } from '../services/remote-fs-browser.js';
 import * as gitOps from '../services/git-ops.js';
@@ -15,7 +15,7 @@ export const projectsRouter = Router();
 
 // Helper: get project context (local or remote)
 function getProjectContext(projectId: string): { cwd: string; connectionId?: string } | null {
-  const project = vccDb.getProject(projectId);
+  const project = db.getProject(projectId);
   if (!project) return null;
   if (project.ssh_connection_id) {
     return { cwd: project.remote_path || project.path, connectionId: project.ssh_connection_id };
@@ -29,7 +29,7 @@ function getProjectContext(projectId: string): { cwd: string; connectionId?: str
 
 // Convenience: list all projects across all environments
 projectsRouter.get('/api/projects', (_req, res) => {
-  const projects = vccDb.listAllProjects();
+  const projects = db.listAllProjects();
   const withGit = projects.map(p => {
     let isGit = false;
     try { isGit = fs.existsSync(path.join(p.path, '.git')); } catch {}
@@ -39,22 +39,22 @@ projectsRouter.get('/api/projects', (_req, res) => {
 });
 
 projectsRouter.delete('/api/projects/:id', (req, res) => {
-  const deleted = vccDb.deleteProject(req.params.id);
+  const deleted = db.deleteProject(req.params.id);
   if (!deleted) return res.status(404).json({ error: 'Project not found' });
   res.json({ success: true });
 });
 
 // Get environments a project is linked to
 projectsRouter.get('/api/projects/:id/environments', (req, res) => {
-  const project = vccDb.getProject(req.params.id);
+  const project = db.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
-  const envs = vccDb.getEnvironmentsForProject(req.params.id);
+  const envs = db.getEnvironmentsForProject(req.params.id);
   res.json(envs);
 });
 
 // Sessions filtered by project cwd
 projectsRouter.get('/api/projects/:id/sessions', (req, res) => {
-  const project = vccDb.getProject(req.params.id);
+  const project = db.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
   const sessions = Array.from(store.sessions.values())
@@ -398,7 +398,7 @@ projectsRouter.post('/api/screenshot', async (req, res) => {
 // ═══════════════════════════════════════════════════
 
 function getProjectCwd(req: any, res: any): { cwd: string; connectionId?: string } | null {
-  const project = vccDb.getProject(req.params.id);
+  const project = db.getProject(req.params.id);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return null;
@@ -793,10 +793,10 @@ projectsRouter.delete('/api/projects/:id/git/worktrees', async (req, res) => {
     const worktreePath = req.query.path as string;
     if (!worktreePath) return res.status(400).json({ error: 'path query parameter required' });
     // Find and remove the linked child project
-    const childProject = vccDb.findProjectByPath(worktreePath);
+    const childProject = db.findProjectByPath(worktreePath);
     if (childProject) {
       unwatchProject(childProject.id);
-      vccDb.deleteProject(childProject.id);
+      db.deleteProject(childProject.id);
     }
     ctx.connectionId
       ? await remoteGitOps.gitWorktreeRemove(ctx.connectionId, ctx.cwd, worktreePath)

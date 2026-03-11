@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AgentStatus, AgentDescriptor, HistoricalSession } from './types.js';
 import type { WireMessage } from '../events/wire.js';
 import { store } from '../state/store.js';
-import { vccDb } from '../state/db.js';
+import { db } from '../state/db.js';
 
 interface AgentEntry {
   agent: Agent;
@@ -137,7 +137,7 @@ class AgentRegistry {
     let unique = Array.from(bestById.values());
     // Filter by project path (includes main project + all worktree paths)
     if (cwd) {
-      const relatedPaths = new Set(vccDb.getAllRelatedProjectPaths(cwd));
+      const relatedPaths = new Set(db.getAllRelatedProjectPaths(cwd));
       unique = unique.filter(s => relatedPaths.has(s.directory));
     }
     // Sort by date descending (most recent first)
@@ -153,7 +153,7 @@ class AgentRegistry {
    */
   async getSessionFilesForProject(cwd: string): Promise<string[]> {
     // Resolve all related project paths (main + worktrees, current and historical)
-    const relatedPaths = vccDb.getAllRelatedProjectPaths(cwd);
+    const relatedPaths = db.getAllRelatedProjectPaths(cwd);
 
     const seen = new Set<string>();
     const allFiles: string[] = [];

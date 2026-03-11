@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { vccDb } from '../state/db.js';
+import { db } from '../state/db.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { createSession, setSessionCookie, clearSessionCookie, destroySession, SESSION_COOKIE_NAME } from '../auth/session.js';
 import { getSessionUser } from '../auth/session.js';
@@ -12,7 +12,7 @@ export const authRouter = Router();
 
 // GET /api/auth/status — public, returns setup state
 authRouter.get('/api/auth/status', (_req, res) => {
-  const userCount = vccDb.getUserCount();
+  const userCount = db.getUserCount();
   res.json({ setupRequired: userCount === 0, userCount });
 });
 
@@ -24,7 +24,7 @@ const setupSchema = z.object({
 });
 
 authRouter.post('/api/auth/setup', async (req, res) => {
-  if (vccDb.getUserCount() > 0) {
+  if (db.getUserCount() > 0) {
     return res.status(400).json({ error: 'Setup already completed' });
   }
 
@@ -35,10 +35,10 @@ authRouter.post('/api/auth/setup', async (req, res) => {
 
   const { username, display_name, password } = parsed.data;
   const passwordHash = await hashPassword(password);
-  const user = vccDb.createUser(username, display_name, 'admin', passwordHash);
+  const user = db.createUser(username, display_name, 'admin', passwordHash);
 
   // Assign all existing unowned environments to this admin
-  vccDb.assignUnownedEnvironments(user.id);
+  db.assignUnownedEnvironments(user.id);
 
   const sessionId = createSession(user.id, req);
   setSessionCookie(res, sessionId);
@@ -61,7 +61,7 @@ authRouter.post('/api/auth/login', async (req, res) => {
   }
 
   const { username, password } = parsed.data;
-  const user = vccDb.getUserByUsername(username);
+  const user = db.getUserByUsername(username);
   if (!user) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
@@ -135,12 +135,12 @@ authRouter.post('/api/auth/login/passkey/options', async (req, res) => {
     return res.status(400).json({ error: 'Invalid input' });
   }
 
-  const user = vccDb.getUserByUsername(parsed.data.username);
+  const user = db.getUserByUsername(parsed.data.username);
   if (!user) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
-  const passkeys = vccDb.listPasskeys(user.id);
+  const passkeys = db.listPasskeys(user.id);
   if (passkeys.length === 0) {
     return res.status(400).json({ error: 'No passkeys registered' });
   }
@@ -163,7 +163,7 @@ authRouter.post('/api/auth/login/passkey', async (req, res) => {
   }
 
   const { userId, response } = parsed.data;
-  const user = vccDb.getUser(userId);
+  const user = db.getUser(userId);
   if (!user) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
@@ -198,7 +198,7 @@ authRouter.post('/api/auth/logout', (req, res) => {
 authRouter.get('/api/auth/me', requireAuth, (req, res) => {
   const user = req.user!;
   const hasTOTP = hasTotpEnabled(user.id);
-  const passkeys = vccDb.listPasskeys(user.id);
+  const passkeys = db.listPasskeys(user.id);
   res.json({
     user: { id: user.id, username: user.username, display_name: user.display_name, role: user.role },
     hasTOTP,

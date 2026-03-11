@@ -12,7 +12,7 @@ let monacoInstance: any = null;
 function initMonaco() {
   import('monaco-editor').then(monaco => {
     monacoInstance = monaco;
-    monaco.editor.defineTheme('vcc-dark', {
+    monaco.editor.defineTheme('atoo-dark', {
       base: 'vs-dark',
       inherit: true,
       rules: [],
@@ -160,7 +160,7 @@ function SourceEditorView({ file }: { file: EditorFile }) {
       monacoEditor.setModel(monacoInstance.editor.createModel(file.content, file.lang));
     } else {
       monacoEditor = monacoInstance.editor.create(containerRef.current, {
-        value: file.content, language: file.lang, theme: 'vcc-dark',
+        value: file.content, language: file.lang, theme: 'atoo-dark',
         fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
         minimap: { enabled: true, scale: 1 }, lineNumbers: 'on',
         renderLineHighlight: 'all', scrollBeyondLastLine: false,
@@ -223,7 +223,7 @@ function DiffEditorView({ file }: { file: EditorFile }) {
     if (monacoDiffEditor) { monacoDiffEditor.dispose(); }
 
     monacoDiffEditor = monacoInstance.editor.createDiffEditor(containerRef.current, {
-      theme: 'vcc-dark', fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
+      theme: 'atoo-dark', fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
       renderSideBySide: true, automaticLayout: true, readOnly: true,
       scrollBeyondLastLine: false, padding: { top: 8 },
     });

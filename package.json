@@ -1,9 +1,9 @@
 {
-  "name": "ccproxy",
+  "name": "atoo-studio",
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "ccproxy": "bin/ccproxy.js"
+    "atoo-studio": "bin/atoo-studio.js"
   },
   "files": [
     "bin/",
@@ -11,8 +11,8 @@
     "dist/",
     "frontend/dist/",
     "docker/preview/",
-    "preload/ccproxy-preload.c",
-    "preload/ccproxy-preload.so",
+    "preload/atoo-studio-preload.c",
+    "preload/atoo-studio-preload.so",
     "preload/Makefile",
     "src/serial/native/binding.gyp",
     "src/serial/native/pty_pair.c"
