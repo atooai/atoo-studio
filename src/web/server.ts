@@ -28,7 +28,7 @@ import { devtoolsProxyMiddleware, isDevtoolsWsUpgrade, handleDevtoolsWsUpgrade }
 import forge from 'node-forge';
 import { CA_CERT_PATH, CA_KEY_PATH, PROJECT_ROOT } from '../config.js';
 import { serialManager } from '../serial/manager.js';
-import { searchSessionHistory } from '../services/session-search.js';
+import { searchSessionHistory, fetchSessionRange } from '../services/session-search.js';
 import { containersRouter, getContainerRuntimes } from '../handlers/containers.js';
 import { handleHookCallback } from '../agents/lib/claude/hooks.js';
 import { handleCodexNotifyCallback } from '../agents/lib/codex/notify.js';
@@ -312,6 +312,30 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         sort: sort || 'newest_first',
       });
       res.json(results);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // MCP callback: fetch full messages from a session by range
+  app.post('/api/mcp/fetch-history-range', async (req, res) => {
+    const { cwd, type, session_uuid, sort, session, from, to } = req.body;
+    if (!cwd || typeof cwd !== 'string') {
+      return res.status(400).json({ error: 'cwd is required' });
+    }
+    if (session == null || from == null || to == null) {
+      return res.status(400).json({ error: 'session, from, and to are required' });
+    }
+    try {
+      const result = await fetchSessionRange(cwd, {
+        type: type || 'FullProjectSearch',
+        sessionUuid: session_uuid,
+        sort: sort || 'newest_first',
+        session,
+        from,
+        to,
+      });
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

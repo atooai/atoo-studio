@@ -111,59 +111,131 @@ server.tool(
 
 server.tool(
   'search_session_history',
-  `Search through session history files (chat logs) of the current project across all agent types (Claude Code, subagents, etc.). Use this to find previous decisions, implementation notes, reasoning, discussed approaches, or any other information from past and current sessions. Returns matching lines with file paths and line numbers, deduplicated across agent types.
+  `Search or fetch messages from session history (chat logs) of the current project. Results use abstract session:message addressing — no file paths are exposed.
+
+Two modes:
+
+SEARCH MODE (provide "query"):
+  Regex search across sessions. Returns matches as session:message references.
+  Example result: "2:15 [assistant] the database schema uses..."
+  → session 2, message 15
+
+RANGE MODE (provide "session" + "from" + "to"):
+  Fetch full messages by session:from-to range. Use after search to get context around a match.
+  Example: session=2, from=12, to=18 → returns messages 12-18 from session 2
+
+Typical workflow:
+  1. Search → "found match at 2:15"
+  2. Fetch range 2:12-18 → get full context around the match
+  Done in 2 calls.
+
+Session numbering:
+- CurrentSessionChain: sessions are 1-indexed from oldest ancestor. Numbering is stable.
+- FullProjectSearch: sessions are numbered in sort order (1 = first in sort).
 
 Search types:
 - "FullProjectSearch" (default): searches ALL sessions for the project
-- "CurrentSessionChain": searches only sessions in the current session chain (previous continuation sessions), excluding the current session. Use this when you need context from earlier in a conversation that was continued across session boundaries.
+- "CurrentSessionChain": searches only previous sessions in the current chain (excludes current session)
 
-You can provide multiple search queries as an array — each query is run independently with its own result limit. Queries support regex; invalid regex falls back to literal text search.
-
-IMPORTANT: When using this tool, prefer to delegate the search to a subagent if your client supports it, so the main conversation context is not polluted with potentially large search results.`,
+IMPORTANT: Prefer to delegate to a subagent if your client supports it, so the main context is not polluted with large results.`,
   {
     type: z.enum(['FullProjectSearch', 'CurrentSessionChain']).default('FullProjectSearch')
       .describe('Search scope: FullProjectSearch (all sessions) or CurrentSessionChain (only sessions in the current chain)'),
-    query: z.union([z.string(), z.array(z.string())])
-      .describe('Search query or array of queries (regex supported, falls back to text if invalid) — e.g. "port 3000", ["database schema", "migration"]'),
+    query: z.union([z.string(), z.array(z.string())]).optional()
+      .describe('Search mode: query or array of queries (regex supported, falls back to text if invalid) — e.g. "port 3000", ["database schema", "migration"]'),
     max_results_per_query: z.number().int().min(1).max(200).default(50)
-      .describe('Maximum number of matching lines to return per query (default: 50)'),
+      .describe('Search mode: maximum results per query (default: 50)'),
     sort: z.enum(['newest_first', 'oldest_first']).default('newest_first')
       .describe('Sort order: newest_first (default) or oldest_first'),
+    session: z.number().int().min(1).optional()
+      .describe('Range mode: session/chainlink number to fetch from (1-indexed)'),
+    from: z.number().int().min(1).optional()
+      .describe('Range mode: start message number (inclusive, 1-indexed)'),
+    to: z.number().int().min(1).optional()
+      .describe('Range mode: end message number (inclusive, 1-indexed)'),
   },
-  async ({ type, query, max_results_per_query, sort }) => {
+  async ({ type, query, max_results_per_query, sort, session, from, to }) => {
     try {
       const sessionUuid = process.env.ATOO_CURRENT_SESSION_UUID || undefined;
-      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/search-history`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          max_results_per_query,
-          type,
-          session_uuid: sessionUuid,
-          sort,
-          cwd: process.cwd(),
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-        return { content: [{ type: 'text' as const, text: `Search failed: ${(err as any).error}` }] };
+
+      // Determine mode: range if session+from+to provided, search if query provided
+      const isRangeMode = session != null && from != null && to != null;
+      const isSearchMode = query != null;
+
+      if (!isRangeMode && !isSearchMode) {
+        return { content: [{ type: 'text' as const, text: 'Either "query" (search mode) or "session"+"from"+"to" (range mode) is required.' }] };
       }
-      const data = await res.json() as { results: Array<{ file: string; line: number; text: string }>; totalMatches: number; filesSearched: number };
-      if (!data.results.length) {
-        const queryStr = Array.isArray(query) ? query.join('", "') : query;
-        return { content: [{ type: 'text' as const, text: `No matches found for "${queryStr}" across ${data.filesSearched} session file(s) (scope: ${type}).` }] };
-      }
-      const lines = data.results.map(r => `${r.file}:${r.line}: ${r.text}`);
-      let output = lines.join('\n');
-      if (data.totalMatches > data.results.length) {
-        output += `\n\n(Showing ${data.results.length} of ${data.totalMatches} total matches across ${data.filesSearched} files)`;
+
+      if (isRangeMode) {
+        // Range mode: fetch full messages
+        const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/fetch-history-range`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type,
+            session_uuid: sessionUuid,
+            sort,
+            session,
+            from,
+            to,
+            cwd: process.cwd(),
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+          return { content: [{ type: 'text' as const, text: `Range fetch failed: ${(err as any).error}` }] };
+        }
+        const data = await res.json() as {
+          session: number;
+          messages: Array<{ message: number; text: string }>;
+          totalMessages: number;
+        };
+        if (!data.messages.length) {
+          return { content: [{ type: 'text' as const, text: `No messages found for session ${session} range ${from}-${to}.` }] };
+        }
+        const lines = data.messages.map(m => `${data.session}:${m.message} ${m.text}`);
+        let output = lines.join('\n\n');
+        output += `\n\n(${data.messages.length} message(s) from session ${data.session}, ${data.totalMessages} total messages in session)`;
+        return { content: [{ type: 'text' as const, text: output }] };
+
       } else {
-        output += `\n\n(${data.results.length} match(es) across ${data.filesSearched} file(s))`;
+        // Search mode
+        const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/search-history`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query,
+            max_results_per_query,
+            type,
+            session_uuid: sessionUuid,
+            sort,
+            cwd: process.cwd(),
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+          return { content: [{ type: 'text' as const, text: `Search failed: ${(err as any).error}` }] };
+        }
+        const data = await res.json() as {
+          results: Array<{ session: number; message: number; text: string }>;
+          totalMatches: number;
+          sessionsSearched: number;
+        };
+        if (!data.results.length) {
+          const queryStr = Array.isArray(query) ? query.join('", "') : query;
+          return { content: [{ type: 'text' as const, text: `No matches found for "${queryStr}" across ${data.sessionsSearched} session(s) (scope: ${type}).` }] };
+        }
+        const lines = data.results.map(r => `${r.session}:${r.message} ${r.text}`);
+        let output = lines.join('\n');
+        if (data.totalMatches > data.results.length) {
+          output += `\n\n(Showing ${data.results.length} of ${data.totalMatches} total matches across ${data.sessionsSearched} session(s))`;
+        } else {
+          output += `\n\n(${data.results.length} match(es) across ${data.sessionsSearched} session(s))`;
+        }
+        return { content: [{ type: 'text' as const, text: output }] };
       }
-      return { content: [{ type: 'text' as const, text: output }] };
     } catch (err: any) {
-      return { content: [{ type: 'text' as const, text: `Search failed: ${err.message}` }] };
+      return { content: [{ type: 'text' as const, text: `Failed: ${err.message}` }] };
     }
   },
 );
