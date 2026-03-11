@@ -29,6 +29,7 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
   private createdAt = Date.now();
   private destroyed = false;
   private hookToken: string | null = null;
+  private cliSessionId: string | null = null;
 
   constructor(sessionId: string) {
     super();
@@ -44,7 +45,9 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
 
     try {
       this.hookToken = generateHookToken();
-      registerHookToken(this.hookToken, this.sessionId, this.cwd);
+      registerHookToken(this.hookToken, this.sessionId, this.cwd).then(uuid => {
+        this.cliSessionId = uuid;
+      });
 
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
@@ -127,6 +130,10 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
 
   getEvents(): SessionEvent[] {
     return [];
+  }
+
+  getCliSessionId(): string | null {
+    return this.cliSessionId;
   }
 
   getWireMessages(): WireMessage[] {
