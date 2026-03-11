@@ -12,6 +12,8 @@ import type { AgentDescriptor } from '../../types';
 
 interface RawNode {
   id: string;
+  /** CLI session UUID used for chain link detection (falls back to id) */
+  linkId: string;
   kind: 'active' | 'historical';
   data: any;
   linkType: LinkType | null;
@@ -49,31 +51,33 @@ function buildDisplayItems(
   historicalSessions: { id: string; [k: string]: any }[],
 ): DisplayItem[] {
   const all: RawNode[] = [
-    ...activeSessions.map((s, i) => ({
-      id: s.id, kind: 'active' as const, data: s, linkType: parseLinkType(s.id), idx: i,
-    })),
+    ...activeSessions.map((s, i) => {
+      // Use cliSessionId for chain link detection if available (agent_xxx IDs don't carry link info)
+      const linkId = s.cliSessionId || s.id;
+      return { id: s.id, linkId, kind: 'active' as const, data: s, linkType: parseLinkType(linkId), idx: i };
+    }),
     ...historicalSessions.map((s, i) => ({
-      id: s.id, kind: 'historical' as const, data: s, linkType: parseLinkType(s.id), idx: activeSessions.length + i,
+      id: s.id, linkId: s.id, kind: 'historical' as const, data: s, linkType: parseLinkType(s.id), idx: activeSessions.length + i,
     })),
   ];
 
   if (all.length === 0) return [];
 
-  // Build parent lookup: last16 hex → node
+  // Build parent lookup: last16 hex of linkId → node
   const last16Map = new Map<string, RawNode>();
   const nodeById = new Map<string, RawNode>();
   for (const node of all) {
     nodeById.set(node.id, node);
-    const hex = toRawHex(node.id);
+    const hex = toRawHex(node.linkId);
     if (hex.length >= 16) {
       last16Map.set(hex.slice(-16), node);
     }
   }
 
-  // Find parent for each node
+  // Find parent for each node using linkId for chain detection
   const parentOf = new Map<string, RawNode>();
   for (const node of all) {
-    const hex = toRawHex(node.id);
+    const hex = toRawHex(node.linkId);
     const first16 = hex.slice(0, 16);
     const parent = last16Map.get(first16);
     if (parent && parent.id !== node.id) {

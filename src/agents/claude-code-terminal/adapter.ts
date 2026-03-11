@@ -43,6 +43,11 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
       this.mode = 'bypassPermissions';
     }
 
+    // For resume/chain sessions, the CLI session UUID is the resume UUID
+    if (options.resumeSessionUuid) {
+      this.cliSessionId = options.resumeSessionUuid;
+    }
+
     try {
       this.hookToken = generateHookToken();
       registerHookToken(this.hookToken, this.sessionId, this.cwd).then(uuid => {
@@ -120,6 +125,7 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
       cwd: this.cwd || undefined,
       capabilities: this.getCapabilities(),
       createdAt: this.createdAt,
+      cliSessionId: this.cliSessionId || undefined,
     };
   }
 

@@ -215,14 +215,35 @@ class FsSessionScanner {
         // Skip file-history-snapshot events
         if (event.type === 'file-history-snapshot') continue;
 
-        // Map JSONL fields to SessionEvent format
+        // Map JSONL fields to SessionEvent format, preserving fields needed
+        // for chain building (cwd, parentUuid, version, etc.)
         const mapped: any = {
           uuid: event.uuid,
+          parentUuid: event.parentUuid,
           session_id: event.sessionId || event.session_id,
           type: event.type,
           message: event.message,
           timestamp: event.timestamp,
+          cwd: event.cwd,
+          version: event.version,
+          gitBranch: event.gitBranch,
+          userType: event.userType,
+          isSidechain: event.isSidechain,
+          permissionMode: event.permissionMode,
         };
+
+        // Copy optional fields that some event types have
+        if (event.subtype) mapped.subtype = event.subtype;
+        if (event.data) mapped.data = event.data;
+        if (event.content) mapped.content = event.content;
+        if (event.toolUseResult) mapped.toolUseResult = event.toolUseResult;
+        if (event.hookCount !== undefined) mapped.hookCount = event.hookCount;
+        if (event.hookInfos) mapped.hookInfos = event.hookInfos;
+        if (event.hookErrors) mapped.hookErrors = event.hookErrors;
+        if (event.hasOutput !== undefined) mapped.hasOutput = event.hasOutput;
+        if (event.preventedContinuation !== undefined) mapped.preventedContinuation = event.preventedContinuation;
+        if (event.level) mapped.level = event.level;
+        if (event.toolUseID) mapped.toolUseID = event.toolUseID;
 
         // Map parentUuid + isSidechain to parent_tool_use_id
         if (event.isSidechain && event.parentUuid) {

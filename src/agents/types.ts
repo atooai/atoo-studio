@@ -56,6 +56,8 @@ export interface AgentSessionInfo {
   cwd?: string;
   capabilities: AgentCapabilities;
   createdAt: number;
+  /** The CLI's own session UUID (for chain link detection in the sidebar) */
+  cliSessionId?: string;
 }
 
 // ═══════════════════════════════════════════════════════

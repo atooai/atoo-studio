@@ -161,6 +161,7 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
       cwd: this.cwd || undefined,
       capabilities: this.getCapabilities(),
       createdAt: this.createdAt,
+      cliSessionId: this.cliSessionId || undefined,
     };
   }
 

@@ -60,18 +60,19 @@ function extractChainEvents(events: SessionEvent[]): SessionEvent[] {
     return (indexMap.get(aKey) ?? 0) - (indexMap.get(bKey) ?? 0);
   });
 
-  // Inject chain context header into the first event
+  // Inject chain context header into the first user message
   if (result.length > 0) {
     const header = '[This is a chain continuation session. The messages below are carried forward from the previous session in this chain. For full context from earlier in the conversation, use the search_session_history tool with type "CurrentSessionChain".]';
-    const first = result[0];
-    if (first.type === 'user' && first.message) {
+    const firstUserIdx = result.findIndex(e => e.type === 'user' && (e as any).message);
+    if (firstUserIdx >= 0) {
+      const first = result[firstUserIdx] as any;
       const msg = first.message;
       const content = typeof msg.content === 'string'
         ? `${header}\n\n${msg.content}`
         : Array.isArray(msg.content)
           ? [{ type: 'text' as const, text: header }, ...msg.content]
           : msg.content;
-      result[0] = { ...first, message: { ...msg, content } };
+      result[firstUserIdx] = { ...first, message: { ...msg, content } } as SessionEvent;
     }
   }
 

@@ -674,6 +674,7 @@ function registerGlobalFunctions() {
         permissionMode: result.mode || 'bypassPermissions',
         model: result.model || null,
         _capabilities: result.capabilities,
+        cliSessionId: result.cliSessionId || null,
       };
       store.updateProject(proj.id, p => ({
         ...p,
@@ -744,6 +745,7 @@ function registerGlobalFunctions() {
               permissionMode: result.mode || 'bypassPermissions',
               model: result.model || null,
               _capabilities: result.capabilities,
+              cliSessionId: result.cliSessionId || null,
             };
             store.updateProject(proj.id, p => {
               // Remove the old session (backend destroys it), add the new one
@@ -1348,6 +1350,7 @@ function registerGlobalFunctions() {
           messages: [], lastMessage: '', viewMode: defaultViewMode as 'chat' | 'tui',
           agentType: result.agentType, agentMode: result.agentMode,
           permissionMode: result.mode || 'bypassPermissions', model: result.model || null, _capabilities: result.capabilities,
+          cliSessionId: result.cliSessionId || null,
         };
         store.updateProject(projId, p => ({
           ...p,
@@ -1412,6 +1415,7 @@ function registerGlobalFunctions() {
               permissionMode: result.mode || 'bypassPermissions',
               model: result.model || null,
               _capabilities: result.capabilities,
+              cliSessionId: result.cliSessionId || null,
             };
             store.updateProject(projId, p => ({
               ...p,
