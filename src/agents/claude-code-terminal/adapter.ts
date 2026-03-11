@@ -12,7 +12,7 @@ import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
 import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
-import { generateHookToken, registerHookToken, removeHookToken, getCliUuidForToken } from '../lib/claude/hooks.js';
+import { generateHookToken, registerHookToken, removeHookToken } from '../lib/claude/hooks.js';
 
 /**
  * Terminal-only Claude Code agent.
@@ -43,16 +43,9 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
       this.mode = 'bypassPermissions';
     }
 
-    // For resume/chain sessions, the CLI session UUID is the resume UUID
-    if (options.resumeSessionUuid) {
-      this.cliSessionId = options.resumeSessionUuid;
-    }
-
     try {
       this.hookToken = generateHookToken();
-      registerHookToken(this.hookToken, this.sessionId, this.cwd).then(uuid => {
-        this.cliSessionId = uuid;
-      });
+      const sessionUuidPromise = registerHookToken(this.hookToken, this.sessionId, this.cwd);
 
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
@@ -64,6 +57,20 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
 
       // Register envId → sessionId mapping for activity tracking
       registerActivitySession(this.envId, this.sessionId);
+
+      // Await hook-based session discovery (same pattern as terminal-chatro)
+      const HOOK_TIMEOUT = 8000;
+      try {
+        this.cliSessionId = await Promise.race([
+          sessionUuidPromise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('hook timeout')), HOOK_TIMEOUT)
+          ),
+        ]);
+        console.log(`[claude-terminal] Hook-based session discovery: ${this.cliSessionId}`);
+      } catch {
+        console.warn(`[claude-terminal] Hook-based session discovery timed out for agent ${this.sessionId}`);
+      }
 
       this.setStatus('idle');
       this.emit('ready');
@@ -142,14 +149,7 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
   }
 
   getCliSessionId(): string | null {
-    if (this.cliSessionId) return this.cliSessionId;
-    // Fallback: check the hook token registry directly (the .then() may not have fired yet)
-    if (this.hookToken) {
-      const uuid = getCliUuidForToken(this.hookToken);
-      if (uuid) this.cliSessionId = uuid;
-      return uuid;
-    }
-    return null;
+    return this.cliSessionId;
   }
 
   getWireMessages(): WireMessage[] {

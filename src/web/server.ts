@@ -12,7 +12,6 @@ import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
 import { getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback, killCliProcess } from '../spawner.js';
 import { fsMonitor } from '../fs-monitor.js';
-import { fsSessionScanner } from '../agents/lib/claude/fs-sessions.js';
 import { changesRouter } from '../handlers/changes.js';
 import { projectsRouter } from '../handlers/projects.js';
 import { environmentsRouter, setBroadcastSettingsChange } from '../handlers/environments.js';
@@ -614,19 +613,9 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
             agentType: agentType || undefined,
           });
         } else {
-          // Last resort: scan filesystem for the most recent session in this project directory
-          const agentCwd = cwd || activeAgent.getInfo().cwd;
-          const fsCandidateUuid = agentCwd ? await fsSessionScanner.findMostRecentForCwd(agentCwd) : null;
-          if (fsCandidateUuid) {
-            console.log(`[web] Chain fallback: found session ${fsCandidateUuid} via filesystem scan for cwd=${agentCwd}`);
-            newAgent = await agentRegistry.chainAgent(fsCandidateUuid, {
-              cwd: cwd || undefined,
-              skipPermissions: !!skipPermissions,
-              agentType: agentType || undefined,
-            });
-          } else {
-            return res.status(400).json({ error: 'Agent has no events and no CLI session UUID — cannot create chain' });
-          }
+          return res.status(400).json({
+            error: 'Could not determine CLI session UUID. The session hook may not have fired — try sending a message first, then chain again.',
+          });
         }
 
         // Destroy the old active agent — the chain link replaces it
