@@ -583,25 +583,33 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
       let newAgent;
 
       if (agentSessionId) {
-        // Active agent: read events directly from memory (no FS scanner needed)
+        // Active agent: try reading events from memory first, fall back to disk
         const activeAgent = agentRegistry.getAgent(agentSessionId);
         if (!activeAgent) {
           return res.status(404).json({ error: `Active agent not found: ${agentSessionId}` });
         }
 
         const events = activeAgent.getEvents();
-        if (!events.length) {
-          return res.status(400).json({ error: 'Agent has no events yet' });
+        const cliUuid = activeAgent.getCliSessionId?.();
+        const parentId = cliUuid || agentSessionId;
+
+        if (events.length > 0) {
+          // In-memory events available — build chain directly
+          newAgent = await agentRegistry.chainFromEvents(events, parentId, {
+            cwd: cwd || undefined,
+            skipPermissions: !!skipPermissions,
+            agentType: agentType || undefined,
+          });
+        } else if (cliUuid) {
+          // No in-memory events (e.g. terminal-only adapter) — read from JSONL on disk
+          newAgent = await agentRegistry.chainAgent(cliUuid, {
+            cwd: cwd || undefined,
+            skipPermissions: !!skipPermissions,
+            agentType: agentType || undefined,
+          });
+        } else {
+          return res.status(400).json({ error: 'Agent has no events and no CLI session UUID — cannot create chain' });
         }
-
-        // Use CLI session UUID for parent linking if available, fall back to agent session ID
-        const parentId = activeAgent.getCliSessionId?.() || agentSessionId;
-
-        newAgent = await agentRegistry.chainFromEvents(events, parentId, {
-          cwd: cwd || undefined,
-          skipPermissions: !!skipPermissions,
-          agentType: agentType || undefined,
-        });
 
         // Destroy the old active agent — the chain link replaces it
         agentRegistry.destroyAgent(agentSessionId).catch(err => {
