@@ -229,14 +229,14 @@ function RightPanel({ proj }: { proj: any }) {
           <button
             className={`rp-tab${rightPanelTab === 'issues' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`}
             onClick={() => ghAvailable && handleTabChange('issues')}
-            title={!ghAvailable ? (ghLoading ? 'Checking GitHub...' : 'GitHub CLI not available or not authenticated') : `Issues (${ghStatus!.owner}/${ghStatus!.repo})`}
+            title={!ghAvailable ? (ghLoading ? 'Checking GitHub...' : ghStatus?.unavailableReason || 'GitHub not available') : `Issues (${ghStatus!.owner}/${ghStatus!.repo})`}
           >
             Issues
           </button>
           <button
             className={`rp-tab${rightPanelTab === 'prs' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`}
             onClick={() => ghAvailable && handleTabChange('prs')}
-            title={!ghAvailable ? (ghLoading ? 'Checking GitHub...' : 'GitHub CLI not available or not authenticated') : `PRs (${ghStatus!.owner}/${ghStatus!.repo})`}
+            title={!ghAvailable ? (ghLoading ? 'Checking GitHub...' : ghStatus?.unavailableReason || 'GitHub not available') : `PRs (${ghStatus!.owner}/${ghStatus!.repo})`}
           >
             PRs
           </button>

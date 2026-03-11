@@ -230,6 +230,7 @@ export interface GitHubStatus {
   owner: string;
   repo: string;
   canWrite: boolean;
+  unavailableReason?: string;
 }
 
 export interface GitHubLabel {

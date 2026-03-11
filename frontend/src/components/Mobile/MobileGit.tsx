@@ -38,14 +38,14 @@ export function MobileGit() {
         <button
           className={`mobile-git-tab${tab === 'issues' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`}
           onClick={() => ghAvailable && setTab('issues')}
-          title={!ghAvailable ? 'GitHub CLI not available' : undefined}
+          title={!ghAvailable ? (ghStatus?.unavailableReason || 'GitHub not available') : undefined}
         >
           Issues
         </button>
         <button
           className={`mobile-git-tab${tab === 'prs' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`}
           onClick={() => ghAvailable && setTab('prs')}
-          title={!ghAvailable ? 'GitHub CLI not available' : undefined}
+          title={!ghAvailable ? (ghStatus?.unavailableReason || 'GitHub not available') : undefined}
         >
           PRs
         </button>

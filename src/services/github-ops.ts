@@ -27,6 +27,7 @@ export interface GitHubStatus {
   owner: string;
   repo: string;
   canWrite: boolean;
+  unavailableReason?: string;
 }
 
 export interface GitHubIssue {
@@ -82,7 +83,11 @@ export async function getGitHubStatus(cwd: string): Promise<GitHubStatus> {
 
   // Check if gh is installed
   const hasGh = await whichGh();
-  if (!hasGh) return result;
+  if (!hasGh) {
+    result.unavailableReason = 'GitHub CLI (gh) is not installed';
+    statusCache.set(cwd, { status: result, ts: Date.now() });
+    return result;
+  }
 
   // Check for GitHub remote
   try {
@@ -96,16 +101,26 @@ export async function getGitHubStatus(cwd: string): Promise<GitHubStatus> {
     const ghRemote = remotes.split('\n').find(line =>
       line.includes('github.com') && line.includes('(push)')
     );
-    if (!ghRemote) return result;
+    if (!ghRemote) {
+      result.unavailableReason = 'No GitHub remote configured';
+      statusCache.set(cwd, { status: result, ts: Date.now() });
+      return result;
+    }
 
     // Parse owner/repo from remote URL
     // Handles: git@github.com:owner/repo.git, https://github.com/owner/repo.git, etc.
     const match = ghRemote.match(/github\.com[:/]([^/]+)\/([^/\s]+?)(?:\.git)?(?:\s|$)/);
-    if (!match) return result;
+    if (!match) {
+      result.unavailableReason = 'Could not parse GitHub remote URL';
+      statusCache.set(cwd, { status: result, ts: Date.now() });
+      return result;
+    }
 
     result.owner = match[1];
     result.repo = match[2];
   } catch {
+    result.unavailableReason = 'No GitHub remote configured';
+    statusCache.set(cwd, { status: result, ts: Date.now() });
     return result;
   }
 
@@ -126,8 +141,9 @@ export async function getGitHubStatus(cwd: string): Promise<GitHubStatus> {
       result.available = true;
       // Conservative: if we can't parse scopes, assume read-only
       result.canWrite = /\brepo\b/.test(msg);
+    } else {
+      result.unavailableReason = 'GitHub CLI not authenticated — run "gh auth login"';
     }
-    // Not authenticated at all - available stays false
   }
 
   statusCache.set(cwd, { status: result, ts: Date.now() });
