@@ -71,10 +71,10 @@ function buildEnvelope(
   if (event.version) env.version = event.version;
   if (event.slug) env.slug = event.slug;
   if (event.userType) env.userType = event.userType;
-  if (event.isSidechain) env.isSidechain = event.isSidechain;
+  env.isSidechain = event.isSidechain ?? false;
   if (event.isSynthetic) env.isSynthetic = event.isSynthetic;
   if (event.agentId) env.agentId = event.agentId;
-  if (event.parent_tool_use_id !== undefined) env.parent_tool_use_id = event.parent_tool_use_id;
+  if (event.parent_tool_use_id) env.parent_tool_use_id = event.parent_tool_use_id;
   return env;
 }
 
@@ -88,6 +88,7 @@ function reconstructUser(event: UserEvent, sessionId: string, uuid: string, pare
     content: event.message.content,
   };
   if (event.toolUseResult) out.toolUseResult = event.toolUseResult;
+  if ((event as any).permissionMode) out.permissionMode = (event as any).permissionMode;
   return out;
 }
 
@@ -230,12 +231,30 @@ export function writeForkedClaudeJsonl(
     }
   }
 
+  // First pass: determine which events will be written (not filtered out)
+  const writtenUuids = new Set<string>();
+  for (const event of events) {
+    // Check if toClaudeJsonlEvent would produce output for this event type
+    const isConversational = ['user', 'assistant', 'system', 'result', 'control_request', 'control_response'].includes(event.type);
+    if (isConversational && event.uuid) {
+      writtenUuids.add(uuidMap.get(event.uuid)!);
+    }
+  }
+
   const lines: string[] = [];
   let lastUuid: string | null = null;
 
   for (const event of events) {
     const newUuid = (event.uuid && uuidMap.get(event.uuid)) || uuidv4();
-    const newParentUuid = event.parentUuid ? (uuidMap.get(event.parentUuid) || null) : lastUuid;
+    // Resolve parentUuid: if the parent event was filtered out (e.g. progress),
+    // fall back to lastUuid to keep the conversation tree connected.
+    let newParentUuid: string | null;
+    if (event.parentUuid) {
+      const remapped = uuidMap.get(event.parentUuid) || null;
+      newParentUuid = (remapped && writtenUuids.has(remapped)) ? remapped : lastUuid;
+    } else {
+      newParentUuid = lastUuid;
+    }
 
     const jsonlEvent = toClaudeJsonlEvent(event, targetUuid, newUuid, newParentUuid);
     if (jsonlEvent) {

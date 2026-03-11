@@ -1,6 +1,4 @@
 import { EventEmitter } from 'events';
-import fs from 'fs';
-import path from 'path';
 import os from 'os';
 import type {
   Agent,
@@ -45,21 +43,14 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
       this.mode = 'bypassPermissions';
     }
 
+    // For resume/chain sessions, we already know the CLI session UUID
+    if (options.resumeSessionUuid) {
+      this.cliSessionId = options.resumeSessionUuid;
+    }
+
     try {
       this.hookToken = generateHookToken();
       const sessionUuidPromise = registerHookToken(this.hookToken, this.sessionId, this.cwd);
-
-      // Snapshot existing JSONL files before spawn (for fallback detection)
-      const projectDirHash = this.cwd.replace(/\//g, '-');
-      const projectDir = path.join(os.homedir(), '.claude', 'projects', projectDirHash);
-      const preExisting = new Set<string>();
-      try {
-        if (fs.existsSync(projectDir)) {
-          for (const f of fs.readdirSync(projectDir)) {
-            if (f.endsWith('.jsonl')) preExisting.add(f);
-          }
-        }
-      } catch {}
 
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
@@ -73,23 +64,18 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
       registerActivitySession(this.envId, this.sessionId);
 
       // Await hook-based session discovery (same pattern as terminal-chatro)
-      const HOOK_TIMEOUT = 8000;
-      try {
-        this.cliSessionId = await Promise.race([
-          sessionUuidPromise,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('hook timeout')), HOOK_TIMEOUT)
-          ),
-        ]);
-        console.log(`[claude-terminal] Hook-based session discovery: ${this.cliSessionId}`);
-      } catch {
-        // Fallback: detect new JSONL file created after spawn
-        console.warn(`[claude-terminal] Hook timed out, falling back to filesystem detection`);
-        this.cliSessionId = this.detectNewSession(projectDir, preExisting);
-        if (this.cliSessionId) {
-          console.log(`[claude-terminal] Filesystem-based session discovery: ${this.cliSessionId}`);
-        } else {
-          console.warn(`[claude-terminal] Could not discover CLI session for agent ${this.sessionId}`);
+      if (!this.cliSessionId) {
+        const HOOK_TIMEOUT = 8000;
+        try {
+          this.cliSessionId = await Promise.race([
+            sessionUuidPromise,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('hook timeout')), HOOK_TIMEOUT)
+            ),
+          ]);
+          console.log(`[claude-terminal] Hook-based session discovery: ${this.cliSessionId}`);
+        } catch {
+          console.warn(`[claude-terminal] Hook timed out — cliSessionId not available for agent ${this.sessionId}`);
         }
       }
 
@@ -189,33 +175,6 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
       availableModes: [],
       availableModels: [],
     };
-  }
-
-  /**
-   * Detect a new JSONL session file by comparing current directory listing
-   * against the pre-spawn snapshot. Returns the UUID or null.
-   */
-  private detectNewSession(projectDir: string, preExisting: Set<string>): string | null {
-    try {
-      if (!fs.existsSync(projectDir)) return null;
-      const files = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
-      const newFiles = files.filter(f => !preExisting.has(f));
-      if (newFiles.length === 0) return null;
-
-      // Pick the most recently modified new file
-      let best: { name: string; mtime: number } | null = null;
-      for (const f of newFiles) {
-        try {
-          const stat = fs.statSync(path.join(projectDir, f));
-          if (!best || stat.mtimeMs > best.mtime) {
-            best = { name: f, mtime: stat.mtimeMs };
-          }
-        } catch {}
-      }
-      return best ? best.name.replace('.jsonl', '') : null;
-    } catch {
-      return null;
-    }
   }
 
   private setStatus(status: AgentStatus): void {

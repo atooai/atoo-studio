@@ -205,8 +205,9 @@ class FsSessionScanner {
   async readEvents(uuid: string): Promise<any[]> {
     const meta = this.cache.get(uuid);
     if (!meta) return [];
+    const jsonlPath = meta.jsonlPath;
 
-    const content = fs.readFileSync(meta.jsonlPath, 'utf-8');
+    const content = fs.readFileSync(jsonlPath, 'utf-8');
     const events: any[] = [];
     for (const line of content.split('\n')) {
       if (!line.trim()) continue;
@@ -246,10 +247,12 @@ class FsSessionScanner {
         if (event.toolUseID) mapped.toolUseID = event.toolUseID;
 
         // Map parentUuid + isSidechain to parent_tool_use_id
+        // Only set when actually present — null/undefined should be omitted
+        // so the writer doesn't emit "parent_tool_use_id": null
         if (event.isSidechain && event.parentUuid) {
           mapped.parent_tool_use_id = event.parentUuid;
-        } else {
-          mapped.parent_tool_use_id = event.parent_tool_use_id || null;
+        } else if (event.parent_tool_use_id) {
+          mapped.parent_tool_use_id = event.parent_tool_use_id;
         }
 
         events.push(mapped);

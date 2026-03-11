@@ -62,6 +62,7 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       // Pre-load historical messages for resume (before spawning CLI)
       if (options.resumeSessionUuid) {
         this.resumeSessionUuid = options.resumeSessionUuid;
+        this.cliSessionId = options.resumeSessionUuid;
         await this.loadHistoricalMessages(options.resumeSessionUuid);
       }
 
