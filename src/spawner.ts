@@ -199,9 +199,12 @@ export function spawnProcess(options: SpawnOptions): { envId: string; term: ITer
     buf += data;
     if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
     spawnerScrollback.set(envId, buf);
-    markActivityData(envId);
+    // Only count as activity if there's visible content (not just cursor blink / ANSI codes)
     const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
-    if (stripped) console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
+    if (stripped) {
+      markActivityData(envId);
+      console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
+    }
   });
 
   term.onExit(({ exitCode }) => {
@@ -250,9 +253,11 @@ export async function spawnRemoteProcess(options: {
     buf += data;
     if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
     spawnerScrollback.set(envId, buf);
-    markActivityData(envId);
     const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
-    if (stripped) console.log(`[spawner:ssh] ${stripped.substring(0, 200)}`);
+    if (stripped) {
+      markActivityData(envId);
+      console.log(`[spawner:ssh] ${stripped.substring(0, 200)}`);
+    }
   });
 
   term.onExit(({ exitCode }) => {
