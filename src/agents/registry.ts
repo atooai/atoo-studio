@@ -262,7 +262,7 @@ class AgentRegistry {
     // Build the chain session — writes JSONL with carried-forward events
     const chainUuid = buildChainSession(events, sessionUuid, cwd);
     if (!chainUuid) {
-      throw new Error(`Failed to create chain session from ${sessionUuid}`);
+      throw new Error(`Session has no conversation content to chain — try sending a message first`);
     }
 
     // If cross-family, convert the chain JSONL to target format
@@ -305,7 +305,7 @@ class AgentRegistry {
     // Build the chain session from the provided events
     const chainUuid = buildChainSession(events, parentSessionId, cwd);
     if (!chainUuid) {
-      throw new Error('Failed to create chain session');
+      throw new Error('Session has no conversation content to chain — try sending a message first');
     }
 
     const sessionId = `agent_${uuidv4()}`;

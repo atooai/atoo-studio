@@ -96,6 +96,13 @@ export function buildChainSession(
   const chainEvents = extractChainEvents(sourceEvents);
   if (chainEvents.length === 0) return null;
 
+  // Verify there are actual conversational events (user/assistant) that will
+  // survive JSONL reconstruction. Non-conversational events (progress, etc.)
+  // are filtered out by writeForkedClaudeJsonl, which would produce an empty file.
+  const CONVERSATIONAL_TYPES = new Set(['user', 'assistant', 'system', 'result', 'control_request', 'control_response']);
+  const hasConversation = chainEvents.some(e => CONVERSATIONAL_TYPES.has(e.type));
+  if (!hasConversation) return null;
+
   const chainUuid = buildLinkedUuid(parentSessionId, 'chain');
   writeForkedClaudeJsonl(chainEvents, chainUuid, directory);
 
