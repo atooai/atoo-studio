@@ -14,8 +14,8 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
+import { buildLinkedUuid } from '../session-id-utils.js';
 import type {
   SessionEvent,
   UserEvent,
@@ -256,31 +256,6 @@ export function writeForkedClaudeJsonl(
  * @returns The resume UUID, or null if the fork point wasn't found.
  */
 /**
- * Generate a parent-linked UUID for forked sessions.
- * The last 16 hex chars of the parent UUID become the first 16 hex chars of the child.
- * This enables tree-view reconstruction in session history — children can be identified
- * by matching their first half against a parent's second half.
- */
-function buildLinkedUuid(parentSessionId: string): string {
-  // Strip any prefix (agent_, sess_) and dashes to get raw hex
-  const parentRaw = parentSessionId.replace(/^(agent_|sess_)/, '').replace(/-/g, '');
-  const last16 = parentRaw.slice(-16);
-
-  // First 16 hex = parent's last 16, remaining 16 hex = random
-  const randomHex = crypto.randomBytes(8).toString('hex'); // 16 hex chars
-  const newHex = last16 + randomHex;
-
-  // Format as UUID: 8-4-4-4-12
-  return [
-    newHex.slice(0, 8),
-    newHex.slice(8, 12),
-    newHex.slice(12, 16),
-    newHex.slice(16, 20),
-    newHex.slice(20, 32),
-  ].join('-');
-}
-
-/**
  * Fork a slice of SessionEvents into a resumable JSONL file.
  * Handles event slicing, range-fork synthetic init, UUID generation, and writing.
  *
@@ -373,7 +348,7 @@ export function forkEventsToResumable(
     }
   }
 
-  const targetUuid = buildLinkedUuid(parentSessionId);
+  const targetUuid = buildLinkedUuid(parentSessionId, 'fork');
   writeForkedClaudeJsonl(sliced, targetUuid, directory);
   return targetUuid;
 }

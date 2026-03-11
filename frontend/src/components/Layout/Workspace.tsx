@@ -126,6 +126,13 @@ function ViewToggle({ session, proj }: { session: any; proj: any }) {
           <span className="svt-filter-icon">⚡</span> Verbose
         </button>
       )}
+      <button
+        className="svt-filter-btn"
+        onClick={() => (window as any).chainSession(session.id)}
+        title="Continue in a new chain link (preserves full context via search)"
+      >
+        <span className="svt-filter-icon">⛓</span> Chain
+      </button>
     </div>
   );
 }

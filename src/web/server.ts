@@ -295,15 +295,21 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // MCP callback: search session history files for the current project
   app.post('/api/mcp/search-history', async (req, res) => {
-    const { query, max_results = 50, cwd } = req.body;
-    if (!query || typeof query !== 'string') {
-      return res.status(400).json({ error: 'query string is required' });
+    const { query, max_results, max_results_per_query, cwd, type, session_uuid, sort } = req.body;
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
     }
     if (!cwd || typeof cwd !== 'string') {
       return res.status(400).json({ error: 'cwd is required' });
     }
     try {
-      const results = await searchSessionHistory(query, cwd, max_results);
+      // Support both old (max_results) and new (max_results_per_query) parameter names
+      const limit = max_results_per_query ?? max_results ?? 50;
+      const results = await searchSessionHistory(query, cwd, limit, {
+        type: type || 'FullProjectSearch',
+        sessionUuid: session_uuid,
+        sort: sort || 'newest_first',
+      });
       res.json(results);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -562,6 +568,59 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
       const sessions = await agentRegistry.getHistoricalSessions(cwd);
       res.json(sessions);
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Create a chain continuation from an existing session.
+  // Accepts either:
+  //   - agentSessionId: an active agent session (agent_xxx) — reads events from live agent memory
+  //   - sessionUuid: a historical JSONL session UUID — reads events from disk
+  app.post('/api/agent-sessions/chain', async (req, res) => {
+    const { agentSessionId, sessionUuid, cwd, skipPermissions, agentType } = req.body;
+
+    try {
+      let newAgent;
+
+      if (agentSessionId) {
+        // Active agent: read events directly from memory (no FS scanner needed)
+        const activeAgent = agentRegistry.getAgent(agentSessionId);
+        if (!activeAgent) {
+          return res.status(404).json({ error: `Active agent not found: ${agentSessionId}` });
+        }
+
+        const events = activeAgent.getEvents();
+        if (!events.length) {
+          return res.status(400).json({ error: 'Agent has no events yet' });
+        }
+
+        // Use CLI session UUID for parent linking if available, fall back to agent session ID
+        const parentId = activeAgent.getCliSessionId?.() || agentSessionId;
+
+        newAgent = await agentRegistry.chainFromEvents(events, parentId, {
+          cwd: cwd || undefined,
+          skipPermissions: !!skipPermissions,
+          agentType: agentType || undefined,
+        });
+
+        // Destroy the old active agent — the chain link replaces it
+        agentRegistry.destroyAgent(agentSessionId).catch(err => {
+          console.warn(`[web] Failed to destroy old agent after chain:`, err.message);
+        });
+      } else if (sessionUuid) {
+        // Historical session: read events from disk via factory
+        newAgent = await agentRegistry.chainAgent(sessionUuid, {
+          cwd: cwd || undefined,
+          skipPermissions: !!skipPermissions,
+          agentType: agentType || undefined,
+        });
+      } else {
+        return res.status(400).json({ error: 'agentSessionId or sessionUuid is required' });
+      }
+
+      res.json(newAgent.getInfo());
+    } catch (err: any) {
+      console.error(`[web] Failed to create chain session:`, err.message);
       res.status(500).json({ error: err.message });
     }
   });

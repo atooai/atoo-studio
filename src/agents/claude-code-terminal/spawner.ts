@@ -5,7 +5,7 @@
 import os from 'os';
 import { spawnProcess } from '../../spawner.js';
 import { ensureWorkspaceTrust } from '../lib/claude/workspace-trust.js';
-import { getMcpConfigPath, MCP_SYSTEM_PROMPT } from '../../mcp/config.js';
+import { getMcpConfigPath, MCP_SYSTEM_PROMPT, CHAIN_SYSTEM_PROMPT } from '../../mcp/config.js';
 import { WEB_PORT } from '../../config.js';
 import { getHooksSettingsArgs } from '../lib/claude/hooks.js';
 
@@ -14,13 +14,19 @@ export function spawnTerminalCliProcess(options: {
   cwd?: string;
   resumeSessionUuid?: string;
   hookToken?: string;
+  isChainContinuation?: boolean;
 }): string {
   const cwd = options.cwd || process.env.HOME || os.homedir();
   ensureWorkspaceTrust(cwd);
 
+  const systemPrompt = options.isChainContinuation
+    ? MCP_SYSTEM_PROMPT + CHAIN_SYSTEM_PROMPT
+    : MCP_SYSTEM_PROMPT;
+  const mcpConfigPath = getMcpConfigPath(options.resumeSessionUuid);
+
   const args: string[] = [];
   if (options.skipPermissions) args.push('--dangerously-skip-permissions');
-  args.push('--append-system-prompt', MCP_SYSTEM_PROMPT, '--mcp-config', getMcpConfigPath());
+  args.push('--append-system-prompt', systemPrompt, '--mcp-config', mcpConfigPath);
   if (options.resumeSessionUuid) args.push('--resume', options.resumeSessionUuid);
   if (options.hookToken) args.push(...getHooksSettingsArgs());
 

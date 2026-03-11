@@ -92,6 +92,7 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
         cwd: this.cwd,
         resumeSessionUuid: options.resumeSessionUuid,
         hookToken: this.hookToken,
+        isChainContinuation: options.isChainContinuation,
       });
 
       // Race: hook-based discovery vs timeout fallback
@@ -189,6 +190,10 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     // session UUID on --resume, but forks should link to the session the user sees.
     const parentId = this.resumeSessionUuid || this.cliSessionId || this.sessionId;
     return forkEventsToResumable(this.events, afterEventUuid, dir, parentId, fromEventUuid);
+  }
+
+  getCliSessionId(): string | null {
+    return this.cliSessionId;
   }
 
   getMessages(): WireMessage[] {

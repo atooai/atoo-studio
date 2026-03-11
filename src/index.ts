@@ -10,6 +10,7 @@ import { createApiApp } from './router.js';
 import { createWebServer } from './web/server.js';
 import { killAllCliProcesses } from './spawner.js';
 import { PROXY_PORT, WEB_PORT, CA_CERT_PATH, CA_KEY_PATH, WEB_CERT_PATH, WEB_KEY_PATH } from './config.js';
+import { cleanupStaleMcpConfigs } from './mcp/config.js';
 import { fsMonitor } from './fs-monitor.js';
 import { db } from './state/db.js';
 import { agentRegistry } from './agents/registry.js';
@@ -46,6 +47,9 @@ async function main() {
   proxyServer.listen(PROXY_PORT, '0.0.0.0', () => {
     console.log(`[init] MITM proxy listening on 0.0.0.0:${PROXY_PORT}`);
   });
+
+  // 3.5. Clean up stale per-session MCP config files (older than 24h)
+  cleanupStaleMcpConfigs();
 
   // 4. Generate CA-signed TLS cert for web frontend
   const tlsOptions = getOrCreateWebCert();

@@ -47,7 +47,11 @@ export const MCP_SYSTEM_PROMPT = [
   'When you need to recall previous decisions, implementation reasoning, discussed approaches,',
   'or any context from past sessions for this project, use mcp__atoo-studio__search_session_history.',
   'It searches across ALL session history files (including subagent sessions) for the current project.',
-  'Results are ordered by most recent session first.',
+  'You can search with type "FullProjectSearch" (default, all sessions) or "CurrentSessionChain"',
+  '(only sessions in the current chain — use this when you need context from earlier in the',
+  'current conversation that was continued across session boundaries).',
+  'You can provide multiple queries as an array, and control sort order (newest_first or oldest_first).',
+  'Results are ordered by most recent session first by default.',
   'IMPORTANT: Prefer delegating search_session_history calls to a subagent when possible, so the',
   'main conversation context is not polluted with potentially large search results.',
   '\n## When stuck or unsure\n',
@@ -62,24 +66,103 @@ export const MCP_SYSTEM_PROMPT = [
   '- Choosing between multiple implementation approaches',
 ].join(' ');
 
-export function getMcpConfigPath(): string {
-  if (cachedPath) return cachedPath;
+/**
+ * Additional system prompt appended for chain continuation sessions.
+ * Tells the LLM that this is a continuation and how to search previous chain links.
+ */
+export const CHAIN_SYSTEM_PROMPT = [
+  '\n\n## Session Chain Continuation\n',
+  'This session is a chain continuation of a previous session. The conversation context',
+  'from earlier session(s) has been partially carried forward (all user messages + recent events).',
+  'If you need more context about what was discussed or decided earlier, use',
+  'mcp__atoo-studio__search_session_history with type "CurrentSessionChain" to search through',
+  'all previous sessions in this chain. The results are ordered by most recent first by default.',
+  'If you think there might be more relevant information that was cut off, search again with',
+  'different queries or increase max_results_per_query.',
+].join(' ');
 
+/**
+ * Get or create an MCP config file.
+ * When sessionUuid is provided, creates a per-session config that includes
+ * ATOO_CURRENT_SESSION_UUID in the env — enabling chain-scoped search.
+ */
+export function getMcpConfigPath(sessionUuid?: string): string {
+  // No session UUID — use the shared (cached) config
+  if (!sessionUuid) {
+    if (cachedPath) return cachedPath;
+
+    const def = getMcpServerDef();
+    const config = {
+      mcpServers: {
+        'atoo-studio': {
+          command: def.command,
+          args: def.args,
+          env: def.env,
+        },
+      },
+    };
+
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+    console.log(`[mcp] Wrote MCP config to ${CONFIG_PATH} (${IS_DEV ? 'dev' : 'production'} mode)`);
+
+    cachedPath = CONFIG_PATH;
+    return CONFIG_PATH;
+  }
+
+  // Per-session config with session UUID in env
+  const sessionConfigPath = path.join(CONFIG_DIR, `mcp-config-${sessionUuid}.json`);
   const def = getMcpServerDef();
   const config = {
     mcpServers: {
       'atoo-studio': {
         command: def.command,
         args: def.args,
-        env: def.env,
+        env: {
+          ...def.env,
+          ATOO_CURRENT_SESSION_UUID: sessionUuid,
+        },
       },
     },
   };
 
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
-  console.log(`[mcp] Wrote MCP config to ${CONFIG_PATH} (${IS_DEV ? 'dev' : 'production'} mode)`);
+  fs.writeFileSync(sessionConfigPath, JSON.stringify(config, null, 2));
+  console.log(`[mcp] Wrote per-session MCP config to ${sessionConfigPath}`);
 
-  cachedPath = CONFIG_PATH;
-  return CONFIG_PATH;
+  return sessionConfigPath;
+}
+
+/**
+ * Clean up a per-session MCP config file.
+ */
+export function cleanupMcpConfig(sessionUuid: string): void {
+  const sessionConfigPath = path.join(CONFIG_DIR, `mcp-config-${sessionUuid}.json`);
+  try {
+    fs.unlinkSync(sessionConfigPath);
+  } catch {
+    // File may not exist
+  }
+}
+
+/**
+ * Clean up stale per-session MCP config files older than maxAgeMs.
+ */
+export function cleanupStaleMcpConfigs(maxAgeMs: number = 24 * 60 * 60 * 1000): void {
+  try {
+    const files = fs.readdirSync(CONFIG_DIR);
+    const now = Date.now();
+    for (const file of files) {
+      if (!file.startsWith('mcp-config-') || !file.endsWith('.json')) continue;
+      if (file === 'mcp-config.json') continue; // Skip shared config
+      const filePath = path.join(CONFIG_DIR, file);
+      try {
+        const stat = fs.statSync(filePath);
+        if (now - stat.mtimeMs > maxAgeMs) {
+          fs.unlinkSync(filePath);
+          console.log(`[mcp] Cleaned up stale config: ${file}`);
+        }
+      } catch {}
+    }
+  } catch {}
 }

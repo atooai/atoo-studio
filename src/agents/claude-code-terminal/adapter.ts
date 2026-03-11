@@ -51,6 +51,7 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
         cwd: this.cwd,
         resumeSessionUuid: options.resumeSessionUuid,
         hookToken: this.hookToken,
+        isChainContinuation: options.isChainContinuation,
       });
 
       this.setStatus('idle');

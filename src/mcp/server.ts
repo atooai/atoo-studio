@@ -111,17 +111,39 @@ server.tool(
 
 server.tool(
   'search_session_history',
-  `Search through ALL session history files (chat logs) of the current project across all agent types (Claude Code, subagents, etc.). Use this to find previous decisions, implementation notes, reasoning, discussed approaches, or any other information from past and current sessions. Returns matching lines with file paths and line numbers, deduplicated across agent types. IMPORTANT: When using this tool, prefer to delegate the search to a subagent if your client supports it, so the main conversation context is not polluted with potentially large search results.`,
+  `Search through session history files (chat logs) of the current project across all agent types (Claude Code, subagents, etc.). Use this to find previous decisions, implementation notes, reasoning, discussed approaches, or any other information from past and current sessions. Returns matching lines with file paths and line numbers, deduplicated across agent types.
+
+Search types:
+- "FullProjectSearch" (default): searches ALL sessions for the project
+- "CurrentSessionChain": searches only sessions in the current session chain (previous continuation sessions), excluding the current session. Use this when you need context from earlier in a conversation that was continued across session boundaries.
+
+You can provide multiple search queries as an array — each query is run independently with its own result limit. Queries support regex; invalid regex falls back to literal text search.
+
+IMPORTANT: When using this tool, prefer to delegate the search to a subagent if your client supports it, so the main conversation context is not polluted with potentially large search results.`,
   {
-    query: z.string().describe('Search query (regex supported) to find in session history — e.g. "port 3000", "database schema", "decided to use", etc.'),
-    max_results: z.number().int().min(1).max(200).default(50).describe('Maximum number of matching lines to return (default: 50)'),
+    type: z.enum(['FullProjectSearch', 'CurrentSessionChain']).default('FullProjectSearch')
+      .describe('Search scope: FullProjectSearch (all sessions) or CurrentSessionChain (only sessions in the current chain)'),
+    query: z.union([z.string(), z.array(z.string())])
+      .describe('Search query or array of queries (regex supported, falls back to text if invalid) — e.g. "port 3000", ["database schema", "migration"]'),
+    max_results_per_query: z.number().int().min(1).max(200).default(50)
+      .describe('Maximum number of matching lines to return per query (default: 50)'),
+    sort: z.enum(['newest_first', 'oldest_first']).default('newest_first')
+      .describe('Sort order: newest_first (default) or oldest_first'),
   },
-  async ({ query, max_results }) => {
+  async ({ type, query, max_results_per_query, sort }) => {
     try {
+      const sessionUuid = process.env.ATOO_CURRENT_SESSION_UUID || undefined;
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/search-history`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, max_results, cwd: process.cwd() }),
+        body: JSON.stringify({
+          query,
+          max_results_per_query,
+          type,
+          session_uuid: sessionUuid,
+          sort,
+          cwd: process.cwd(),
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Unknown error' }));
@@ -129,7 +151,8 @@ server.tool(
       }
       const data = await res.json() as { results: Array<{ file: string; line: number; text: string }>; totalMatches: number; filesSearched: number };
       if (!data.results.length) {
-        return { content: [{ type: 'text' as const, text: `No matches found for "${query}" across ${data.filesSearched} session file(s).` }] };
+        const queryStr = Array.isArray(query) ? query.join('", "') : query;
+        return { content: [{ type: 'text' as const, text: `No matches found for "${queryStr}" across ${data.filesSearched} session file(s) (scope: ${type}).` }] };
       }
       const lines = data.results.map(r => `${r.file}:${r.line}: ${r.text}`);
       let output = lines.join('\n');

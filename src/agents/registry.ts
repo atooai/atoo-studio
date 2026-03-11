@@ -1,9 +1,11 @@
 import type WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AgentStatus, AgentDescriptor, HistoricalSession } from './types.js';
+import type { SessionEvent } from '../events/types.js';
 import type { WireMessage } from '../events/wire.js';
 import { store } from '../state/store.js';
 import { db } from '../state/db.js';
+import { buildChainSession } from './lib/chain-builder.js';
 
 interface AgentEntry {
   agent: Agent;
@@ -190,16 +192,22 @@ class AgentRegistry {
     }
 
     let resumeUuid = sessionUuid;
+    let isChainContinuation = false;
 
-    // Cross-family conversion: read events from source, write via target writer
+    // Cross-family resume: create a chain link instead of reusing the same UUID.
+    // This keeps each session file unambiguously one agent family and preserves
+    // the parent→child link via the session ID schema.
     if (sourceFactory.agentFamily !== targetFactory.agentFamily) {
       const events = await sourceFactory.readSessionEvents(sessionUuid);
       if (!events.length) {
         throw new Error(`No events found in session ${sessionUuid} for cross-family conversion`);
       }
       const cwd = options.cwd || '.';
-      targetFactory.writeSessionForResume(events, sessionUuid, cwd);
-      // resumeUuid stays the same — written with same UUID in target format
+      const { buildLinkedUuid } = await import('./lib/session-id-utils.js');
+      const chainUuid = buildLinkedUuid(sessionUuid, 'chain');
+      targetFactory.writeSessionForResume(events, chainUuid, cwd);
+      resumeUuid = chainUuid;
+      isChainContinuation = true;
     }
 
     const sessionId = `agent_${uuidv4()}`;
@@ -207,6 +215,100 @@ class AgentRegistry {
       cwd: options.cwd,
       skipPermissions: options.skipPermissions,
       resumeSessionUuid: resumeUuid,
+      isChainContinuation,
+    });
+  }
+
+  /**
+   * Create a new chain link from an existing session.
+   * Carries forward user messages + last N events, generates a chain-linked UUID.
+   * The new session can search previous chain links via CurrentSessionChain.
+   */
+  async chainAgent(sessionUuid: string, options: { cwd?: string; skipPermissions?: boolean; agentType?: string } = {}): Promise<Agent> {
+    // Find the factory that owns the source session.
+    // Invalidate caches first since we may be chaining from a still-running session
+    // whose JSONL has grown since the last scan.
+    let sourceFactory: AgentFactory | null = null;
+    for (const factory of this.factories.values()) {
+      if (await factory.ownsSession(sessionUuid)) {
+        sourceFactory = factory;
+        break;
+      }
+    }
+    if (!sourceFactory) {
+      throw new Error(`No agent implementation recognizes session ${sessionUuid}`);
+    }
+
+    // Read events from the source session (file is up-to-date since CLIs write incrementally)
+    const events = await sourceFactory.readSessionEvents(sessionUuid);
+    if (!events.length) {
+      throw new Error(`No events found in session ${sessionUuid} for chain creation`);
+    }
+
+    // Determine target factory
+    const targetAgentType = options.agentType || sourceFactory.agentType;
+    const targetFactory = this.factories.get(targetAgentType);
+    if (!targetFactory) {
+      throw new Error(`Unknown agent type: ${targetAgentType}`);
+    }
+
+    const cwd = options.cwd || '.';
+
+    // Build the chain session — writes JSONL with carried-forward events
+    const chainUuid = buildChainSession(events, sessionUuid, cwd);
+    if (!chainUuid) {
+      throw new Error(`Failed to create chain session from ${sessionUuid}`);
+    }
+
+    // If cross-family, convert the chain JSONL to target format
+    if (sourceFactory.agentFamily !== targetFactory.agentFamily) {
+      const chainEvents = await sourceFactory.readSessionEvents(chainUuid);
+      targetFactory.writeSessionForResume(chainEvents, chainUuid, cwd);
+    }
+
+    const sessionId = `agent_${uuidv4()}`;
+    return this.createAgent(targetFactory.agentType, sessionId, {
+      cwd: options.cwd,
+      skipPermissions: options.skipPermissions,
+      resumeSessionUuid: chainUuid,
+      isChainContinuation: true,
+    });
+  }
+
+  /**
+   * Create a chain link from in-memory events (for active agents).
+   * Bypasses the FS scanner — events come directly from the live agent.
+   */
+  async chainFromEvents(
+    events: SessionEvent[],
+    parentSessionId: string,
+    options: { cwd?: string; skipPermissions?: boolean; agentType?: string } = {},
+  ): Promise<Agent> {
+    if (!events.length) {
+      throw new Error('No events provided for chain creation');
+    }
+
+    // Determine target factory
+    const targetAgentType = options.agentType || 'claude-code-terminal-chatro';
+    const targetFactory = this.factories.get(targetAgentType);
+    if (!targetFactory) {
+      throw new Error(`Unknown agent type: ${targetAgentType}`);
+    }
+
+    const cwd = options.cwd || '.';
+
+    // Build the chain session from the provided events
+    const chainUuid = buildChainSession(events, parentSessionId, cwd);
+    if (!chainUuid) {
+      throw new Error('Failed to create chain session');
+    }
+
+    const sessionId = `agent_${uuidv4()}`;
+    return this.createAgent(targetFactory.agentType, sessionId, {
+      cwd: options.cwd,
+      skipPermissions: options.skipPermissions,
+      resumeSessionUuid: chainUuid,
+      isChainContinuation: true,
     });
   }
 

@@ -6,13 +6,14 @@ import os from 'os';
 import { spawnProcess } from '../../spawner.js';
 import { WEB_PORT } from '../../config.js';
 import { setupCodexNotify } from '../lib/codex/notify.js';
-import { getMcpServerDef, MCP_SYSTEM_PROMPT } from '../../mcp/config.js';
+import { getMcpServerDef, MCP_SYSTEM_PROMPT, CHAIN_SYSTEM_PROMPT } from '../../mcp/config.js';
 
 export function spawnCodexCliProcess(options: {
   skipPermissions?: boolean;
   cwd?: string;
   resumeSessionUuid?: string;
   notifyToken?: string;
+  isChainContinuation?: boolean;
 }): string {
   const cwd = options.cwd || process.env.HOME || os.homedir();
 
@@ -31,7 +32,10 @@ export function spawnCodexCliProcess(options: {
   }
 
   // Inject system prompt with MCP tool usage instructions
-  baseArgs.push('-c', `developer_instructions=${JSON.stringify(MCP_SYSTEM_PROMPT)}`);
+  const systemPrompt = options.isChainContinuation
+    ? MCP_SYSTEM_PROMPT + CHAIN_SYSTEM_PROMPT
+    : MCP_SYSTEM_PROMPT;
+  baseArgs.push('-c', `developer_instructions=${JSON.stringify(systemPrompt)}`);
 
   if (options.resumeSessionUuid) {
     // codex resume <session_id> [flags]

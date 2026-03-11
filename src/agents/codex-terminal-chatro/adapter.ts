@@ -71,6 +71,7 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
         cwd: this.cwd,
         resumeSessionUuid: options.resumeSessionUuid,
         notifyToken: this.notifyToken,
+        isChainContinuation: options.isChainContinuation,
       });
 
       // For new sessions: wait for first notify callback to discover thread-id,
@@ -164,6 +165,10 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
     const dir = targetDir || this.cwd || os.homedir();
     const parentId = this.resumeSessionUuid || this.cliSessionId || this.sessionId;
     return forkEventsToResumable(this.events, afterEventUuid, dir, parentId, fromEventUuid);
+  }
+
+  getCliSessionId(): string | null {
+    return this.cliSessionId;
   }
 
   getMessages(): WireMessage[] {

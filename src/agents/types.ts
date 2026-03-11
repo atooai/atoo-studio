@@ -66,6 +66,8 @@ export interface AgentInitOptions {
   cwd?: string;
   skipPermissions?: boolean;
   resumeSessionUuid?: string;
+  /** When true, this is a chain continuation session — append chain system prompt */
+  isChainContinuation?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════

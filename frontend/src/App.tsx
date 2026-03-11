@@ -697,6 +697,68 @@ function registerGlobalFunctions() {
     });
   };
 
+  /**
+   * Create a chain continuation from the current active session.
+   * Shows agent picker, then creates a chain link and opens the new session.
+   */
+  win.chainSession = async (agentSessionId: string) => {
+    const store = useStore.getState();
+    if (!store.activeProjectId) return;
+    const proj = store.projects.find(p => p.id === store.activeProjectId);
+    if (!proj) return;
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: async (agent: any) => {
+          store.setModal(null);
+          try {
+            setPendingAgentCreation(true);
+            const result = await api('POST', '/api/agent-sessions/chain', {
+              agentSessionId,
+              cwd: proj.path,
+              skipPermissions: true,
+              agentType: agent.agentType,
+            });
+            setPendingAgentCreation(false);
+
+            const sessionId = result.sessionId;
+            const defaultViewMode = (agent.mode === 'terminal') ? 'tui' : 'chat';
+            const session = {
+              id: sessionId,
+              title: 'Chain continuation',
+              status: 'waiting' as const,
+              startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+              messages: [],
+              lastMessage: '',
+              viewMode: defaultViewMode as 'chat' | 'tui',
+              agentType: agent.agentType,
+              agentMode: agent.mode as any,
+              permissionMode: result.mode || 'bypassPermissions',
+              model: result.model || null,
+              _capabilities: result.capabilities,
+            };
+            store.updateProject(proj.id, p => {
+              // Remove the old session (backend destroys it), add the new one
+              const remaining = p.sessions.filter(s => s.id !== agentSessionId);
+              return {
+                ...p,
+                sessions: [...remaining, session],
+                activeSessionIdx: remaining.filter(s => s.status !== 'ended').length,
+              };
+            });
+            store.setActiveTabType('session');
+            connectAgentWs(sessionId);
+            store.addToast(proj.name, 'Chain continuation created', 'success');
+          } catch (e: any) {
+            setPendingAgentCreation(false);
+            store.addToast(proj.name, `Failed: ${e.message}`, 'attention');
+          }
+        },
+      },
+    });
+  };
+
   win.switchToSession = (projId: string, idx: number) => {
     const store = useStore.getState();
     store.setActiveTabType('session');
