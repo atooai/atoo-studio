@@ -6,6 +6,7 @@ import type { WireMessage } from '../events/wire.js';
 import { store } from '../state/store.js';
 import { db } from '../state/db.js';
 import { buildChainSession } from './lib/chain-builder.js';
+import { fsSessionScanner } from './lib/claude/fs-sessions.js';
 
 interface AgentEntry {
   agent: Agent;
@@ -233,6 +234,7 @@ class AgentRegistry {
     // Find the factory that owns the source session.
     // Invalidate caches first since we may be chaining from a still-running session
     // whose JSONL has grown since the last scan.
+    fsSessionScanner.invalidate();
     let sourceFactory: AgentFactory | null = null;
     for (const factory of this.factories.values()) {
       if (await factory.ownsSession(sessionUuid)) {
