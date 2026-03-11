@@ -21,6 +21,7 @@ export interface AppState {
   activeTabType: 'session' | 'terminal';
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
+  rightPanelTab: 'sessions' | 'issues' | 'prs';
 
   // Editor state
   openFiles: EditorFile[];
@@ -93,6 +94,7 @@ export interface AppState {
   setActiveTabType: (t: 'session' | 'terminal') => void;
   setSidebarCollapsed: (v: boolean) => void;
   setRightPanelCollapsed: (v: boolean) => void;
+  setRightPanelTab: (t: 'sessions' | 'issues' | 'prs') => void;
   setOpenFiles: (files: EditorFile[]) => void;
   setActiveFileIdx: (idx: number) => void;
   setMonacoReady: (v: boolean) => void;
@@ -149,6 +151,7 @@ export const useStore = create<AppState>((set, get) => ({
   activeTabType: 'session',
   sidebarCollapsed: false,
   rightPanelCollapsed: false,
+  rightPanelTab: 'sessions',
   openFiles: [],
   activeFileIdx: -1,
   monacoReady: false,
@@ -196,6 +199,7 @@ export const useStore = create<AppState>((set, get) => ({
   setActiveTabType: (t) => set({ activeTabType: t }),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
   setRightPanelCollapsed: (v) => set({ rightPanelCollapsed: v }),
+  setRightPanelTab: (t) => set({ rightPanelTab: t }),
   setOpenFiles: (files) => set({ openFiles: files }),
   setActiveFileIdx: (idx) => set({ activeFileIdx: idx }),
   setMonacoReady: (v) => set({ monacoReady: v }),

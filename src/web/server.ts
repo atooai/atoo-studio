@@ -16,6 +16,7 @@ import { changesRouter } from '../handlers/changes.js';
 import { projectsRouter } from '../handlers/projects.js';
 import { environmentsRouter, setBroadcastSettingsChange } from '../handlers/environments.js';
 import { sshRouter } from '../handlers/ssh.js';
+import { githubRouter } from '../handlers/github.js';
 import { authRouter } from '../handlers/auth.js';
 import { usersRouter } from '../handlers/users.js';
 import { isAgentWsUpgrade, handleAgentWsUpgrade } from '../ws/agent-ws.js';
@@ -333,6 +334,9 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // Mount SSH API routes
   app.use(sshRouter);
+
+  // Mount GitHub integration API routes
+  app.use(githubRouter);
 
   // Mount container management API routes
   app.use(containersRouter);

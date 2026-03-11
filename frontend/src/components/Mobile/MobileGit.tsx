@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../../state/store';
 import { GitHistory } from '../Git/GitHistory';
+import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
 
 export function MobileGit() {
   const { activeProjectId, projects } = useStore();
   const proj = projects.find(p => p.id === activeProjectId);
+  const [tab, setTab] = useState<'history' | 'issues' | 'prs'>('history');
+  const { status: ghStatus } = useGitHubStatus(activeProjectId);
 
   if (!proj) {
     return (
@@ -26,9 +29,30 @@ export function MobileGit() {
     );
   }
 
+  const ghAvailable = ghStatus?.available ?? false;
+
   return (
     <div className="mobile-git">
-      <GitHistory />
+      <div className="mobile-git-tabs">
+        <button className={`mobile-git-tab${tab === 'history' ? ' active' : ''}`} onClick={() => setTab('history')}>History</button>
+        <button
+          className={`mobile-git-tab${tab === 'issues' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`}
+          onClick={() => ghAvailable && setTab('issues')}
+          title={!ghAvailable ? 'GitHub CLI not available' : undefined}
+        >
+          Issues
+        </button>
+        <button
+          className={`mobile-git-tab${tab === 'prs' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`}
+          onClick={() => ghAvailable && setTab('prs')}
+          title={!ghAvailable ? 'GitHub CLI not available' : undefined}
+        >
+          PRs
+        </button>
+      </div>
+      {tab === 'history' && <GitHistory />}
+      {tab === 'issues' && ghStatus && <IssuesPanel projectId={proj.id} ghStatus={ghStatus} />}
+      {tab === 'prs' && ghStatus && <PullsPanel projectId={proj.id} ghStatus={ghStatus} />}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { GitHistory } from '../Git/GitHistory';
 import { EditorArea } from '../Editor/Editor';
 import { ChatArea } from '../Chat/Chat';
 import { SessionsPanel } from '../Sessions/Sessions';
+import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
 import { PreviewPanel } from '../Preview/Preview';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
 
@@ -196,16 +197,56 @@ function TuiArea({ session }: { session: any }) {
 }
 
 function RightPanel({ proj }: { proj: any }) {
-  const { rightPanelCollapsed: collapsed, setRightPanelCollapsed: setCollapsed } = useStore();
+  const { rightPanelCollapsed: collapsed, setRightPanelCollapsed: setCollapsed, rightPanelTab, setRightPanelTab } = useStore();
+  const { status: ghStatus, loading: ghLoading } = useGitHubStatus(proj.id);
+
+  const ghAvailable = ghStatus?.available ?? false;
+
+  // Persist tab to project settings
+  const handleTabChange = (tab: 'sessions' | 'issues' | 'prs') => {
+    setRightPanelTab(tab);
+    if (proj.pe_id) {
+      import('../../api').then(({ api }) => {
+        api('PUT', `/api/project-links/${proj.pe_id}/settings`, { rightPanelTab: tab }).catch(() => {});
+      });
+    }
+  };
+
+  const tabTitle = rightPanelTab === 'sessions' ? 'Sessions'
+    : rightPanelTab === 'issues' ? 'Issues'
+    : 'Pull Requests';
 
   return (
     <div className={`right-panel ${collapsed ? 'collapsed' : ''}`} id="right-panel">
       <div className="rp-header">
-        <span className="rp-header-title">Sessions</span>
-        <button className="rp-collapse-btn" onClick={() => setCollapsed(!collapsed)} title="Collapse/expand">▸</button>
+        <div className="rp-tabs">
+          <button
+            className={`rp-tab${rightPanelTab === 'sessions' ? ' active' : ''}`}
+            onClick={() => handleTabChange('sessions')}
+          >
+            Sessions
+          </button>
+          <button
+            className={`rp-tab${rightPanelTab === 'issues' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`}
+            onClick={() => ghAvailable && handleTabChange('issues')}
+            title={!ghAvailable ? (ghLoading ? 'Checking GitHub...' : 'GitHub CLI not available or not authenticated') : `Issues (${ghStatus!.owner}/${ghStatus!.repo})`}
+          >
+            Issues
+          </button>
+          <button
+            className={`rp-tab${rightPanelTab === 'prs' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`}
+            onClick={() => ghAvailable && handleTabChange('prs')}
+            title={!ghAvailable ? (ghLoading ? 'Checking GitHub...' : 'GitHub CLI not available or not authenticated') : `PRs (${ghStatus!.owner}/${ghStatus!.repo})`}
+          >
+            PRs
+          </button>
+        </div>
+        <button className="rp-collapse-btn" onClick={() => setCollapsed(!collapsed)} title="Collapse/expand">&#x25b8;</button>
       </div>
-      <SessionsPanel />
-      <div className="rp-collapsed-label" onClick={() => setCollapsed(false)}>Sessions</div>
+      {rightPanelTab === 'sessions' && <SessionsPanel />}
+      {rightPanelTab === 'issues' && ghStatus && <IssuesPanel projectId={proj.id} ghStatus={ghStatus} />}
+      {rightPanelTab === 'prs' && ghStatus && <PullsPanel projectId={proj.id} ghStatus={ghStatus} />}
+      <div className="rp-collapsed-label" onClick={() => setCollapsed(false)}>{tabTitle}</div>
     </div>
   );
 }

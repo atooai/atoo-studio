@@ -504,6 +504,7 @@ function applyProjectSettings(settings: any, proj: any) {
   if (settings.preview_visible !== undefined) store.setPreviewVisible(settings.preview_visible);
   if (settings.preview_tabs) store.setPreviewTabs(settings.preview_tabs);
   if (settings.preview_active_idx !== undefined) store.setPreviewActiveIdx(settings.preview_active_idx);
+  if (settings.rightPanelTab) store.setRightPanelTab(settings.rightPanelTab);
   // previewMode removed (streaming only, no iframe)
 
   // Apply DOM-level layout settings
@@ -550,6 +551,7 @@ function gatherProjectSettings(): Record<string, any> {
     preview_visible: store.previewVisible,
     preview_tabs: store.previewTabs,
     preview_active_idx: store.previewActiveIdx,
+    rightPanelTab: store.rightPanelTab,
   };
 }
 

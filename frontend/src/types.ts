@@ -223,6 +223,54 @@ export interface ReportedService {
   reportedAt: number;
 }
 
+// ─── GitHub types ───
+
+export interface GitHubStatus {
+  available: boolean;
+  owner: string;
+  repo: string;
+  canWrite: boolean;
+}
+
+export interface GitHubLabel {
+  name: string;
+  color: string;
+}
+
+export interface GitHubIssue {
+  number: number;
+  title: string;
+  state: string;
+  author: { login: string };
+  labels: GitHubLabel[];
+  createdAt: string;
+  updatedAt: string;
+  comments: { totalCount: number };
+  url: string;
+  assignees: { login: string }[];
+  milestone?: { title: string } | null;
+}
+
+export interface GitHubPull {
+  number: number;
+  title: string;
+  state: string;
+  author: { login: string };
+  labels: GitHubLabel[];
+  createdAt: string;
+  updatedAt: string;
+  comments: { totalCount: number };
+  url: string;
+  headRefName: string;
+  baseRefName: string;
+  isDraft: boolean;
+  mergeable: string;
+  reviewDecision: string;
+  additions: number;
+  deletions: number;
+  assignees: { login: string }[];
+}
+
 export interface PreviewTab {
   id: string;
   label: string;
