@@ -69,6 +69,14 @@ export interface AppState {
   // Session loading overlay
   sessionLoading: string | null; // label or null
 
+  // Mobile layout
+  isMobileLayout: boolean;
+  mobileView: 'dashboard' | 'files' | 'git' | 'agents' | 'terminal';
+  mobileDrawerOpen: boolean;
+  mobileSheetOpen: boolean;
+  mobileSheetType: string | null;
+  mobileSheetProps: any;
+
   // Actions
   setEnvironments: (envs: Environment[]) => void;
   setActiveEnvironmentId: (id: string | null) => void;
@@ -115,6 +123,11 @@ export interface AppState {
   setModal: (modal: { type: string; props?: any } | null) => void;
   setCtxMenu: (menu: AppState['ctxMenu']) => void;
   setSessionLoading: (label: string | null) => void;
+  setIsMobileLayout: (v: boolean) => void;
+  setMobileView: (v: 'dashboard' | 'files' | 'git' | 'agents' | 'terminal') => void;
+  setMobileDrawerOpen: (v: boolean) => void;
+  openMobileSheet: (type: string, props?: any) => void;
+  closeMobileSheet: () => void;
 
   // Helpers
   getActiveProject: () => Project | undefined;
@@ -159,6 +172,12 @@ export const useStore = create<AppState>((set, get) => ({
   modal: null,
   ctxMenu: null,
   sessionLoading: null,
+  isMobileLayout: false,
+  mobileView: 'dashboard',
+  mobileDrawerOpen: false,
+  mobileSheetOpen: false,
+  mobileSheetType: null,
+  mobileSheetProps: null,
 
   setEnvironments: (envs) => set({ environments: envs }),
   setActiveEnvironmentId: (id) => set({ activeEnvironmentId: id }),
@@ -252,6 +271,11 @@ export const useStore = create<AppState>((set, get) => ({
   setModal: (modal) => set({ modal }),
   setCtxMenu: (menu) => set({ ctxMenu: menu }),
   setSessionLoading: (label) => set({ sessionLoading: label }),
+  setIsMobileLayout: (v) => set({ isMobileLayout: v }),
+  setMobileView: (v) => set({ mobileView: v }),
+  setMobileDrawerOpen: (v) => set({ mobileDrawerOpen: v }),
+  openMobileSheet: (type, props) => set({ mobileSheetOpen: true, mobileSheetType: type, mobileSheetProps: props || null }),
+  closeMobileSheet: () => set({ mobileSheetOpen: false, mobileSheetType: null, mobileSheetProps: null }),
 
   getActiveProject: () => {
     const s = get();

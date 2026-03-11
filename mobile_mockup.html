@@ -1,0 +1,1645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Atoo Studio ADE — Mobile</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-0: #0a0a0f;
+  --bg-1: #111118;
+  --bg-2: #1a1a24;
+  --bg-3: #22222f;
+  --bg-4: #2a2a3a;
+  --border: #2d2d3d;
+  --border-hi: #3a3a50;
+  --text-0: #e8e8f0;
+  --text-1: #b0b0c0;
+  --text-2: #707088;
+  --accent: #00e5a0;
+  --accent-dim: #00e5a020;
+  --accent-mid: #00e5a060;
+  --warn: #ff6b4a;
+  --warn-dim: #ff6b4a20;
+  --info: #4a9eff;
+  --info-dim: #4a9eff20;
+  --purple: #a78bfa;
+  --purple-dim: #a78bfa20;
+  --yellow: #fbbf24;
+  --yellow-dim: #fbbf2420;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ─── App Shell ─── */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ─── Top Bar ─── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  min-height: 52px;
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hamburger {
+  width: 36px; height: 36px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 5px; cursor: pointer;
+  border: none; background: none;
+  padding: 6px;
+}
+.hamburger span {
+  display: block; width: 20px; height: 2px;
+  background: var(--text-1); border-radius: 1px;
+  transition: all .3s;
+}
+.hamburger.active span:nth-child(1) { transform: rotate(45deg) translate(5px,5px); }
+.hamburger.active span:nth-child(2) { opacity: 0; }
+.hamburger.active span:nth-child(3) { transform: rotate(-45deg) translate(5px,-5px); }
+
+.logo {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+}
+.logo-sub {
+  font-size: 10px;
+  color: var(--text-2);
+  font-weight: 400;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.topbar-right {
+  display: flex; align-items: center; gap: 8px;
+}
+
+.topbar-btn {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; position: relative;
+  font-size: 16px;
+}
+.topbar-btn:active { background: var(--bg-3); }
+
+.badge {
+  position: absolute; top: -3px; right: -3px;
+  width: 16px; height: 16px;
+  background: var(--warn);
+  border-radius: 50%;
+  font-size: 9px; font-weight: 700;
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--bg-1);
+}
+
+.avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--info));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 12px; color: var(--bg-0);
+  cursor: pointer;
+}
+
+/* ─── Context Bar ─── */
+.context-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.context-bar::-webkit-scrollbar { display: none; }
+
+.ctx-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 11px;
+  color: var(--text-1);
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ctx-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.ctx-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ─── Main Content Area ─── */
+.main {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ─── Views ─── */
+.view {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 16px 20px;
+  display: none;
+  -webkit-overflow-scrolling: touch;
+}
+.view.active { display: block; animation: fadeUp .25s ease; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Section Headers ─── */
+.section-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; margin-top: 16px;
+}
+.section-hdr:first-child { margin-top: 0; }
+.section-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-2);
+}
+.section-action {
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+  border: none; background: none;
+  font-family: var(--sans);
+}
+
+/* ─── Cards ─── */
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.card:active { border-color: var(--border-hi); }
+
+.card-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.card-icon {
+  width: 38px; height: 38px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.card-body { flex: 1; min-width: 0; }
+.card-title {
+  font-weight: 600; font-size: 13px; color: var(--text-0);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card-desc {
+  font-size: 11px; color: var(--text-2); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card-meta {
+  display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;
+}
+.tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.tag-green { background: var(--accent-dim); color: var(--accent); }
+.tag-red { background: var(--warn-dim); color: var(--warn); }
+.tag-blue { background: var(--info-dim); color: var(--info); }
+.tag-purple { background: var(--purple-dim); color: var(--purple); }
+.tag-yellow { background: var(--yellow-dim); color: var(--yellow); }
+
+.card-chevron {
+  color: var(--text-2); font-size: 16px; flex-shrink: 0;
+}
+
+/* ─── Stats Row ─── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.stat-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 10px;
+  text-align: center;
+}
+.stat-val {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+.stat-label {
+  font-size: 10px;
+  color: var(--text-2);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ─── Containers / Lists ─── */
+.list-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.list-item:active { border-color: var(--border-hi); }
+
+.li-icon {
+  width: 32px; height: 32px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; flex-shrink: 0;
+}
+.li-body { flex: 1; min-width: 0; }
+.li-title { font-size: 13px; font-weight: 500; }
+.li-sub { font-size: 11px; color: var(--text-2); margin-top: 1px; }
+.li-right { text-align: right; flex-shrink: 0; }
+.li-val { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.li-unit { font-size: 10px; color: var(--text-2); }
+
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.green { background: var(--accent); box-shadow: 0 0 6px var(--accent-mid); }
+.status-dot.red { background: var(--warn); }
+.status-dot.yellow { background: var(--yellow); }
+.status-dot.blue { background: var(--info); }
+
+/* ─── File Explorer ─── */
+.file-tree { padding-left: 0; }
+.file-node {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.file-node:active { background: var(--bg-3); }
+.file-node .icon { width: 18px; text-align: center; flex-shrink: 0; }
+.file-indent-1 { padding-left: 28px; }
+.file-indent-2 { padding-left: 44px; }
+.file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-size { font-size: 10px; color: var(--text-2); }
+
+/* ─── Editor Tabs ─── */
+.editor-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -16px;
+  padding: 0 16px;
+}
+.editor-tabs::-webkit-scrollbar { display: none; }
+.ed-tab {
+  padding: 8px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  flex-shrink: 0;
+}
+.ed-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.editor-mode-bar {
+  display: flex; gap: 4px; margin: 10px 0;
+}
+.mode-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.mode-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+.code-block {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.7;
+  overflow-x: auto;
+  color: var(--text-1);
+  white-space: pre;
+}
+.code-ln { color: var(--text-2); user-select: none; margin-right: 12px; }
+.code-kw { color: var(--purple); }
+.code-str { color: var(--accent); }
+.code-fn { color: var(--info); }
+.code-cm { color: var(--text-2); font-style: italic; }
+
+/* ─── Git ─── */
+.branch-selector {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.branch-icon { font-size: 16px; }
+.branch-name { font-family: var(--mono); font-size: 13px; font-weight: 500; flex: 1; }
+
+.commit-item {
+  display: flex; gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.commit-line {
+  display: flex; flex-direction: column; align-items: center;
+  width: 20px; flex-shrink: 0;
+}
+.commit-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: var(--bg-0);
+  flex-shrink: 0;
+}
+.commit-stem { flex: 1; width: 2px; background: var(--border); }
+.commit-body { flex: 1; min-width: 0; }
+.commit-msg {
+  font-size: 13px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.commit-info { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+.commit-hash { font-family: var(--mono); color: var(--info); }
+
+/* ─── Agent Chat ─── */
+.chat-container { display: flex; flex-direction: column; gap: 10px; padding-bottom: 60px; }
+.chat-msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.chat-msg.agent {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+.chat-msg.user {
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+.chat-msg .agent-name {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.chat-msg code {
+  font-family: var(--mono);
+  background: var(--bg-1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.chat-input-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+}
+.chat-input {
+  flex: 1;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 8px 14px;
+  color: var(--text-0);
+  font-size: 13px;
+  font-family: var(--sans);
+  outline: none;
+}
+.chat-input:focus { border-color: var(--accent); }
+.chat-send {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  color: var(--bg-0);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ─── Terminal ─── */
+.terminal {
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  min-height: 200px;
+  color: var(--text-1);
+  overflow: auto;
+}
+.term-prompt { color: var(--accent); }
+.term-path { color: var(--info); }
+.term-out { color: var(--text-2); }
+.term-err { color: var(--warn); }
+
+.terminal-tabs {
+  display: flex; gap: 4px; margin-bottom: 8px;
+}
+.term-tab {
+  padding: 4px 12px;
+  border-radius: 6px 6px 0 0;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.term-tab.active { background: #000; color: var(--accent); }
+
+/* ─── Proxy ─── */
+.proxy-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.proxy-method {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 10px;
+}
+.proxy-route { flex: 1; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proxy-target { color: var(--text-2); font-size: 10px; }
+
+/* ─── Preview ─── */
+.preview-frame {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  min-height: 300px;
+  display: flex; align-items: center; justify-content: center;
+}
+.preview-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  margin-bottom: -1px;
+}
+.preview-url {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-dots { display: flex; gap: 4px; }
+.preview-dots span {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+
+/* ─── Drawer / Sidebar ─── */
+.drawer-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 200;
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s;
+}
+.drawer-overlay.open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: 280px;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  z-index: 201;
+  transform: translateX(-100%);
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+.drawer.open { transform: translateX(0); }
+
+.drawer-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-section-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 8px;
+}
+.drawer-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-1);
+}
+.drawer-item:active { background: var(--bg-3); }
+.drawer-item.active { background: var(--accent-dim); color: var(--accent); }
+.drawer-item .di-icon { width: 20px; text-align: center; font-size: 15px; }
+
+.workspace-item {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.workspace-item:active { background: var(--bg-3); }
+.ws-name { font-size: 13px; font-weight: 500; }
+.ws-projects { font-size: 11px; color: var(--text-2); }
+
+.project-tree-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.project-tree-item:active { background: var(--bg-3); }
+.project-tree-item.nested { padding-left: 24px; }
+.pt-icon { font-size: 12px; }
+
+/* ─── Bottom Nav ─── */
+.bottom-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  padding: 6px 0;
+  padding-bottom: calc(6px + var(--safe-bottom));
+  flex-shrink: 0;
+  z-index: 100;
+}
+.nav-item {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 2px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border: none; background: none;
+  position: relative;
+}
+.nav-icon {
+  font-size: 20px;
+  color: var(--text-2);
+  transition: color .15s;
+  height: 24px;
+  display: flex; align-items: center;
+}
+.nav-label {
+  font-size: 9px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: color .15s;
+}
+.nav-item.active .nav-icon { color: var(--accent); }
+.nav-item.active .nav-label { color: var(--accent); }
+.nav-item.active::after {
+  content: '';
+  position: absolute; top: -7px;
+  width: 20px; height: 2px;
+  background: var(--accent);
+  border-radius: 0 0 2px 2px;
+}
+
+/* ─── Agent Session History ─── */
+.session-item {
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.session-item:active { border-color: var(--border-hi); }
+.session-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.session-agent {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.session-time { font-size: 10px; color: var(--text-2); }
+.session-summary {
+  font-size: 12px; color: var(--text-1);
+  display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.session-stats {
+  display: flex; gap: 12px; margin-top: 8px;
+}
+.ss-item {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+}
+.ss-item span { color: var(--text-0); font-weight: 600; }
+
+/* ─── Utility ─── */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { scrollbar-width: none; }
+
+.swipe-hint {
+  position: absolute;
+  bottom: 12px; left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  background: var(--bg-3);
+  border-radius: 20px;
+  font-size: 10px;
+  color: var(--text-2);
+  pointer-events: none;
+  opacity: 0;
+  animation: hintPulse 3s ease 1s;
+}
+@keyframes hintPulse {
+  0%, 100% { opacity: 0; }
+  20%, 80% { opacity: 1; }
+}
+
+/* ─── Container Detail Sheet ─── */
+.sheet-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 300;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+.sheet-overlay.open { opacity: 1; pointer-events: auto; }
+
+.sheet {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  z-index: 301;
+  transform: translateY(100%);
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding-bottom: var(--safe-bottom);
+}
+.sheet.open { transform: translateY(0); }
+
+.sheet-handle {
+  width: 36px; height: 4px;
+  background: var(--bg-4);
+  border-radius: 2px;
+  margin: 10px auto;
+}
+.sheet-content { padding: 0 16px 20px; }
+.sheet-title {
+  font-weight: 700; font-size: 16px; margin-bottom: 12px;
+}
+.sheet-actions {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 8px; margin-bottom: 16px;
+}
+.sheet-action-btn {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 4px;
+  padding: 12px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-1);
+  font-size: 11px;
+}
+.sheet-action-btn .sa-icon { font-size: 20px; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- ═══ TOP BAR ═══ -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <button class="hamburger" id="menuBtn" onclick="toggleDrawer()">
+        <span></span><span></span><span></span>
+      </button>
+      <div>
+        <div class="logo">ATOO<span style="color:var(--text-0)">STUDIO</span></div>
+        <div class="logo-sub">ADE</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="topbar-btn" onclick="showSheet('search')">🔍</button>
+      <button class="topbar-btn" style="position:relative">
+        🔔<span class="badge">3</span>
+      </button>
+      <div class="avatar" onclick="showSheet('user')">MK</div>
+    </div>
+  </div>
+
+  <!-- ═══ CONTEXT BAR ═══ -->
+  <div class="context-bar" id="contextBar">
+    <div class="ctx-chip active">
+      <span class="ctx-dot" style="background:var(--accent)"></span>
+      my-saas-app
+    </div>
+    <div class="ctx-chip">
+      <span class="ctx-dot" style="background:var(--info)"></span>
+      api-backend
+    </div>
+    <div class="ctx-chip">
+      <span class="ctx-dot" style="background:var(--purple)"></span>
+      auth-service
+    </div>
+    <div class="ctx-chip">
+      <span class="ctx-dot" style="background:var(--yellow)"></span>
+      landing-page
+    </div>
+  </div>
+
+  <!-- ═══ MAIN CONTENT ═══ -->
+  <div class="main">
+
+    <!-- ── DASHBOARD VIEW ── -->
+    <div class="view active" id="view-dashboard">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-val" style="color:var(--warn)">3</div>
+          <div class="stat-label">Attention</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" style="color:var(--accent)">5</div>
+          <div class="stat-label">Running</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" style="color:var(--info)">12</div>
+          <div class="stat-label">Alive</div>
+        </div>
+      </div>
+
+      <div class="section-hdr">
+        <span class="section-title">Containers</span>
+        <button class="section-action">View All →</button>
+      </div>
+
+      <div class="list-item" onclick="showSheet('container')">
+        <div class="li-icon" style="background:var(--accent-dim)">🐳</div>
+        <div class="li-body">
+          <div class="li-title">api-backend <span class="status-dot green"></span></div>
+          <div class="li-sub">Docker · node:20-alpine · Up 4h</div>
+        </div>
+        <div class="li-right">
+          <div class="li-val">47<span class="li-unit">MB</span></div>
+          <div class="li-unit">2.1% CPU</div>
+        </div>
+      </div>
+
+      <div class="list-item" onclick="showSheet('container')">
+        <div class="li-icon" style="background:var(--info-dim)">🐳</div>
+        <div class="li-body">
+          <div class="li-title">postgres-db <span class="status-dot green"></span></div>
+          <div class="li-sub">Docker · postgres:16 · Up 4h</div>
+        </div>
+        <div class="li-right">
+          <div class="li-val">128<span class="li-unit">MB</span></div>
+          <div class="li-unit">0.8% CPU</div>
+        </div>
+      </div>
+
+      <div class="list-item" onclick="showSheet('container')">
+        <div class="li-icon" style="background:var(--warn-dim)">📦</div>
+        <div class="li-body">
+          <div class="li-title">redis-cache <span class="status-dot yellow"></span></div>
+          <div class="li-sub">Podman · redis:7 · Restarting</div>
+        </div>
+        <div class="li-right">
+          <div class="li-val">23<span class="li-unit">MB</span></div>
+          <div class="li-unit">—</div>
+        </div>
+      </div>
+
+      <div class="list-item">
+        <div class="li-icon" style="background:var(--purple-dim)">🧊</div>
+        <div class="li-body">
+          <div class="li-title">dev-sandbox <span class="status-dot green"></span></div>
+          <div class="li-sub">LXC · Ubuntu 24.04 · Up 1d</div>
+        </div>
+        <div class="li-right">
+          <div class="li-val">256<span class="li-unit">MB</span></div>
+          <div class="li-unit">5.2% CPU</div>
+        </div>
+      </div>
+
+      <div class="section-hdr">
+        <span class="section-title">Proxy Routes</span>
+        <button class="section-action">Manage →</button>
+      </div>
+
+      <div class="proxy-row">
+        <span class="proxy-method tag-green" style="background:var(--accent-dim)">GET</span>
+        <span class="proxy-route">/api/*</span>
+        <span class="proxy-target">→ :3001</span>
+        <span class="status-dot green"></span>
+      </div>
+      <div class="proxy-row">
+        <span class="proxy-method tag-blue" style="background:var(--info-dim);color:var(--info)">WSS</span>
+        <span class="proxy-route">/ws</span>
+        <span class="proxy-target">→ :3002</span>
+        <span class="status-dot green"></span>
+      </div>
+      <div class="proxy-row">
+        <span class="proxy-method tag-purple" style="background:var(--purple-dim);color:var(--purple)">ALL</span>
+        <span class="proxy-route">/*</span>
+        <span class="proxy-target">→ :5173</span>
+        <span class="status-dot green"></span>
+      </div>
+
+      <div class="section-hdr">
+        <span class="section-title">App Preview</span>
+        <button class="section-action">Fullscreen →</button>
+      </div>
+      <div class="preview-bar">
+        <div class="preview-dots">
+          <span style="background:var(--warn)"></span>
+          <span style="background:var(--yellow)"></span>
+          <span style="background:var(--accent)"></span>
+        </div>
+        <span class="preview-url">https://my-saas-app.atoo.dev</span>
+        <span style="color:var(--text-2);font-size:14px;cursor:pointer">↗</span>
+      </div>
+      <div class="preview-frame" style="border-top:none;border-radius:0 0 var(--radius) var(--radius)">
+        <div style="text-align:center;padding:40px 20px">
+          <div style="font-size:28px;margin-bottom:8px">🚀</div>
+          <div style="font-size:13px;color:#333;font-weight:600">my-saas-app</div>
+          <div style="font-size:11px;color:#888;margin-top:4px">Live Preview — Port 5173</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FILES VIEW ── -->
+    <div class="view" id="view-files">
+      <div class="section-hdr">
+        <span class="section-title">File Explorer</span>
+        <button class="section-action">+ New</button>
+      </div>
+
+      <div class="file-tree">
+        <div class="file-node" onclick="switchToEditor()">
+          <span class="icon">📁</span>
+          <span class="file-name" style="font-weight:600">my-saas-app</span>
+        </div>
+        <div class="file-node file-indent-1">
+          <span class="icon">📁</span>
+          <span class="file-name">src</span>
+        </div>
+        <div class="file-node file-indent-2" onclick="switchToEditor()">
+          <span class="icon" style="color:var(--info)">⚛</span>
+          <span class="file-name">App.tsx</span>
+          <span class="file-size">2.4 KB</span>
+        </div>
+        <div class="file-node file-indent-2" onclick="switchToEditor()">
+          <span class="icon" style="color:var(--info)">⚛</span>
+          <span class="file-name">main.tsx</span>
+          <span class="file-size">340 B</span>
+        </div>
+        <div class="file-node file-indent-2">
+          <span class="icon">📁</span>
+          <span class="file-name">components</span>
+        </div>
+        <div class="file-node file-indent-2">
+          <span class="icon">📁</span>
+          <span class="file-name">hooks</span>
+        </div>
+        <div class="file-node file-indent-1" onclick="switchToEditor()">
+          <span class="icon" style="color:var(--accent)">📄</span>
+          <span class="file-name">package.json</span>
+          <span class="file-size">1.1 KB</span>
+        </div>
+        <div class="file-node file-indent-1" onclick="switchToEditor()">
+          <span class="icon" style="color:var(--yellow)">📄</span>
+          <span class="file-name">tsconfig.json</span>
+          <span class="file-size">580 B</span>
+        </div>
+        <div class="file-node file-indent-1" onclick="switchToEditor()">
+          <span class="icon" style="color:var(--purple)">📄</span>
+          <span class="file-name">vite.config.ts</span>
+          <span class="file-size">420 B</span>
+        </div>
+        <div class="file-node file-indent-1" onclick="switchToEditor()">
+          <span class="icon">📄</span>
+          <span class="file-name">.env.local</span>
+          <span class="file-size">128 B</span>
+        </div>
+        <div class="file-node file-indent-1" onclick="switchToEditor()">
+          <span class="icon">🐳</span>
+          <span class="file-name">Dockerfile</span>
+          <span class="file-size">890 B</span>
+        </div>
+      </div>
+
+      <!-- Editor Area (hidden by default, toggles via JS) -->
+      <div id="editorArea" style="display:none; margin-top: 12px;">
+        <div class="editor-tabs">
+          <div class="ed-tab active">App.tsx</div>
+          <div class="ed-tab">main.tsx</div>
+          <div class="ed-tab">package.json</div>
+        </div>
+        <div class="editor-mode-bar">
+          <button class="mode-btn active">Source</button>
+          <button class="mode-btn">Diff</button>
+          <button class="mode-btn">Rendered</button>
+          <button class="mode-btn">Hex</button>
+        </div>
+        <div class="code-block"><span class="code-ln"> 1</span><span class="code-kw">import</span> { useState } <span class="code-kw">from</span> <span class="code-str">'react'</span>
+<span class="code-ln"> 2</span><span class="code-kw">import</span> { Dashboard } <span class="code-kw">from</span> <span class="code-str">'./components'</span>
+<span class="code-ln"> 3</span>
+<span class="code-ln"> 4</span><span class="code-kw">export default function</span> <span class="code-fn">App</span>() {
+<span class="code-ln"> 5</span>  <span class="code-kw">const</span> [user, setUser] = <span class="code-fn">useState</span>(<span class="code-kw">null</span>)
+<span class="code-ln"> 6</span>
+<span class="code-ln"> 7</span>  <span class="code-cm">// TODO: Add auth flow</span>
+<span class="code-ln"> 8</span>  <span class="code-kw">return</span> (
+<span class="code-ln"> 9</span>    &lt;<span class="code-fn">Dashboard</span>
+<span class="code-ln">10</span>      <span class="code-fn">user</span>={user}
+<span class="code-ln">11</span>      <span class="code-fn">onLogout</span>={() =&gt; <span class="code-fn">setUser</span>(<span class="code-kw">null</span>)}
+<span class="code-ln">12</span>    /&gt;
+<span class="code-ln">13</span>  )
+<span class="code-ln">14</span>}</div>
+      </div>
+    </div>
+
+    <!-- ── GIT VIEW ── -->
+    <div class="view" id="view-git">
+      <div class="section-hdr">
+        <span class="section-title">Branch</span>
+        <button class="section-action">+ Worktree</button>
+      </div>
+
+      <div class="branch-selector">
+        <span class="branch-icon">🌿</span>
+        <span class="branch-name">feature/auth-flow</span>
+        <span style="color:var(--text-2);font-size:12px">▼</span>
+      </div>
+
+      <div style="display:flex;gap:6px;margin-bottom:14px;overflow-x:auto" class="scrollbar-hide">
+        <div class="tag tag-green" style="padding:6px 12px;border-radius:20px;cursor:pointer">feature/auth-flow</div>
+        <div class="tag tag-blue" style="padding:6px 12px;border-radius:20px;cursor:pointer">main</div>
+        <div class="tag tag-purple" style="padding:6px 12px;border-radius:20px;cursor:pointer">dev</div>
+        <div class="tag tag-yellow" style="padding:6px 12px;border-radius:20px;cursor:pointer">hotfix/cors</div>
+      </div>
+
+      <div class="section-hdr">
+        <span class="section-title">Commit History</span>
+        <button class="section-action">Filter</button>
+      </div>
+
+      <div class="commit-item">
+        <div class="commit-line"><div class="commit-dot"></div><div class="commit-stem"></div></div>
+        <div class="commit-body">
+          <div class="commit-msg">feat: add JWT token refresh</div>
+          <div class="commit-info"><span class="commit-hash">a3f1d92</span> · 2m ago · agent-01</div>
+        </div>
+      </div>
+      <div class="commit-item">
+        <div class="commit-line"><div class="commit-dot"></div><div class="commit-stem"></div></div>
+        <div class="commit-body">
+          <div class="commit-msg">refactor: extract auth middleware</div>
+          <div class="commit-info"><span class="commit-hash">b7c4e1a</span> · 18m ago · agent-01</div>
+        </div>
+      </div>
+      <div class="commit-item">
+        <div class="commit-line"><div class="commit-dot"></div><div class="commit-stem"></div></div>
+        <div class="commit-body">
+          <div class="commit-msg">fix: CORS headers for API routes</div>
+          <div class="commit-info"><span class="commit-hash">c9d2f3b</span> · 1h ago · you</div>
+        </div>
+      </div>
+      <div class="commit-item">
+        <div class="commit-line"><div class="commit-dot"></div><div class="commit-stem"></div></div>
+        <div class="commit-body">
+          <div class="commit-msg">chore: update dependencies</div>
+          <div class="commit-info"><span class="commit-hash">d1e5a4c</span> · 3h ago · agent-02</div>
+        </div>
+      </div>
+      <div class="commit-item">
+        <div class="commit-line"><div class="commit-dot" style="border-color:var(--info)"></div><div class="commit-stem"></div></div>
+        <div class="commit-body">
+          <div class="commit-msg">Merge branch 'dev' into feature/auth-flow</div>
+          <div class="commit-info"><span class="commit-hash">e2f6b5d</span> · 5h ago · you</div>
+        </div>
+      </div>
+
+      <div class="section-hdr">
+        <span class="section-title">Worktrees</span>
+        <button class="section-action">+ New</button>
+      </div>
+
+      <div class="list-item">
+        <div class="li-icon" style="background:var(--accent-dim)">🌲</div>
+        <div class="li-body">
+          <div class="li-title">main</div>
+          <div class="li-sub">/worktrees/main · clean</div>
+        </div>
+      </div>
+      <div class="list-item">
+        <div class="li-icon" style="background:var(--purple-dim)">🌲</div>
+        <div class="li-body">
+          <div class="li-title">feature/auth-flow</div>
+          <div class="li-sub">/worktrees/auth · 3 modified</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── AGENTS VIEW ── -->
+    <div class="view" id="view-agents">
+      <div class="section-hdr">
+        <span class="section-title">Active Agents</span>
+        <button class="section-action">+ Launch</button>
+      </div>
+
+      <div class="card" onclick="switchAgentTab('chat')">
+        <div class="card-row">
+          <div class="card-icon" style="background:var(--accent-dim)">🤖</div>
+          <div class="card-body">
+            <div class="card-title">agent-01 <span class="status-dot green"></span></div>
+            <div class="card-desc">Implementing auth flow in src/auth/</div>
+          </div>
+          <span class="card-chevron">›</span>
+        </div>
+        <div class="card-meta">
+          <span class="tag tag-green">running</span>
+          <span class="tag tag-blue">42 turns</span>
+          <span class="tag tag-purple">feature/auth</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-row">
+          <div class="card-icon" style="background:var(--info-dim)">🤖</div>
+          <div class="card-body">
+            <div class="card-title">agent-02 <span class="status-dot green"></span></div>
+            <div class="card-desc">Writing tests for payment module</div>
+          </div>
+          <span class="card-chevron">›</span>
+        </div>
+        <div class="card-meta">
+          <span class="tag tag-green">running</span>
+          <span class="tag tag-blue">18 turns</span>
+          <span class="tag tag-yellow">tests</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-row">
+          <div class="card-icon" style="background:var(--yellow-dim)">🤖</div>
+          <div class="card-body">
+            <div class="card-title">agent-03 <span class="status-dot yellow"></span></div>
+            <div class="card-desc">⚠ Awaiting approval: delete user table</div>
+          </div>
+          <span class="card-chevron">›</span>
+        </div>
+        <div class="card-meta">
+          <span class="tag tag-red">needs input</span>
+          <span class="tag tag-blue">7 turns</span>
+          <span class="tag tag-purple">migration</span>
+        </div>
+      </div>
+
+      <!-- Agent Chat Sub-view -->
+      <div id="agentChat" style="display:none;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <button onclick="switchAgentTab('list')" style="background:none;border:none;color:var(--text-1);font-size:18px;cursor:pointer">←</button>
+          <div style="font-weight:600;font-size:14px">🤖 agent-01</div>
+          <div class="tag tag-green" style="margin-left:auto">running</div>
+        </div>
+
+        <div class="editor-mode-bar">
+          <button class="mode-btn active" id="chatModeBtn" onclick="toggleAgentMode('chat')">Chat</button>
+          <button class="mode-btn" id="tuiModeBtn" onclick="toggleAgentMode('tui')">TUI</button>
+        </div>
+
+        <div id="agentChatView" class="chat-container">
+          <div class="chat-msg user">Implement JWT authentication with refresh tokens for the API</div>
+          <div class="chat-msg agent">
+            <div class="agent-name">agent-01</div>
+            I'll implement JWT auth with refresh tokens. Here's my plan:<br><br>
+            1. Create <code>auth.middleware.ts</code><br>
+            2. Add token generation in <code>auth.service.ts</code><br>
+            3. Set up refresh endpoint<br><br>
+            Starting with the middleware...
+          </div>
+          <div class="chat-msg agent">
+            <div class="agent-name">agent-01</div>
+            ✅ Created <code>src/auth/auth.middleware.ts</code><br>
+            ✅ Created <code>src/auth/auth.service.ts</code><br>
+            🔄 Working on <code>src/auth/refresh.controller.ts</code>...
+          </div>
+          <div class="chat-msg user">Make sure the refresh token rotation works correctly</div>
+          <div class="chat-msg agent">
+            <div class="agent-name">agent-01</div>
+            Good call. I'm implementing one-time-use refresh tokens with automatic rotation. Each refresh invalidates the old token and issues a new pair. Writing tests now...
+          </div>
+        </div>
+
+        <div id="agentTuiView" style="display:none;">
+          <div class="terminal">
+<span class="term-prompt">agent-01</span> <span class="term-path">~/my-saas-app</span> <span style="color:var(--text-0)">$</span> cat src/auth/auth.service.ts
+<span class="term-out">
+export class AuthService {
+  async generateTokenPair(userId: string) {
+    const accessToken = jwt.sign(
+      { sub: userId },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+    const refreshToken = crypto.randomUUID();
+    await this.storeRefreshToken(userId, refreshToken);
+    return { accessToken, refreshToken };
+  }
+}
+</span>
+<span class="term-prompt">agent-01</span> <span class="term-path">~/my-saas-app</span> <span style="color:var(--text-0)">$</span> npm test -- --grep auth
+<span class="term-out">  ✓ should generate valid access token (12ms)
+  ✓ should rotate refresh token on use (8ms)
+  ✓ should reject expired refresh token (5ms)
+
+  3 passing (25ms)</span>
+<span class="term-prompt">agent-01</span> <span class="term-path">~/my-saas-app</span> <span style="color:var(--text-0)">$</span> <span style="animation:blink 1s infinite">▊</span></div>
+        </div>
+      </div>
+
+      <!-- Session History -->
+      <div class="section-hdr" id="sessionHdr">
+        <span class="section-title">Session History</span>
+        <button class="section-action">View All →</button>
+      </div>
+
+      <div class="session-item" id="sessionList">
+        <div class="session-header">
+          <span class="session-agent">agent-04 — completed</span>
+          <span class="session-time">2h ago</span>
+        </div>
+        <div class="session-summary">Set up CI/CD pipeline with GitHub Actions. Configured build, test, and deploy stages for staging environment.</div>
+        <div class="session-stats">
+          <div class="ss-item"><span>28</span> turns</div>
+          <div class="ss-item"><span>12</span> files</div>
+          <div class="ss-item"><span>18m</span> runtime</div>
+        </div>
+      </div>
+
+      <div class="session-item">
+        <div class="session-header">
+          <span class="session-agent">agent-02 — completed</span>
+          <span class="session-time">5h ago</span>
+        </div>
+        <div class="session-summary">Database schema migration from v2 to v3. Added new columns and indices for user preferences.</div>
+        <div class="session-stats">
+          <div class="ss-item"><span>15</span> turns</div>
+          <div class="ss-item"><span>4</span> files</div>
+          <div class="ss-item"><span>6m</span> runtime</div>
+        </div>
+      </div>
+
+      <div class="session-item">
+        <div class="session-header">
+          <span class="session-agent" style="color:var(--warn)">agent-05 — failed</span>
+          <span class="session-time">8h ago</span>
+        </div>
+        <div class="session-summary">Attempted to integrate Stripe webhooks. Failed on signature verification — needs manual review.</div>
+        <div class="session-stats">
+          <div class="ss-item"><span>34</span> turns</div>
+          <div class="ss-item"><span>6</span> files</div>
+          <div class="ss-item"><span>22m</span> runtime</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TERMINAL VIEW ── -->
+    <div class="view" id="view-terminal">
+      <div class="section-hdr">
+        <span class="section-title">Terminals</span>
+        <button class="section-action">+ New</button>
+      </div>
+
+      <div class="terminal-tabs">
+        <div class="term-tab active">bash-1</div>
+        <div class="term-tab">bash-2</div>
+        <div class="term-tab">agent-01</div>
+      </div>
+
+      <div class="terminal" style="min-height:calc(100dvh - 260px)">
+<span class="term-prompt">claude</span><span style="color:var(--text-2)">@</span><span class="term-path">my-saas-app</span> <span style="color:var(--text-0)">$</span> docker ps
+<span class="term-out">CONTAINER ID  IMAGE            STATUS        PORTS
+a1b2c3d4e5f6  node:20-alpine   Up 4 hours    0.0.0.0:3001->3001
+f6e5d4c3b2a1  postgres:16      Up 4 hours    0.0.0.0:5432->5432
+1a2b3c4d5e6f  redis:7          Restarting    0.0.0.0:6379->6379</span>
+
+<span class="term-prompt">claude</span><span style="color:var(--text-2)">@</span><span class="term-path">my-saas-app</span> <span style="color:var(--text-0)">$</span> docker logs redis-cache --tail 5
+<span class="term-err">Error: MISCONF Redis is configured to save RDB snapshots
+# WARNING: disk full, can't save background
+# Redis will now exit with code 1</span>
+
+<span class="term-prompt">claude</span><span style="color:var(--text-2)">@</span><span class="term-path">my-saas-app</span> <span style="color:var(--text-0)">$</span> df -h /data
+<span class="term-out">Filesystem  Size  Used  Avail  Use%  Mounted
+/dev/sda1   50G   48G   2.0G   96%   /data</span>
+
+<span class="term-prompt">claude</span><span style="color:var(--text-2)">@</span><span class="term-path">my-saas-app</span> <span style="color:var(--text-0)">$</span> <span style="animation:blink 1s infinite">▊</span></div>
+    </div>
+
+  </div><!-- /main -->
+
+  <!-- ═══ BOTTOM NAV ═══ -->
+  <div class="bottom-nav">
+    <button class="nav-item active" onclick="switchView('dashboard')">
+      <span class="nav-icon">◉</span>
+      <span class="nav-label">Home</span>
+    </button>
+    <button class="nav-item" onclick="switchView('files')">
+      <span class="nav-icon">📂</span>
+      <span class="nav-label">Files</span>
+    </button>
+    <button class="nav-item" onclick="switchView('git')">
+      <span class="nav-icon">🌿</span>
+      <span class="nav-label">Git</span>
+    </button>
+    <button class="nav-item" onclick="switchView('agents')">
+      <span class="nav-icon" style="position:relative">🤖<span class="badge" style="top:-6px;right:-8px;font-size:8px;width:14px;height:14px">3</span></span>
+      <span class="nav-label">Agents</span>
+    </button>
+    <button class="nav-item" onclick="switchView('terminal')">
+      <span class="nav-icon">⬛</span>
+      <span class="nav-label">Term</span>
+    </button>
+  </div>
+
+</div><!-- /app -->
+
+<!-- ═══ DRAWER ═══ -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="toggleDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="avatar" style="width:40px;height:40px;font-size:14px">MK</div>
+      <div>
+        <div style="font-weight:600;font-size:14px">Marco K.</div>
+        <div style="font-size:11px;color:var(--text-2)">admin · Pro Plan</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="drawer-section">
+    <div class="drawer-section-title">User Management</div>
+    <div class="drawer-item">
+      <span class="di-icon">👥</span> Team Members
+    </div>
+    <div class="drawer-item">
+      <span class="di-icon">🔑</span> Roles & Permissions
+    </div>
+    <div class="drawer-item">
+      <span class="di-icon">📊</span> Usage & Billing
+    </div>
+  </div>
+
+  <div class="drawer-section">
+    <div class="drawer-section-title">Workspaces</div>
+    <div class="workspace-item" style="background:var(--accent-dim);border-radius:var(--radius-sm)">
+      <div class="ws-name">🏢 Production Apps</div>
+      <div class="ws-projects">4 projects · 6 agents</div>
+    </div>
+    <div class="workspace-item">
+      <div class="ws-name">🧪 Sandbox</div>
+      <div class="ws-projects">2 projects · 1 agent</div>
+    </div>
+    <div class="workspace-item">
+      <div class="ws-name">📚 Learning</div>
+      <div class="ws-projects">3 projects</div>
+    </div>
+  </div>
+
+  <div class="drawer-section">
+    <div class="drawer-section-title">Projects</div>
+    <div class="project-tree-item" style="color:var(--accent);font-weight:600">
+      <span class="pt-icon">▼</span> my-saas-app
+    </div>
+    <div class="project-tree-item nested">
+      <span class="pt-icon">▶</span> api-backend
+    </div>
+    <div class="project-tree-item nested">
+      <span class="pt-icon">▶</span> auth-service
+    </div>
+    <div class="project-tree-item nested">
+      <span class="pt-icon">▶</span> landing-page
+    </div>
+    <div class="project-tree-item">
+      <span class="pt-icon">▶</span> internal-tools
+    </div>
+    <div class="project-tree-item">
+      <span class="pt-icon">▶</span> mobile-app
+    </div>
+  </div>
+
+  <div class="drawer-section">
+    <div class="drawer-section-title">Infrastructure</div>
+    <div class="drawer-item">
+      <span class="di-icon">🐳</span> Containers
+    </div>
+    <div class="drawer-item">
+      <span class="di-icon">💾</span> Images
+    </div>
+    <div class="drawer-item">
+      <span class="di-icon">📦</span> Volumes
+    </div>
+    <div class="drawer-item">
+      <span class="di-icon">🌐</span> Networks
+    </div>
+    <div class="drawer-item">
+      <span class="di-icon">🔀</span> Proxy Config
+    </div>
+  </div>
+
+  <div class="drawer-section">
+    <div class="drawer-section-title">Quick Actions</div>
+    <div class="drawer-item">
+      <span class="di-icon">⚙️</span> Settings
+    </div>
+    <div class="drawer-item">
+      <span class="di-icon">📖</span> Documentation
+    </div>
+    <div class="drawer-item" style="color:var(--warn)">
+      <span class="di-icon">🚪</span> Sign Out
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CONTAINER DETAIL SHEET ═══ -->
+<div class="sheet-overlay" id="sheetOverlay" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-content">
+    <div class="sheet-title">🐳 api-backend</div>
+
+    <div class="sheet-actions">
+      <div class="sheet-action-btn">
+        <span class="sa-icon">⬛</span>
+        Bash
+      </div>
+      <div class="sheet-action-btn">
+        <span class="sa-icon">📄</span>
+        Logs
+      </div>
+      <div class="sheet-action-btn">
+        <span class="sa-icon">📊</span>
+        Stats
+      </div>
+      <div class="sheet-action-btn">
+        <span class="sa-icon">🔄</span>
+        Restart
+      </div>
+      <div class="sheet-action-btn">
+        <span class="sa-icon">⏹</span>
+        Stop
+      </div>
+      <div class="sheet-action-btn" style="color:var(--warn)">
+        <span class="sa-icon">🗑</span>
+        Remove
+      </div>
+    </div>
+
+    <div class="section-hdr"><span class="section-title">Details</span></div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text-1);line-height:2">
+      <div><span style="color:var(--text-2)">Image:</span> node:20-alpine</div>
+      <div><span style="color:var(--text-2)">ID:</span> a1b2c3d4e5f6</div>
+      <div><span style="color:var(--text-2)">Status:</span> <span style="color:var(--accent)">Running</span> (4h 23m)</div>
+      <div><span style="color:var(--text-2)">Ports:</span> 3001:3001</div>
+      <div><span style="color:var(--text-2)">Network:</span> atoo-bridge</div>
+      <div><span style="color:var(--text-2)">Memory:</span> 47 MB / 512 MB</div>
+      <div><span style="color:var(--text-2)">CPU:</span> 2.1%</div>
+      <div><span style="color:var(--text-2)">Volumes:</span> app-data:/data</div>
+    </div>
+
+    <div class="section-hdr"><span class="section-title">Recent Logs</span></div>
+    <div class="terminal" style="min-height:120px;font-size:10px">
+<span class="term-out">[14:23:01] Server listening on :3001
+[14:23:02] Connected to postgres at 5432
+[14:23:02] Redis connection pending...
+[14:24:15] GET /api/health 200 2ms
+[14:24:18] POST /api/auth/login 200 45ms
+[14:25:01] GET /api/users 200 12ms</span></div>
+  </div>
+</div>
+
+<style>
+@keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+</style>
+
+<script>
+// ── View switching ──
+function switchView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+
+  // Reset agent sub-views when switching to agents
+  if (name === 'agents') {
+    switchAgentTab('list');
+  }
+}
+
+// ── Drawer ──
+function toggleDrawer() {
+  document.getElementById('drawer').classList.toggle('open');
+  document.getElementById('drawerOverlay').classList.toggle('open');
+  document.getElementById('menuBtn').classList.toggle('active');
+}
+
+// ── Sheet ──
+function showSheet(type) {
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('sheetOverlay').classList.add('open');
+}
+function closeSheet() {
+  document.getElementById('sheet').classList.remove('open');
+  document.getElementById('sheetOverlay').classList.remove('open');
+}
+
+// ── File Editor toggle ──
+function switchToEditor() {
+  document.getElementById('editorArea').style.display = 'block';
+  document.getElementById('editorArea').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── Agent tabs ──
+function switchAgentTab(tab) {
+  const cards = document.querySelectorAll('#view-agents > .card');
+  const chat = document.getElementById('agentChat');
+  const hdr = document.getElementById('sessionHdr');
+  const sessions = document.querySelectorAll('.session-item');
+
+  if (tab === 'chat') {
+    cards.forEach(c => c.style.display = 'none');
+    hdr.style.display = 'none';
+    sessions.forEach(s => s.style.display = 'none');
+    document.querySelector('#view-agents .section-hdr').style.display = 'none';
+    chat.style.display = 'block';
+  } else {
+    cards.forEach(c => c.style.display = 'block');
+    hdr.style.display = 'flex';
+    sessions.forEach(s => s.style.display = 'block');
+    document.querySelector('#view-agents .section-hdr').style.display = 'flex';
+    chat.style.display = 'none';
+  }
+}
+
+// ── Agent mode toggle ──
+function toggleAgentMode(mode) {
+  document.getElementById('chatModeBtn').classList.toggle('active', mode === 'chat');
+  document.getElementById('tuiModeBtn').classList.toggle('active', mode === 'tui');
+  document.getElementById('agentChatView').style.display = mode === 'chat' ? 'flex' : 'none';
+  document.getElementById('agentTuiView').style.display = mode === 'tui' ? 'block' : 'none';
+}
+
+// ── Touch gesture: swipe right to open drawer ──
+let touchStartX = 0;
+document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; });
+document.addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  if (touchStartX < 30 && dx > 80) toggleDrawer();
+  if (dx < -80 && document.getElementById('drawer').classList.contains('open')) toggleDrawer();
+});
+
+// ── Editor mode buttons ──
+document.querySelectorAll('.editor-mode-bar').forEach(bar => {
+  bar.addEventListener('click', e => {
+    if (e.target.classList.contains('mode-btn') && !e.target.id) {
+      bar.querySelectorAll('.mode-btn:not([id])').forEach(b => b.classList.remove('active'));
+      e.target.classList.add('active');
+    }
+  });
+});
+
+// ── Editor tab switching ──
+document.querySelector('.editor-tabs')?.addEventListener('click', e => {
+  if (e.target.classList.contains('ed-tab')) {
+    document.querySelectorAll('.ed-tab').forEach(t => t.classList.remove('active'));
+    e.target.classList.add('active');
+  }
+});
+</script>
+
+</body>
+</html>

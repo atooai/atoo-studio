@@ -14,7 +14,27 @@ import { ContextMenu } from './components/Modals/ContextMenu';
 import { SessionLoadingOverlay } from './components/Modals/SessionLoadingOverlay';
 import { LoginPage } from './components/Auth/LoginPage';
 import { SetupPage } from './components/Auth/SetupPage';
+import { MobileApp } from './components/Mobile';
 import { getMonacoLang, debounce, getServerIp, isRenderable, isImageFile } from './utils';
+
+const MOBILE_BREAKPOINT = 768;
+
+function useIsMobile() {
+  const setIsMobileLayout = useStore(s => s.setIsMobileLayout);
+
+  useEffect(() => {
+    const check = () => {
+      const isMobile = window.innerWidth <= MOBILE_BREAKPOINT ||
+        /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      setIsMobileLayout(isMobile);
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [setIsMobileLayout]);
+
+  return useStore(s => s.isMobileLayout);
+}
 
 export function App() {
   const {
@@ -22,6 +42,7 @@ export function App() {
   } = useStore();
   const sidebarCollapsed = useStore(s => s.sidebarCollapsed);
   const { user, setupRequired, loading: authLoading, checkAuth } = useAuthStore();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     checkAuth();
@@ -60,6 +81,20 @@ export function App() {
     return <LoginPage />;
   }
 
+  // Mobile layout
+  if (isMobile) {
+    const showStart = !activeEnvironmentId;
+    return (
+      <>
+        {showStart ? <StartPage /> : <MobileApp />}
+        <ToastContainer />
+        <ModalContainer />
+        <ContextMenu />
+      </>
+    );
+  }
+
+  // Desktop layout
   const showStart = !activeEnvironmentId;
   const showOverview = activeEnvironmentId && !activeProjectId;
   const showWorkspace = activeEnvironmentId && activeProjectId;
