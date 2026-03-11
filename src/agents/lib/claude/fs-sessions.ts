@@ -249,6 +249,22 @@ class FsSessionScanner {
   }
 
   /**
+   * Find the most recently modified session UUID for a given working directory.
+   * Useful as a fallback when hook-based CLI session discovery fails.
+   */
+  async findMostRecentForCwd(cwd: string): Promise<string | null> {
+    await this.scan();
+    let best: FsSessionMeta | null = null;
+    for (const meta of this.cache.values()) {
+      if (meta.directory !== cwd) continue;
+      if (!best || new Date(meta.lastModified).getTime() > new Date(best.lastModified).getTime()) {
+        best = meta;
+      }
+    }
+    return best?.uuid ?? null;
+  }
+
+  /**
    * Return all JSONL file paths (sessions + subagents) for sessions
    * whose working directory matches any of the given cwds.
    */

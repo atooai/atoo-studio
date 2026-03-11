@@ -67,6 +67,8 @@ export function handleHookCallback(token: string, payload: any): void {
           entry.resolveSessionId = null;
         }
         console.log(`[claude-hooks] SessionStart for ${entry.agentSessionId}: CLI session ${uuid}`);
+      } else {
+        console.warn(`[claude-hooks] SessionStart for ${entry.agentSessionId} but no session_id in payload. Keys: ${Object.keys(payload).join(', ')}`);
       }
       break;
     }
@@ -86,6 +88,10 @@ export function handleHookCallback(token: string, payload: any): void {
 
 export function removeHookToken(token: string): void {
   hookTokens.delete(token);
+}
+
+export function getCliUuidForToken(token: string): string | null {
+  return hookTokens.get(token)?.cliSessionUuid ?? null;
 }
 
 // ═══════════════════════════════════════════════════════

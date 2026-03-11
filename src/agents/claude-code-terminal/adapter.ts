@@ -12,7 +12,7 @@ import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
 import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
-import { generateHookToken, registerHookToken, removeHookToken } from '../lib/claude/hooks.js';
+import { generateHookToken, registerHookToken, removeHookToken, getCliUuidForToken } from '../lib/claude/hooks.js';
 
 /**
  * Terminal-only Claude Code agent.
@@ -136,7 +136,14 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
   }
 
   getCliSessionId(): string | null {
-    return this.cliSessionId;
+    if (this.cliSessionId) return this.cliSessionId;
+    // Fallback: check the hook token registry directly (the .then() may not have fired yet)
+    if (this.hookToken) {
+      const uuid = getCliUuidForToken(this.hookToken);
+      if (uuid) this.cliSessionId = uuid;
+      return uuid;
+    }
+    return null;
   }
 
   getWireMessages(): WireMessage[] {
