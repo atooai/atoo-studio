@@ -304,9 +304,9 @@ function GitHubList<T extends { number: number }>({
   const lastFetchKey = useRef('');
 
   const fetchItems = useCallback(async (filterState: string, filterSearch: string, append = false, limit = 50) => {
-    const key = `${filterState}:${filterSearch}:${limit}`;
-    // Avoid duplicate fetches
-    if (!append && key === lastFetchKey.current && !initialLoad) return;
+    const key = `${projectId}:${filterState}:${filterSearch}:${limit}`;
+    // Avoid duplicate fetches (but not on append)
+    if (!append && key === lastFetchKey.current) return;
 
     setLoading(true);
     try {
@@ -343,12 +343,18 @@ function GitHubList<T extends { number: number }>({
     } finally {
       setLoading(false);
     }
-  }, [projectId, fetchUrl, type, initialLoad]);
+  }, [projectId, fetchUrl, type]);
 
-  // Initial load
+  // Reset and fetch on project change
   useEffect(() => {
-    fetchItems(state, search);
-  }, []);
+    setItems([]);
+    setState('open');
+    setSearch('');
+    setHasMore(false);
+    setInitialLoad(true);
+    lastFetchKey.current = '';
+    fetchItems('open', '');
+  }, [projectId]);
 
   // State filter change: immediate fetch
   useEffect(() => {
@@ -376,7 +382,7 @@ function GitHubList<T extends { number: number }>({
       fetchItems(state, search);
     }, 30000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [state, search, fetchItems]);
+  }, [state, search, projectId, fetchItems]);
 
   // Load more on scroll near bottom (for virtual scroll "infinite load")
   const handleRefresh = useCallback(() => {
