@@ -15,7 +15,7 @@ import { toWireMessages } from '../../events/wire.js';
 import { mapCodexJsonlLine } from '../lib/codex/jsonl-mapper.js';
 import { codexSessionScanner } from '../lib/codex/fs-sessions.js';
 import { forkEventsToResumable } from '../lib/claude/jsonl-writer.js';
-import { getPty, killCliProcess } from '../../spawner.js';
+import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnCodexCliProcess } from './spawner.js';
 import { CodexJsonlWatcher } from './jsonl-watcher.js';
 import { generateNotifyToken, registerNotifyToken, removeNotifyToken } from '../lib/codex/notify.js';
@@ -73,6 +73,9 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
         notifyToken: this.notifyToken,
         isChainContinuation: options.isChainContinuation,
       });
+
+      // Register envId → sessionId mapping for activity tracking
+      registerActivitySession(this.envId, this.sessionId);
 
       // For new sessions: wait for first notify callback to discover thread-id,
       // then start tailing. For resume: thread-id already known, this is a no-op.

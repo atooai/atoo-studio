@@ -12,7 +12,7 @@ import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
 import { toWireMessages } from '../../events/wire.js';
 import { forkEventsToResumable } from '../lib/claude/jsonl-writer.js';
-import { getPty, killCliProcess } from '../../spawner.js';
+import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
 import { JsonlWatcher, type SubagentMetadata } from './jsonl-watcher.js';
 import { fsSessionScanner } from '../lib/claude/fs-sessions.js';
@@ -94,6 +94,9 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
         hookToken: this.hookToken,
         isChainContinuation: options.isChainContinuation,
       });
+
+      // Register envId → sessionId mapping for activity tracking
+      registerActivitySession(this.envId, this.sessionId);
 
       // Race: hook-based discovery vs timeout fallback
       const HOOK_TIMEOUT = 8000;

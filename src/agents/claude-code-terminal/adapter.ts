@@ -10,7 +10,7 @@ import type {
 } from '../types.js';
 import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
-import { getPty, killCliProcess } from '../../spawner.js';
+import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
 import { generateHookToken, registerHookToken, removeHookToken } from '../lib/claude/hooks.js';
 
@@ -56,6 +56,9 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
         hookToken: this.hookToken,
         isChainContinuation: options.isChainContinuation,
       });
+
+      // Register envId → sessionId mapping for activity tracking
+      registerActivitySession(this.envId, this.sessionId);
 
       this.setStatus('idle');
       this.emit('ready');

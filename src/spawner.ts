@@ -67,6 +67,29 @@ interface ActivityState {
 const activityStates = new Map<string, ActivityState>();
 const INACTIVITY_THRESHOLD_MS = 5000;
 
+// Explicit envId → sessionId mapping for agent-registry sessions
+// (store.sessions may use different IDs than the agent registry)
+const envToSessionIds = new Map<string, Set<string>>();
+
+/**
+ * Register an agent session ID for an envId so activity status
+ * changes are broadcast under the correct session ID.
+ */
+export function registerActivitySession(envId: string, sessionId: string): void {
+  if (!envToSessionIds.has(envId)) {
+    envToSessionIds.set(envId, new Set());
+  }
+  envToSessionIds.get(envId)!.add(sessionId);
+}
+
+export function unregisterActivitySession(envId: string, sessionId: string): void {
+  const set = envToSessionIds.get(envId);
+  if (set) {
+    set.delete(sessionId);
+    if (set.size === 0) envToSessionIds.delete(envId);
+  }
+}
+
 function deriveActivityStatus(state: ActivityState): ActivityStatus {
   if (state.lastDataTimestamp === null) return 'open';
   const elapsed = Date.now() - state.lastDataTimestamp;
@@ -75,8 +98,20 @@ function deriveActivityStatus(state: ActivityState): ActivityStatus {
 }
 
 function broadcastActivityStatus(envId: string, status: ActivityStatus): void {
+  const broadcasted = new Set<string>();
+
+  // First: explicit registrations (agent-registry sessions)
+  const registered = envToSessionIds.get(envId);
+  if (registered) {
+    for (const sessionId of registered) {
+      store.setAgentStatus(sessionId, status);
+      broadcasted.add(sessionId);
+    }
+  }
+
+  // Fallback: store.sessions (ingress-based sessions)
   for (const [sessionId, session] of store.sessions.entries()) {
-    if (session.environmentId === envId) {
+    if (session.environmentId === envId && !broadcasted.has(sessionId)) {
       store.setAgentStatus(sessionId, status);
     }
   }
@@ -110,6 +145,7 @@ export function markActivityViewed(envId: string): void {
 
 function removeActivityState(envId: string): void {
   activityStates.delete(envId);
+  envToSessionIds.delete(envId);
 }
 
 // Global interval to detect inactivity transitions (active → attention)
@@ -266,6 +302,7 @@ export function killAllCliProcesses(): void {
   spawnedProcesses.clear();
   spawnerScrollback.clear();
   activityStates.clear();
+  envToSessionIds.clear();
 }
 
 export function getPty(envId: string): ITerminal | undefined {
@@ -281,15 +318,18 @@ export function reassignEnvId(oldEnvId: string, newEnvId: string): void {
   if (!proc) return;
   const scrollback = spawnerScrollback.get(oldEnvId) || '';
   const activity = activityStates.get(oldEnvId);
+  const sessionIds = envToSessionIds.get(oldEnvId);
 
   spawnedProcesses.delete(oldEnvId);
   spawnerScrollback.delete(oldEnvId);
   activityStates.delete(oldEnvId);
+  envToSessionIds.delete(oldEnvId);
 
   proc.envId = newEnvId;
   spawnedProcesses.set(newEnvId, proc);
   spawnerScrollback.set(newEnvId, scrollback);
   if (activity) activityStates.set(newEnvId, activity);
+  if (sessionIds) envToSessionIds.set(newEnvId, sessionIds);
 }
 
 export function getEnvIdForSession(sessionId: string): string | undefined {
