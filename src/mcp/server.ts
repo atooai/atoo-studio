@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const WEB_PORT = process.env.CCPROXY_WEB_PORT || '3001';
+const WEB_PORT = process.env.CCPROXY_WEB_PORT || '3010';
 const WEB_PROTO = process.env.CCPROXY_WEB_PROTO || 'https';
 
 const PROTOCOLS = [

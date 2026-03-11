@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useStore } from './state/store';
+import { useAuthStore } from './state/auth-store';
 import { api } from './api';
 import { connectStatusWs, connectSettingsWs, connectAgentWs, sendAgentCommand, setPendingAgentCreation } from './api/websocket';
 import { Sidebar } from './components/Sidebar/Sidebar';
@@ -11,14 +12,23 @@ import { ToastContainer } from './components/Layout/Toast';
 import { ModalContainer } from './components/Modals/ModalContainer';
 import { ContextMenu } from './components/Modals/ContextMenu';
 import { SessionLoadingOverlay } from './components/Modals/SessionLoadingOverlay';
+import { LoginPage } from './components/Auth/LoginPage';
+import { SetupPage } from './components/Auth/SetupPage';
 import { getMonacoLang, debounce, getServerIp, isRenderable, isImageFile } from './utils';
 
 export function App() {
   const {
     activeProjectId, activeEnvironmentId, projects,
   } = useStore();
+  const sidebarCollapsed = useStore(s => s.sidebarCollapsed);
+  const { user, setupRequired, loading: authLoading, checkAuth } = useAuthStore();
 
   useEffect(() => {
+    checkAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
     registerGlobalFunctions();
     init();
 
@@ -37,11 +47,21 @@ export function App() {
       window.removeEventListener('beforeunload', flushProjectSettings);
       clearInterval(autoSaveInterval);
     };
-  }, []);
+  }, [user]);
+
+  // Auth gate
+  if (authLoading) {
+    return <div className="auth-loading">Loading...</div>;
+  }
+  if (setupRequired) {
+    return <SetupPage />;
+  }
+  if (!user) {
+    return <LoginPage />;
+  }
 
   const showStart = !activeEnvironmentId;
   const showOverview = activeEnvironmentId && !activeProjectId;
-  const sidebarCollapsed = useStore(s => s.sidebarCollapsed);
   const showWorkspace = activeEnvironmentId && activeProjectId;
 
   return (

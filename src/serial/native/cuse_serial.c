@@ -41,7 +41,18 @@
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <stddef.h>
-#include <termios.h>
+#include <asm/termbits.h>
+
+/*
+ * IMPORTANT: We use <asm/termbits.h> instead of <termios.h> because
+ * CUSE ioctl operates at the kernel ABI level. The kernel's struct termios
+ * is 36 bytes, while glibc's is 60 bytes (adds c_cc[32] vs c_cc[19], plus
+ * c_ispeed/c_ospeed). Using glibc's struct would cause the CUSE handler to
+ * write 60 bytes into a 36-byte buffer, corrupting the caller's stack.
+ *
+ * We also avoid the cfmakeraw/cfsetispeed helpers from glibc since those
+ * operate on glibc's struct termios. We initialize manually instead.
+ */
 
 /* Internal pipe: stdin reader thread writes data here, CUSE read callback reads from here */
 static int data_pipe[2] = {-1, -1};
@@ -50,7 +61,7 @@ static int data_pipe[2] = {-1, -1};
 static int modem_bits = 0;
 static pthread_mutex_t modem_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* Emulated termios (tools may get/set this) */
+/* Emulated termios — kernel struct (36 bytes on x86_64) */
 static struct termios current_termios;
 
 /* FUSE session reference for poll notifications */
@@ -311,6 +322,10 @@ static void serial_ioctl(fuse_req_t req, int cmd, void *arg,
     case TIOCNXCL:
     case TIOCSBRK:
     case TIOCCBRK:
+    case TCFLSH:
+    case TCXONC:
+    case TCSBRK:
+    case TCSBRKP:
         fuse_reply_ioctl(req, 0, NULL, 0);
         break;
 
@@ -419,11 +434,14 @@ int main(int argc, char **argv) {
     /* Build device path for ready message */
     snprintf(g_dev_path, sizeof(g_dev_path), "/dev/%s", param.dev_name);
 
-    /* Initialize emulated termios to raw mode, 115200 baud */
+    /* Initialize emulated termios to raw mode, 115200 baud.
+     * Using kernel struct termios — no glibc cfmakeraw/cfsetispeed helpers. */
     memset(&current_termios, 0, sizeof(current_termios));
-    cfmakeraw(&current_termios);
-    cfsetispeed(&current_termios, B115200);
-    cfsetospeed(&current_termios, B115200);
+    /* Raw mode: disable all input/output/local processing */
+    current_termios.c_iflag = 0;
+    current_termios.c_oflag = 0;
+    current_termios.c_lflag = 0;
+    current_termios.c_cflag = B115200 | CS8 | CREAD | CLOCAL;
 
     /* Create internal data pipe (non-blocking read end) */
     if (pipe(data_pipe) < 0) {

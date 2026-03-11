@@ -118,7 +118,7 @@ export function setupHooks(): void {
 payload=$(cat)
 printf '{"token":"%s","payload":%s}' "$CCPROXY_HOOK_TOKEN" "$payload" | \\
   curl -s --max-time 5 -k -X POST "https://localhost:\${CCPROXY_WEB_PORT:-${WEB_PORT}}/api/hooks/callback" \\
-    -H 'Content-Type: application/json' -d @-
+    -H 'Content-Type: application/json' -d @- || true
 `;
 
   try {

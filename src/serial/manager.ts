@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { createPtyPair, PtyPair } from './pty-pair.js';
+import { createPtyPair, isPtyAvailable, PtyPair } from './pty-pair.js';
 import { createCuseDevice, isCuseAvailable, CuseDevice } from './cuse-device.js';
 import { store } from '../state/store.js';
 
@@ -21,7 +21,7 @@ export interface SerialRequest {
   controlSignalsSupported: boolean;
   status: 'pending' | 'connected' | 'closed';
   browserWs: WebSocket | null;
-  resolveReady: ((result: { devicePath: string; controlSignalsSupported: boolean }) => void) | null;
+  resolveReady: ((result: { devicePath: string; controlSignalsSupported: boolean; usbVendorId: number | null; usbProductId: number | null }) => void) | null;
   rejectReady: ((err: Error) => void) | null;
   modemPollInterval: NodeJS.Timeout | null;
   readPollInterval: NodeJS.Timeout | null;
@@ -31,6 +31,7 @@ export interface SerialRequest {
 class SerialManager {
   private requests = new Map<string, SerialRequest>();
   private cuseAvailable: boolean | null = null;
+  private ptyAvailable: boolean | null = null;
 
   private checkCuseAvailable(): boolean {
     if (this.cuseAvailable === null) {
@@ -42,6 +43,20 @@ class SerialManager {
       }
     }
     return this.cuseAvailable;
+  }
+
+  private checkPtyAvailable(): boolean {
+    if (this.ptyAvailable === null) {
+      this.ptyAvailable = isPtyAvailable();
+      if (!this.ptyAvailable) {
+        console.log('[serial] PTY native module not available — serial passthrough disabled');
+      }
+    }
+    return this.ptyAvailable;
+  }
+
+  isAvailable(): boolean {
+    return this.checkCuseAvailable() || this.checkPtyAvailable();
   }
 
   async createRequest(requestId: string, params: SerialRequestParams): Promise<{ devicePath: string; controlSignalsSupported: boolean; readyPromise: Promise<{ devicePath: string; controlSignalsSupported: boolean }> }> {
@@ -59,18 +74,23 @@ class SerialManager {
       } catch (err: any) {
         console.log(`[serial] CUSE failed (${err.message}), falling back to PTY`);
         this.cuseAvailable = false;
+        if (!this.checkPtyAvailable()) {
+          throw new Error('Serial passthrough not available: native PTY module not built. Run npm run build:serial on Linux.');
+        }
         const pty = createPtyPair();
         device = pty;
         devicePath = pty.slavePath;
         controlSignalsSupported = false;
         console.log(`[serial] Created PTY pair: master=${pty.masterFd}, slave=${pty.slavePath}`);
       }
-    } else {
+    } else if (this.checkPtyAvailable()) {
       const pty = createPtyPair();
       device = pty;
       devicePath = pty.slavePath;
       controlSignalsSupported = false;
       console.log(`[serial] Created PTY pair: master=${pty.masterFd}, slave=${pty.slavePath}`);
+    } else {
+      throw new Error('Serial passthrough not available on this platform. Requires Linux with pty_pair native module built.');
     }
 
     let resolveReady: SerialRequest['resolveReady'] = null;
@@ -123,18 +143,28 @@ class SerialManager {
       }
     }, 5);
 
-    // Start modem bit polling (every 50ms)
-    req.modemPollInterval = setInterval(() => {
-      if (req.device.closed || ws.readyState !== WebSocket.OPEN) return;
-      const bits = req.device.getModemBits();
-      if (bits.dtr !== req.lastModemBits.dtr || bits.rts !== req.lastModemBits.rts) {
+    // Forward modem signal changes to browser
+    if ('onModemBitsChanged' in req.device) {
+      // CUSE device: event-driven, immediate forwarding for precise reset timing
+      (req.device as CuseDevice).onModemBitsChanged = (bits) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
         req.lastModemBits = { ...bits };
         ws.send(JSON.stringify({ type: 'set_signals', signals: { dtr: bits.dtr, rts: bits.rts } }));
-      }
-    }, 50);
+      };
+    } else {
+      // PTY fallback: poll modem bits (no callback support)
+      req.modemPollInterval = setInterval(() => {
+        if (req.device.closed || ws.readyState !== WebSocket.OPEN) return;
+        const bits = req.device.getModemBits();
+        if (bits.dtr !== req.lastModemBits.dtr || bits.rts !== req.lastModemBits.rts) {
+          req.lastModemBits = { ...bits };
+          ws.send(JSON.stringify({ type: 'set_signals', signals: { dtr: bits.dtr, rts: bits.rts } }));
+        }
+      }, 50);
+    }
 
     // Resolve the ready promise
-    req.resolveReady?.({ devicePath: req.devicePath, controlSignalsSupported: req.controlSignalsSupported });
+    req.resolveReady?.({ devicePath: req.devicePath, controlSignalsSupported: req.controlSignalsSupported, usbVendorId: null, usbProductId: null });
     req.resolveReady = null;
     req.rejectReady = null;
 

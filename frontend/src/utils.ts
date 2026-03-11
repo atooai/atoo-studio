@@ -10,24 +10,88 @@ export function getFileIcon(name: string): string {
   const icons: Record<string, string> = {
     ts: '⊤', tsx: '⊤', js: '◇', jsx: '◇', py: '⊕', rs: '⊗', go: '◈',
     json: '{}', yaml: '≡', yml: '≡', toml: '≡', md: '◉', txt: '◉',
-    html: '◇', css: '◇', scss: '◇', astro: '✦', vue: '▽', svelte: '◈',
+    html: '◇', css: '◇', scss: '◇', astro: '✦', vue: '▽', svelte: '◈', cshtml: '◇', razor: '◇', cs: '⊤',
     svg: '▣', png: '▣', jpg: '▣', gif: '▣', webp: '▣',
     lock: '⊟', gitignore: '⊘',
   };
   return icons[ext] || '◇';
 }
 
+const monacoLangMap: Record<string, string> = {
+  // TypeScript
+  ts: 'typescript', tsx: 'typescript', cts: 'typescript', mts: 'typescript',
+  // JavaScript
+  js: 'javascript', es6: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+  // Web
+  html: 'html', htm: 'html', shtml: 'html', xhtml: 'html', jsp: 'html', asp: 'html', aspx: 'html', jshtm: 'html', mdoc: 'html', astro: 'html',
+  css: 'css', less: 'less', scss: 'scss',
+  xml: 'xml', xsd: 'xml', dtd: 'xml', ascx: 'xml', csproj: 'xml', config: 'xml', props: 'xml', targets: 'xml',
+  wxi: 'xml', wxl: 'xml', wxs: 'xml', xaml: 'xml', xslt: 'xml', xsl: 'xml', opf: 'xml',
+  // Templating
+  pug: 'pug', jade: 'pug', handlebars: 'handlebars', hbs: 'handlebars', twig: 'twig',
+  liquid: 'liquid', ftl: 'freemarker2', ftlh: 'freemarker2', ftlx: 'freemarker2',
+  // Data
+  json: 'json', yaml: 'yaml', yml: 'yaml', ini: 'ini', properties: 'ini', gitconfig: 'ini', toml: 'ini',
+  // Markdown
+  md: 'markdown', markdown: 'markdown', mdown: 'markdown', mkdn: 'markdown', mkd: 'markdown',
+  mdwn: 'markdown', mdtxt: 'markdown', mdtext: 'markdown', mdx: 'mdx',
+  // .NET
+  cs: 'csharp', csx: 'csharp', cake: 'csharp', cshtml: 'razor',
+  fs: 'fsharp', fsi: 'fsharp', fsx: 'fsharp', fsscript: 'fsharp',
+  vb: 'vb',
+  // JVM
+  java: 'java', jav: 'java', kt: 'kotlin', kts: 'kotlin', scala: 'scala', sc: 'scala', sbt: 'scala',
+  clj: 'clojure', cljs: 'clojure', cljc: 'clojure', edn: 'clojure',
+  // Systems
+  c: 'c', h: 'c',
+  cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp', hh: 'cpp', hxx: 'cpp',
+  rs: 'rust', rlib: 'rust',
+  go: 'go',
+  swift: 'swift',
+  m: 'objective-c',
+  // Scripting
+  py: 'python', rpy: 'python', pyw: 'python', cpy: 'python', gyp: 'python', gypi: 'python',
+  rb: 'ruby', rbx: 'ruby', rjs: 'ruby', gemspec: 'ruby',
+  php: 'php', php4: 'php', php5: 'php', phtml: 'php', ctp: 'php',
+  pl: 'perl', pm: 'perl',
+  lua: 'lua',
+  r: 'r', rmd: 'r',
+  jl: 'julia',
+  tcl: 'tcl',
+  coffee: 'coffeescript',
+  ex: 'elixir', exs: 'elixir',
+  dart: 'dart',
+  // Shell / CLI
+  sh: 'shell', bash: 'shell',
+  ps1: 'powershell', psm1: 'powershell', psd1: 'powershell',
+  bat: 'bat', cmd: 'bat',
+  dockerfile: 'dockerfile',
+  // Infrastructure / Config
+  tf: 'hcl', tfvars: 'hcl', hcl: 'hcl',
+  proto: 'protobuf',
+  graphql: 'graphql', gql: 'graphql',
+  bicep: 'bicep',
+  // Database
+  sql: 'sql',
+  // HDL
+  sv: 'systemverilog', svh: 'systemverilog', v: 'systemverilog', vh: 'systemverilog',
+  // Other
+  sol: 'solidity',
+  rst: 'restructuredtext',
+  scm: 'scheme', ss: 'scheme', sch: 'scheme', rkt: 'scheme',
+  pas: 'pascal', p: 'pascal',
+  wgsl: 'wgsl',
+  abap: 'abap',
+  cls: 'apex',
+  s: 'mips',
+  tsp: 'typespec',
+};
+
 export function getMonacoLang(path: string): string {
-  if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'typescript';
-  if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript';
-  if (path.endsWith('.py')) return 'python';
-  if (path.endsWith('.rs')) return 'rust';
-  if (path.endsWith('.json')) return 'json';
-  if (path.endsWith('.yaml') || path.endsWith('.yml')) return 'yaml';
-  if (path.endsWith('.md')) return 'markdown';
-  if (path.endsWith('.html') || path.endsWith('.astro')) return 'html';
-  if (path.endsWith('.css')) return 'css';
-  return 'plaintext';
+  const filename = path.split('/').pop() || '';
+  if (/^Dockerfile/i.test(filename)) return 'dockerfile';
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  return monacoLangMap[ext] || 'plaintext';
 }
 
 export function isRenderable(path: string): boolean {

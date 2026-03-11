@@ -1,7 +1,8 @@
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import os from 'os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -11,6 +12,7 @@ export interface CuseDevice {
   read(): Buffer | null;
   getModemBits(): { dtr: boolean; rts: boolean };
   setModemBits(dtr: boolean, rts: boolean): void;
+  onModemBitsChanged: ((bits: { dtr: boolean; rts: boolean }) => void) | null;
   close(): void;
   closed: boolean;
   controlSignalsSupported: true;
@@ -33,6 +35,14 @@ export function isCuseAvailable(): boolean {
   // Check if /dev/cuse exists (kernel module loaded)
   if (!fs.existsSync('/dev/cuse')) return false;
 
+  // Check if /dev/cuse is actually accessible by the current user
+  try {
+    fs.accessSync('/dev/cuse', fs.constants.R_OK | fs.constants.W_OK);
+  } catch {
+    console.log('[serial] /dev/cuse exists but is not accessible (check permissions: chmod 0666 /dev/cuse)');
+    return false;
+  }
+
   // Unprivileged LXC containers can open /dev/cuse but can't create device nodes
   try {
     const uidMap = fs.readFileSync('/proc/self/uid_map', 'utf8').trim();
@@ -42,25 +52,40 @@ export function isCuseAvailable(): boolean {
     if (match && parseInt(match[1], 10) > 0) return false;
   } catch {}
 
-  // Check if the binary exists
+  // Check if the binary exists and has the required capability or suid bit
   const bin = findCuseBinarySync();
-  return bin !== null;
+  if (!bin) return false;
+
+  try {
+    const stat = fs.statSync(bin);
+    const hasSuid = (stat.mode & 0o4000) !== 0;
+    if (!hasSuid) {
+      // No suid — check for CAP_SYS_ADMIN via getcap
+      const caps = execFileSync('getcap', [bin], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      if (!caps.includes('cap_sys_admin')) {
+        console.log(`[serial] cuse_serial binary lacks CAP_SYS_ADMIN and suid bit. Run: sudo setcap cap_sys_admin+ep ${bin}`);
+        return false;
+      }
+    }
+  } catch {}
+
+  return true;
 }
 
 function findCuseBinarySync(): string | null {
-  // build/Release/ is inside node-gyp's output dir and survives rebuilds
+  // Preferred: installed by setup-cuse.sh to ~/.ccproxy/bin/ (survives node-gyp rebuilds)
+  const installedPath = path.join(os.homedir(), '.ccproxy', 'bin', 'cuse_serial');
+  if (fs.existsSync(installedPath)) return installedPath;
+
+  // Check /usr/local/bin
+  if (fs.existsSync('/usr/local/bin/cuse-serial')) return '/usr/local/bin/cuse-serial';
+
+  // Fallback: node-gyp build dir (may lack capabilities after rebuild)
   const localPath = path.join(__dirname, 'native', 'build', 'Release', 'cuse_serial');
   if (fs.existsSync(localPath)) return localPath;
 
   const distPath = path.join(__dirname, '..', '..', '..', 'src', 'serial', 'native', 'build', 'Release', 'cuse_serial');
   if (fs.existsSync(distPath)) return distPath;
-
-  // Fallback: old location (setup-cuse.sh might put it in build/)
-  const legacyPath = path.join(__dirname, 'native', 'build', 'cuse_serial');
-  if (fs.existsSync(legacyPath)) return legacyPath;
-
-  // Check /usr/local/bin
-  if (fs.existsSync('/usr/local/bin/cuse-serial')) return '/usr/local/bin/cuse-serial';
 
   return null;
 }
@@ -102,6 +127,8 @@ export function createCuseDevice(): Promise<CuseDevice> {
               dtr: (payload[0] & 0x01) !== 0,
               rts: (payload[0] & 0x02) !== 0,
             };
+            // Fire callback immediately for low-latency signal forwarding
+            device.onModemBitsChanged?.({ ...lastModemBits });
           }
           break;
         case 0x02: // Device ready
@@ -225,6 +252,8 @@ export function createCuseDevice(): Promise<CuseDevice> {
       getModemBits(): { dtr: boolean; rts: boolean } {
         return { ...lastModemBits };
       },
+
+      onModemBitsChanged: null,
 
       setModemBits(_dtr: boolean, _rts: boolean): void {
         // Not needed for CUSE — modem bits are set by the tool's ioctls,

@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useCallback, useImperativeHandle, forwardRef, useState } from 'react';
 import { buildPreviewWsUrl } from '../../utils';
+import { ArealOverlay, ArealRect } from './ArealOverlay';
 
 export interface CanvasViewerProps {
   tabId: string;
@@ -16,10 +17,26 @@ export interface CanvasViewerProps {
   zoom: number;
   responsive: boolean;
   active: boolean;
+  arealMode?: boolean;
+  arealRect?: ArealRect | null;
+  onArealRectChange?: (rect: ArealRect | null) => void;
   onUrlChange?: (url: string) => void;
   onScreenshot?: (data: string) => void;
   onScrollshot?: (data: string) => void;
   onRecording?: (data: string) => void;
+  onDialogOpened?: (dialog: { dialogId: string; dialogType: string; message: string; defaultPrompt?: string; url: string }) => void;
+  onDialogClosed?: (dialogId: string) => void;
+  onFileChooserOpened?: (info: { mode: string; frameId: string; backendNodeId: number }) => void;
+  onDownloadStarted?: (info: { guid: string; suggestedFilename: string; url: string }) => void;
+  onDownloadComplete?: (guid: string) => void;
+  onNewTab?: (info: { url: string; targetId: string }) => void;
+  // Shadow overlay callbacks
+  onSelectOpened?: (info: { rect: { x: number; y: number; width: number; height: number }; options: { value: string; text: string; selected: boolean; disabled: boolean; group: string | null }[]; selectedIndex: number; multiple: boolean; selectorPath: string }) => void;
+  onPickerOpened?: (info: { type: string; value: string; min: string | null; max: string | null; step: string | null; rect: { x: number; y: number; width: number; height: number }; selectorPath: string }) => void;
+  onTooltipShow?: (info: { text: string; rect: { x: number; y: number; width: number; height: number } }) => void;
+  onTooltipHide?: () => void;
+  onAuthRequired?: (info: { requestId: string; url: string; realm: string; scheme: string }) => void;
+  onContextMenu?: (info: { x: number; y: number; selectedText: string; linkHref: string | null; linkText: string | null; imgSrc: string | null }) => void;
 }
 
 export interface CanvasViewerHandle {
@@ -30,6 +47,15 @@ export interface CanvasViewerHandle {
   sendNavigate: (url: string) => void;
   sendViewport: (w: number, h: number, dpr?: number, isMobile?: boolean, hasTouch?: boolean) => void;
   sendQuality: (q: number) => void;
+  sendReload: () => void;
+  sendDialogResponse: (dialogId: string, accept: boolean, promptText?: string) => void;
+  sendSelectResponse: (selectorPath: string, value: string) => void;
+  sendPickerResponse: (selectorPath: string, value: string, inputType: string) => void;
+  sendAuthResponse: (requestId: string, username: string, password: string) => void;
+  sendAuthCancel: (requestId: string) => void;
+  sendContextMenuAction: (action: string, params?: any) => void;
+  cropScreenshot: (x: number, y: number, w: number, h: number) => string | null;
+  getCanvas: () => HTMLCanvasElement | null;
 }
 
 // Map browser button index to CDP button string
@@ -64,7 +90,12 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
   const {
     tabId, projectId, targetPort, headerHost, protocol,
     width, height, dpr, isMobile, hasTouch, quality, zoom, responsive,
-    active, onUrlChange, onScreenshot, onScrollshot, onRecording,
+    active, arealMode, arealRect, onArealRectChange,
+    onUrlChange, onScreenshot, onScrollshot, onRecording,
+    onDialogOpened, onDialogClosed, onFileChooserOpened,
+    onDownloadStarted, onDownloadComplete, onNewTab,
+    onSelectOpened, onPickerOpened, onTooltipShow, onTooltipHide,
+    onAuthRequired, onContextMenu: onContextMenuEvent,
   } = props;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -91,6 +122,33 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
     sendViewport: (w: number, h: number, d?: number, m?: boolean, t?: boolean) =>
       send({ type: 'viewport', width: w, height: h, dpr: d, isMobile: m, hasTouch: t }),
     sendQuality: (q: number) => send({ type: 'quality', quality: q }),
+    sendReload: () => send({ type: 'reload' }),
+    sendDialogResponse: (dialogId: string, accept: boolean, promptText?: string) =>
+      send({ type: 'dialog_response', dialogId, accept, promptText }),
+    sendSelectResponse: (selectorPath: string, value: string) =>
+      send({ type: 'select_response', selectorPath, value }),
+    sendPickerResponse: (selectorPath: string, value: string, inputType: string) =>
+      send({ type: 'picker_response', selectorPath, value, inputType }),
+    sendAuthResponse: (requestId: string, username: string, password: string) =>
+      send({ type: 'auth_response', requestId, username, password }),
+    sendAuthCancel: (requestId: string) =>
+      send({ type: 'auth_cancel', requestId }),
+    sendContextMenuAction: (action: string, params?: any) =>
+      send({ type: 'context_menu_action', action, ...params }),
+    getCanvas: () => canvasRef.current,
+    cropScreenshot: (x: number, y: number, w: number, h: number): string | null => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const offscreen = document.createElement('canvas');
+      offscreen.width = w;
+      offscreen.height = h;
+      const ctx = offscreen.getContext('2d');
+      if (!ctx) return null;
+      ctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+      // Return base64 PNG (without the data:image/png;base64, prefix)
+      const dataUrl = offscreen.toDataURL('image/png');
+      return dataUrl.replace(/^data:image\/png;base64,/, '');
+    },
   }), [send]);
 
   // WebSocket connection
@@ -119,23 +177,35 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       imgRef.current = new Image();
     }
     const img = imgRef.current;
+    let decoding = false;
+    let pendingBlobUrl: string | null = null;
 
-    img.onload = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      // Resize canvas to match frame
-      if (canvas.width !== img.width || canvas.height !== img.height) {
-        canvas.width = img.width;
-        canvas.height = img.height;
-      }
-      const ctx = canvas.getContext('2d');
-      if (ctx) ctx.drawImage(img, 0, 0);
-    };
+    function drawNext() {
+      if (!pendingBlobUrl) { decoding = false; return; }
+      const url = pendingBlobUrl;
+      pendingBlobUrl = null;
+      decoding = true;
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const canvas = canvasRef.current;
+        if (canvas) {
+          if (canvas.width !== img.width || canvas.height !== img.height) {
+            canvas.width = img.width;
+            canvas.height = img.height;
+          }
+          const ctx = canvas.getContext('2d');
+          if (ctx) ctx.drawImage(img, 0, 0);
+        }
+        if (pendingBlobUrl) requestAnimationFrame(drawNext);
+        else decoding = false;
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); decoding = false; };
+      img.src = url;
+    }
 
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
-      // Send current viewport once connected — ensures Puppeteer matches actual canvas size
       const el = wrapperRef.current;
       if (responsive) {
         ws.send(JSON.stringify({ type: 'viewport', width, height, dpr, isMobile, hasTouch }));
@@ -151,24 +221,13 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
 
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) {
-        // Binary message: first byte = type
         const view = new Uint8Array(e.data);
-        if (view[0] === 0x01) {
-          // Frame: rest is JPEG data
-          const blob = new Blob([view.subarray(1)], { type: 'image/jpeg' });
-          const url = URL.createObjectURL(blob);
-          img.onload = () => {
-            URL.revokeObjectURL(url);
-            const canvas = canvasRef.current;
-            if (!canvas) return;
-            if (canvas.width !== img.width || canvas.height !== img.height) {
-              canvas.width = img.width;
-              canvas.height = img.height;
-            }
-            const ctx = canvas.getContext('2d');
-            if (ctx) ctx.drawImage(img, 0, 0);
-          };
-          img.src = url;
+        if (view[0] === 0x01 || view[0] === 0x02) {
+          if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl);
+          const mime = view[0] === 0x02 ? 'image/png' : 'image/jpeg';
+          const blob = new Blob([view.subarray(1)], { type: mime });
+          pendingBlobUrl = URL.createObjectURL(blob);
+          if (!decoding) requestAnimationFrame(drawNext);
         }
       } else {
         // JSON message
@@ -178,6 +237,22 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
           else if (msg.type === 'scrollshot' && onScrollshot) onScrollshot(msg.data);
           else if (msg.type === 'recording' && onRecording) onRecording(msg.data);
           else if (msg.type === 'url_changed' && onUrlChange) onUrlChange(msg.url);
+          else if (msg.type === 'dialog_opened' && onDialogOpened) onDialogOpened(msg);
+          else if (msg.type === 'dialog_closed' && onDialogClosed) onDialogClosed(msg.dialogId);
+          else if (msg.type === 'file_chooser_opened' && onFileChooserOpened) onFileChooserOpened(msg);
+          else if (msg.type === 'download_started' && onDownloadStarted) onDownloadStarted(msg);
+          else if (msg.type === 'download_complete' && onDownloadComplete) onDownloadComplete(msg.guid);
+          else if (msg.type === 'new_tab' && onNewTab) onNewTab(msg);
+          // Shadow overlay messages
+          else if (msg.type === 'select_opened' && onSelectOpened) onSelectOpened(msg);
+          else if (msg.type === 'picker_opened' && onPickerOpened) onPickerOpened(msg);
+          else if (msg.type === 'tooltip_show' && onTooltipShow) onTooltipShow(msg);
+          else if (msg.type === 'tooltip_hide' && onTooltipHide) onTooltipHide();
+          else if (msg.type === 'auth_required' && onAuthRequired) onAuthRequired(msg);
+          else if (msg.type === 'context_menu' && onContextMenuEvent) onContextMenuEvent(msg);
+          else if (msg.type === 'clipboard' && msg.text) {
+            navigator.clipboard.writeText(msg.text).catch(() => {});
+          }
         } catch {}
       }
     };
@@ -189,6 +264,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
     return () => {
       ws.close();
       wsRef.current = null;
+      if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl);
     };
     // Only reconnect on identity/connection changes, not viewport changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -267,6 +343,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
 
   // Mouse handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (arealMode) return;
     e.preventDefault();
     // Focus hidden input for keyboard capture
     hiddenInputRef.current?.focus();
@@ -278,9 +355,10 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       clickCount: e.detail || 1,
       modifiers: cdpModifiers(e),
     });
-  }, [scaleCoords, send]);
+  }, [arealMode, scaleCoords, send]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    if (arealMode) return;
     e.preventDefault();
     const { x, y } = scaleCoords(e.clientX, e.clientY);
     send({
@@ -290,9 +368,10 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       clickCount: e.detail || 1,
       modifiers: cdpModifiers(e),
     });
-  }, [scaleCoords, send]);
+  }, [arealMode, scaleCoords, send]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (arealMode) return;
     const { x, y } = scaleCoords(e.clientX, e.clientY);
     send({
       type: 'mouse', event: 'mouseMoved',
@@ -300,9 +379,10 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       button: 'none',
       modifiers: cdpModifiers(e),
     });
-  }, [scaleCoords, send]);
+  }, [arealMode, scaleCoords, send]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (arealMode) return;
     e.preventDefault();
     const { x, y } = scaleCoords(e.clientX, e.clientY);
     send({
@@ -311,7 +391,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       deltaX: e.deltaX,
       deltaY: e.deltaY,
     });
-  }, [scaleCoords, send]);
+  }, [arealMode, scaleCoords, send]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -319,6 +399,9 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
 
   // Keyboard handlers
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Let Ctrl+V / Cmd+V through to trigger native paste → handlePaste
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') return;
+
     if (e.key.length > 1 || e.ctrlKey || e.altKey || e.metaKey || CONTROL_KEYS.has(e.key)) {
       e.preventDefault();
       send({
@@ -342,19 +425,6 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
     }
   }, [send]);
 
-  const handleKeyUp = useCallback((e: React.KeyboardEvent) => {
-    if (e.key.length > 1 || e.ctrlKey || e.altKey || e.metaKey || CONTROL_KEYS.has(e.key)) {
-      e.preventDefault();
-      send({
-        type: 'key', event: 'keyUp',
-        key: e.key,
-        code: e.code,
-        modifiers: cdpModifiers(e),
-        windowsVirtualKeyCode: e.keyCode,
-      });
-    }
-  }, [send]);
-
   // Hidden input for text input (handles printable characters, IME, paste)
   const handleInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -370,6 +440,19 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
     const text = e.clipboardData.getData('text');
     if (text) {
       send({ type: 'text', text });
+    }
+  }, [send]);
+
+  const handleKeyUp = useCallback((e: React.KeyboardEvent) => {
+    if (e.key.length > 1 || e.ctrlKey || e.altKey || e.metaKey || CONTROL_KEYS.has(e.key)) {
+      e.preventDefault();
+      send({
+        type: 'key', event: 'keyUp',
+        key: e.key,
+        code: e.code,
+        modifiers: cdpModifiers(e),
+        windowsVirtualKeyCode: e.keyCode,
+      });
     }
   }, [send]);
 
@@ -401,6 +484,13 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
         onWheel={handleWheel}
         onContextMenu={handleContextMenu}
       />
+      {arealMode && (
+        <ArealOverlay
+          canvasRef={canvasRef}
+          rect={arealRect || null}
+          onRectChange={onArealRectChange || (() => {})}
+        />
+      )}
       <input
         ref={hiddenInputRef}
         className="canvas-viewer-hidden-input"

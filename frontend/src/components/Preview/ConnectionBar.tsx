@@ -9,9 +9,11 @@ interface ConnectionBarProps {
     protocol?: 'http' | 'https';
   };
   tabIdx: number;
+  onReload?: () => void;
+  onHome?: () => void;
 }
 
-export function ConnectionBar({ tab, tabIdx }: ConnectionBarProps) {
+export function ConnectionBar({ tab, tabIdx, onReload, onHome }: ConnectionBarProps) {
   const { previewTabs, setPreviewTabs } = useStore();
   const [port, setPort] = useState(String(tab.targetPort || ''));
   const [host, setHost] = useState(tab.headerHost || '');
@@ -27,6 +29,8 @@ export function ConnectionBar({ tab, tabIdx }: ConnectionBarProps) {
     );
     setPreviewTabs(updated);
   };
+
+  const isConnected = !!tab.targetPort;
 
   return (
     <div className="preview-connection-bar">
@@ -56,7 +60,14 @@ export function ConnectionBar({ tab, tabIdx }: ConnectionBarProps) {
         onChange={(e) => setPort(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') apply(); }}
       />
-      <button className="preview-connection-btn" onClick={apply} title="Connect">Connect</button>
+      {isConnected ? (
+        <>
+          <button className="preview-connection-btn reload" onClick={onReload} title="Reload page">↻</button>
+          <button className="preview-connection-btn home" onClick={onHome} title="Go to root URL">⌂</button>
+        </>
+      ) : (
+        <button className="preview-connection-btn" onClick={apply} title="Connect">Connect</button>
+      )}
       <span className={`preview-connection-status ${tab.targetPort ? 'connected' : ''}`}>
         {tab.targetPort ? `streaming :${tab.targetPort}` : 'disconnected'}
       </span>

@@ -77,7 +77,7 @@ class SshManager {
 
         try {
           // Setup reverse tunnels so remote claude can reach our proxy
-          await this.setupReverseTunnel(config.id, 3000, 3001);
+          await this.setupReverseTunnel(config.id, 3000, 3010);
           await this.setupReverseTunnel(config.id, PROXY_PORT, PROXY_PORT);
 
           // Upload CA cert to remote

@@ -55,7 +55,13 @@ export class SerialBridge {
         try {
           const msg = JSON.parse(e.data as string);
           if (msg.type === 'set_signals' && msg.signals) {
-            await this.port!.setSignals(msg.signals);
+            console.log('[serial-bridge] setSignals:', msg.signals);
+            // Map short names to Web Serial API's SerialOutputSignals
+            await this.port!.setSignals({
+              dataTerminalReady: msg.signals.dtr,
+              requestToSend: msg.signals.rts,
+            });
+            console.log('[serial-bridge] setSignals done');
           } else if (msg.type === 'close') {
             this.disconnect();
           }
@@ -67,8 +73,13 @@ export class SerialBridge {
       this.running = false;
     };
 
-    // Signal ready to server
-    this.ws.send(JSON.stringify({ type: 'ready' }));
+    // Signal ready to server, including USB device info if available
+    const portInfo = this.port.getInfo?.() as { usbVendorId?: number; usbProductId?: number } | undefined;
+    this.ws.send(JSON.stringify({
+      type: 'ready',
+      usbVendorId: portInfo?.usbVendorId ?? null,
+      usbProductId: portInfo?.usbProductId ?? null,
+    }));
   }
 
   private async readLoop() {

@@ -40,6 +40,51 @@ export interface SshConnection {
   created_at: string;
 }
 
+export interface User {
+  id: string;
+  username: string;
+  display_name: string;
+  role: 'admin' | 'basic';
+  password_hash: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuthSession {
+  id: string;
+  user_id: string;
+  expires_at: string;
+  created_at: string;
+  ip_address: string;
+  user_agent: string;
+}
+
+export interface TotpSecret {
+  user_id: string;
+  secret_encrypted: string;
+  verified: number;
+  created_at: string;
+}
+
+export interface Passkey {
+  id: string;
+  user_id: string;
+  credential_id: string;
+  public_key: string;
+  counter: number;
+  transports: string | null;
+  device_name: string | null;
+  created_at: string;
+}
+
+export interface EnvironmentShare {
+  id: string;
+  environment_id: string;
+  user_id: string;
+  shared_by: string;
+  created_at: string;
+}
+
 export interface EnvironmentSettings {
   environment_id: string;
   sidebar_width: string;
@@ -68,6 +113,7 @@ class VccDatabase {
     this.migrateProjectsParentColumn();
     this.migrateWorktreeHistory();
     this.migrate();
+    this.migrateUserManagement();
   }
 
   private initSchema(): void {
@@ -555,6 +601,278 @@ class VccDatabase {
     }
 
     return Array.from(paths);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // USER MANAGEMENT MIGRATION
+  // ═══════════════════════════════════════════════════
+
+  private migrateUserManagement(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'basic')),
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        ip_address TEXT,
+        user_agent TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS totp_secrets (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        secret_encrypted TEXT NOT NULL,
+        verified INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS passkeys (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        credential_id TEXT NOT NULL UNIQUE,
+        public_key TEXT NOT NULL,
+        counter INTEGER NOT NULL DEFAULT 0,
+        transports TEXT,
+        device_name TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS environment_shares (
+        id TEXT PRIMARY KEY,
+        environment_id TEXT NOT NULL REFERENCES vcc_environments(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        shared_by TEXT NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (environment_id, user_id)
+      );
+    `);
+
+    // Add owner_user_id column to vcc_environments if missing
+    const columns = this.db.prepare("PRAGMA table_info(vcc_environments)").all() as any[];
+    const hasOwnerCol = columns.some((c: any) => c.name === 'owner_user_id');
+    if (!hasOwnerCol && columns.length > 0) {
+      this.db.exec('ALTER TABLE vcc_environments ADD COLUMN owner_user_id TEXT REFERENCES users(id)');
+      console.log('[db] Added owner_user_id column to vcc_environments');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  // USERS
+  // ═══════════════════════════════════════════════════
+
+  getUserCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) as cnt FROM users').get() as any).cnt;
+  }
+
+  createUser(username: string, displayName: string, role: 'admin' | 'basic', passwordHash: string): User {
+    const id = uuidv4();
+    this.db.prepare(
+      'INSERT INTO users (id, username, display_name, role, password_hash) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, username, displayName, role, passwordHash);
+    return this.getUser(id)!;
+  }
+
+  getUser(id: string): User | undefined {
+    return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
+  }
+
+  getUserByUsername(username: string): User | undefined {
+    return this.db.prepare('SELECT * FROM users WHERE username = ?').get(username) as User | undefined;
+  }
+
+  listUsers(): User[] {
+    return this.db.prepare('SELECT id, username, display_name, role, created_at, updated_at FROM users ORDER BY created_at').all() as User[];
+  }
+
+  updateUser(id: string, updates: { display_name?: string; role?: 'admin' | 'basic' }): boolean {
+    const parts: string[] = [];
+    const values: any[] = [];
+    if (updates.display_name !== undefined) { parts.push('display_name = ?'); values.push(updates.display_name); }
+    if (updates.role !== undefined) { parts.push('role = ?'); values.push(updates.role); }
+    if (parts.length === 0) return false;
+    parts.push("updated_at = datetime('now')");
+    values.push(id);
+    const result = this.db.prepare(`UPDATE users SET ${parts.join(', ')} WHERE id = ?`).run(...values);
+    return result.changes > 0;
+  }
+
+  updateUserPassword(id: string, passwordHash: string): boolean {
+    const result = this.db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?").run(passwordHash, id);
+    return result.changes > 0;
+  }
+
+  deleteUser(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    return result.changes > 0;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // AUTH SESSIONS
+  // ═══════════════════════════════════════════════════
+
+  createAuthSession(id: string, userId: string, expiresAt: string, ip: string, userAgent: string): void {
+    this.db.prepare(
+      'INSERT INTO auth_sessions (id, user_id, expires_at, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, userId, expiresAt, ip, userAgent);
+  }
+
+  getAuthSessionUser(sessionId: string): User | null {
+    const row = this.db.prepare(`
+      SELECT u.* FROM users u
+      JOIN auth_sessions s ON s.user_id = u.id
+      WHERE s.id = ? AND s.expires_at > datetime('now')
+    `).get(sessionId) as User | undefined;
+    return row || null;
+  }
+
+  deleteAuthSession(sessionId: string): void {
+    this.db.prepare('DELETE FROM auth_sessions WHERE id = ?').run(sessionId);
+  }
+
+  deleteAllUserAuthSessions(userId: string): void {
+    this.db.prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(userId);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TOTP SECRETS
+  // ═══════════════════════════════════════════════════
+
+  saveTotpSecret(userId: string, secretEncrypted: string): void {
+    this.db.prepare(`
+      INSERT INTO totp_secrets (user_id, secret_encrypted, verified)
+      VALUES (?, ?, 0)
+      ON CONFLICT(user_id) DO UPDATE SET secret_encrypted = excluded.secret_encrypted, verified = 0
+    `).run(userId, secretEncrypted);
+  }
+
+  getTotpSecret(userId: string): TotpSecret | null {
+    return this.db.prepare('SELECT * FROM totp_secrets WHERE user_id = ?').get(userId) as TotpSecret || null;
+  }
+
+  markTotpVerified(userId: string): void {
+    this.db.prepare('UPDATE totp_secrets SET verified = 1 WHERE user_id = ?').run(userId);
+  }
+
+  deleteTotpSecret(userId: string): void {
+    this.db.prepare('DELETE FROM totp_secrets WHERE user_id = ?').run(userId);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // PASSKEYS
+  // ═══════════════════════════════════════════════════
+
+  createPasskey(pk: Omit<Passkey, 'created_at'>): void {
+    this.db.prepare(`
+      INSERT INTO passkeys (id, user_id, credential_id, public_key, counter, transports, device_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(pk.id, pk.user_id, pk.credential_id, pk.public_key, pk.counter, pk.transports, pk.device_name);
+  }
+
+  listPasskeys(userId: string): Passkey[] {
+    return this.db.prepare('SELECT * FROM passkeys WHERE user_id = ? ORDER BY created_at').all(userId) as Passkey[];
+  }
+
+  findPasskeyByCredentialId(credentialId: string): Passkey | null {
+    return this.db.prepare('SELECT * FROM passkeys WHERE credential_id = ?').get(credentialId) as Passkey || null;
+  }
+
+  updatePasskeyCounter(id: string, counter: number): void {
+    this.db.prepare('UPDATE passkeys SET counter = ? WHERE id = ?').run(counter, id);
+  }
+
+  deletePasskey(id: string, userId: string): boolean {
+    const result = this.db.prepare('DELETE FROM passkeys WHERE id = ? AND user_id = ?').run(id, userId);
+    return result.changes > 0;
+  }
+
+  deleteAllUserPasskeys(userId: string): void {
+    this.db.prepare('DELETE FROM passkeys WHERE user_id = ?').run(userId);
+  }
+
+  getUserIdsWithPasskeys(): string[] {
+    return (this.db.prepare('SELECT DISTINCT user_id FROM passkeys').all() as { user_id: string }[]).map(r => r.user_id);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // ENVIRONMENT OWNERSHIP & SHARING
+  // ═══════════════════════════════════════════════════
+
+  listEnvironmentsForUser(userId: string): VccEnvironment[] {
+    return this.db.prepare(`
+      SELECT e.id, e.name, e.created_at, e.owner_user_id,
+        (SELECT COUNT(*) FROM project_environment pe WHERE pe.environment_id = e.id) as project_count
+      FROM vcc_environments e
+      WHERE e.owner_user_id = ?
+        OR e.id IN (SELECT environment_id FROM environment_shares WHERE user_id = ?)
+      ORDER BY e.created_at
+    `).all(userId, userId) as VccEnvironment[];
+  }
+
+  createEnvironmentWithOwner(name: string, ownerUserId: string): VccEnvironment {
+    const id = uuidv4();
+    this.db.prepare('INSERT INTO vcc_environments (id, name, owner_user_id) VALUES (?, ?, ?)').run(id, name, ownerUserId);
+    this.db.prepare('INSERT INTO environment_settings (environment_id) VALUES (?)').run(id);
+    return this.getEnvironment(id)!;
+  }
+
+  assignUnownedEnvironments(userId: string): void {
+    this.db.prepare('UPDATE vcc_environments SET owner_user_id = ? WHERE owner_user_id IS NULL').run(userId);
+  }
+
+  canAccessEnvironment(userId: string, envId: string): boolean {
+    const row = this.db.prepare(`
+      SELECT 1 FROM vcc_environments
+      WHERE id = ? AND (owner_user_id = ? OR id IN (SELECT environment_id FROM environment_shares WHERE user_id = ?))
+    `).get(envId, userId, userId);
+    return !!row;
+  }
+
+  canAccessProject(userId: string, projectId: string): boolean {
+    const row = this.db.prepare(`
+      SELECT 1 FROM project_environment pe
+      JOIN vcc_environments e ON e.id = pe.environment_id
+      WHERE pe.project_id = ?
+        AND (e.owner_user_id = ? OR e.id IN (SELECT environment_id FROM environment_shares WHERE user_id = ?))
+      LIMIT 1
+    `).get(projectId, userId, userId);
+    return !!row;
+  }
+
+  getEnvironmentOwner(envId: string): string | null {
+    const row = this.db.prepare('SELECT owner_user_id FROM vcc_environments WHERE id = ?').get(envId) as { owner_user_id: string | null } | undefined;
+    return row?.owner_user_id || null;
+  }
+
+  shareEnvironment(envId: string, userId: string, sharedBy: string): void {
+    const id = uuidv4();
+    this.db.prepare(`
+      INSERT OR IGNORE INTO environment_shares (id, environment_id, user_id, shared_by)
+      VALUES (?, ?, ?, ?)
+    `).run(id, envId, userId, sharedBy);
+  }
+
+  unshareEnvironment(envId: string, userId: string): boolean {
+    const result = this.db.prepare('DELETE FROM environment_shares WHERE environment_id = ? AND user_id = ?').run(envId, userId);
+    return result.changes > 0;
+  }
+
+  listEnvironmentShares(envId: string): (EnvironmentShare & { username: string; display_name: string })[] {
+    return this.db.prepare(`
+      SELECT es.*, u.username, u.display_name
+      FROM environment_shares es
+      JOIN users u ON u.id = es.user_id
+      WHERE es.environment_id = ?
+      ORDER BY es.created_at
+    `).all(envId) as (EnvironmentShare & { username: string; display_name: string })[];
   }
 
   // ═══════════════════════════════════════════════════

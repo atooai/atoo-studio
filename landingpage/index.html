@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Atoo Studio ADE — Agent Development Environment</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* ── RESET ── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-deep: #0a0d11;
+  --bg-surface: #0f1318;
+  --bg-card: #141a22;
+  --bg-elevated: #1a222d;
+  --border: #1e2a38;
+  --border-glow: #2a3a4e;
+  --text-primary: #e8edf4;
+  --text-secondary: #8899aa;
+  --text-muted: #556677;
+  --accent-cyan: #00e5c8;
+  --accent-cyan-dim: #00b89e;
+  --accent-blue: #4488ff;
+  --accent-orange: #ff8844;
+  --accent-red: #ff4466;
+  --accent-green: #44dd88;
+  --accent-purple: #8866ff;
+  --glow-cyan: rgba(0,229,200,0.15);
+  --glow-blue: rgba(68,136,255,0.12);
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-display);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── NOISE OVERLAY ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── GRID BG ── */
+.grid-bg {
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,229,200,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,229,200,0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── NAV ── */
+nav {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  z-index: 100;
+  padding: 0 48px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(24px) saturate(1.4);
+  background: rgba(10,13,17,0.7);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+}
+
+.nav-logo-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--bg-deep);
+  letter-spacing: -1px;
+}
+
+.nav-logo-text {
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+}
+
+.nav-logo-text span {
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  margin-left: 8px;
+  padding: 3px 8px;
+  border: 1px solid rgba(0,229,200,0.3);
+  border-radius: 4px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 36px;
+}
+
+.nav-links a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.2s;
+  letter-spacing: 0.2px;
+}
+
+.nav-links a:hover { color: var(--text-primary); }
+
+.nav-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  border-radius: 8px;
+  background: var(--accent-cyan);
+  color: var(--bg-deep) !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  letter-spacing: 0.3px;
+  transition: all 0.25s;
+  border: none;
+  cursor: pointer;
+}
+
+.nav-cta:hover {
+  background: #00ffd9;
+  box-shadow: 0 0 30px rgba(0,229,200,0.3);
+  transform: translateY(-1px);
+}
+
+/* ── HERO ── */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 120px 48px 80px;
+  text-align: center;
+  z-index: 1;
+}
+
+.hero-glow {
+  position: absolute;
+  width: 900px;
+  height: 600px;
+  top: 5%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse, rgba(0,229,200,0.08) 0%, rgba(68,136,255,0.04) 40%, transparent 70%);
+  pointer-events: none;
+  filter: blur(60px);
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px 6px 8px;
+  border-radius: 100px;
+  border: 1px solid var(--border-glow);
+  background: rgba(0,229,200,0.05);
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 32px;
+  animation: fadeUp 0.8s ease both;
+  font-weight: 500;
+}
+
+.hero-badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 8px var(--accent-green);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.hero h1 {
+  font-size: clamp(48px, 7vw, 88px);
+  font-weight: 900;
+  line-height: 1.0;
+  letter-spacing: -3px;
+  margin-bottom: 28px;
+  animation: fadeUp 0.8s ease 0.1s both;
+}
+
+.hero h1 .gradient-text {
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 50%, var(--accent-purple) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-sub {
+  font-size: clamp(16px, 2vw, 20px);
+  color: var(--text-secondary);
+  max-width: 640px;
+  line-height: 1.6;
+  font-weight: 400;
+  margin-bottom: 44px;
+  animation: fadeUp 0.8s ease 0.2s both;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  animation: fadeUp 0.8s ease 0.3s both;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 32px;
+  border-radius: 10px;
+  background: var(--accent-cyan);
+  color: var(--bg-deep);
+  font-weight: 700;
+  font-size: 15px;
+  text-decoration: none;
+  transition: all 0.3s;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+}
+
+.btn-primary:hover {
+  background: #00ffd9;
+  box-shadow: 0 4px 40px rgba(0,229,200,0.35);
+  transform: translateY(-2px);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 32px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 15px;
+  text-decoration: none;
+  transition: all 0.3s;
+  border: 1px solid var(--border-glow);
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent-cyan);
+  background: rgba(0,229,200,0.05);
+  transform: translateY(-2px);
+}
+
+/* ── HERO TERMINAL MOCKUP ── */
+.hero-preview {
+  margin-top: 72px;
+  width: 100%;
+  max-width: 1100px;
+  border-radius: 16px;
+  border: 1px solid var(--border-glow);
+  background: var(--bg-surface);
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(0,229,200,0.05),
+    0 20px 80px rgba(0,0,0,0.5),
+    0 0 120px rgba(0,229,200,0.05);
+  animation: fadeUp 1s ease 0.5s both;
+}
+
+.preview-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.preview-dots {
+  display: flex;
+  gap: 7px;
+}
+
+.preview-dots span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.preview-dots span:nth-child(1) { background: var(--accent-red); }
+.preview-dots span:nth-child(2) { background: var(--accent-orange); }
+.preview-dots span:nth-child(3) { background: var(--accent-green); }
+
+.preview-title {
+  flex: 1;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.preview-body {
+  display: grid;
+  grid-template-columns: 220px 1fr 260px;
+  min-height: 380px;
+}
+
+.preview-sidebar {
+  border-right: 1px solid var(--border);
+  padding: 16px;
+}
+
+.preview-sidebar-header {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 12px;
+}
+
+.preview-project {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.preview-project.active {
+  background: rgba(0,229,200,0.08);
+  color: var(--text-primary);
+  border: 1px solid rgba(0,229,200,0.15);
+}
+
+.preview-project .badges {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.preview-project .badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+}
+
+.badge-att { background: rgba(0,229,200,0.2); color: var(--accent-cyan); }
+.badge-act { background: rgba(68,136,255,0.2); color: var(--accent-blue); }
+.badge-open { background: rgba(136,102,255,0.2); color: var(--accent-purple); }
+
+.preview-main {
+  padding: 20px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  position: relative;
+  overflow: hidden;
+}
+
+.terminal-line {
+  opacity: 0;
+  animation: typeLine 0.3s ease forwards;
+}
+
+.terminal-line .prompt {
+  color: var(--accent-cyan);
+}
+
+.terminal-line .cmd {
+  color: var(--text-primary);
+}
+
+.terminal-line .output {
+  color: var(--text-muted);
+}
+
+.terminal-line .success {
+  color: var(--accent-green);
+}
+
+.terminal-line .info {
+  color: var(--accent-blue);
+}
+
+.terminal-line:nth-child(1) { animation-delay: 0.8s; }
+.terminal-line:nth-child(2) { animation-delay: 1.2s; }
+.terminal-line:nth-child(3) { animation-delay: 1.6s; }
+.terminal-line:nth-child(4) { animation-delay: 2.0s; }
+.terminal-line:nth-child(5) { animation-delay: 2.4s; }
+.terminal-line:nth-child(6) { animation-delay: 2.6s; }
+.terminal-line:nth-child(7) { animation-delay: 2.8s; }
+.terminal-line:nth-child(8) { animation-delay: 3.0s; }
+.terminal-line:nth-child(9) { animation-delay: 3.2s; }
+.terminal-line:nth-child(10) { animation-delay: 3.4s; }
+
+@keyframes typeLine {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cursor-blink {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: var(--accent-cyan);
+  animation: blink 1s step-end infinite;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.preview-sessions {
+  border-left: 1px solid var(--border);
+  padding: 16px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.session-item.active {
+  background: rgba(68,136,255,0.08);
+  border: 1px solid rgba(68,136,255,0.15);
+}
+
+.session-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.session-dot.green { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.session-dot.blue { background: var(--accent-blue); }
+.session-dot.dim { background: var(--text-muted); }
+
+.session-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* ── STATS STRIP ── */
+.stats-strip {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 64px;
+  padding: 48px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.stat {
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -2px;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+/* ── FEATURES ── */
+.features-section {
+  position: relative;
+  z-index: 1;
+  padding: 120px 48px;
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: clamp(32px, 4vw, 52px);
+  font-weight: 800;
+  letter-spacing: -2px;
+  margin-bottom: 16px;
+  line-height: 1.1;
+}
+
+.section-desc {
+  font-size: 17px;
+  color: var(--text-secondary);
+  max-width: 560px;
+  line-height: 1.6;
+  margin-bottom: 64px;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.feature-card {
+  padding: 36px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.feature-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  opacity: 0;
+  transition: opacity 0.4s;
+  background: radial-gradient(circle at 30% 20%, rgba(0,229,200,0.06) 0%, transparent 60%);
+}
+
+.feature-card:hover {
+  border-color: var(--border-glow);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+}
+
+.feature-card:hover::before { opacity: 1; }
+
+.feature-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  font-size: 22px;
+  position: relative;
+  z-index: 1;
+}
+
+.feature-icon.cyan { background: rgba(0,229,200,0.1); border: 1px solid rgba(0,229,200,0.2); }
+.feature-icon.blue { background: rgba(68,136,255,0.1); border: 1px solid rgba(68,136,255,0.2); }
+.feature-icon.orange { background: rgba(255,136,68,0.1); border: 1px solid rgba(255,136,68,0.2); }
+.feature-icon.purple { background: rgba(136,102,255,0.1); border: 1px solid rgba(136,102,255,0.2); }
+.feature-icon.green { background: rgba(68,221,136,0.1); border: 1px solid rgba(68,221,136,0.2); }
+.feature-icon.red { background: rgba(255,68,102,0.1); border: 1px solid rgba(255,68,102,0.2); }
+
+.feature-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  letter-spacing: -0.3px;
+  position: relative;
+  z-index: 1;
+}
+
+.feature-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  position: relative;
+  z-index: 1;
+}
+
+.feature-card.featured {
+  grid-column: span 2;
+  grid-row: span 2;
+  background: linear-gradient(160deg, var(--bg-card) 0%, rgba(0,229,200,0.03) 100%);
+}
+
+.feature-card.featured .feature-title {
+  font-size: 24px;
+}
+
+.feature-card.featured .feature-desc {
+  font-size: 15px;
+  max-width: 460px;
+}
+
+.feature-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.feature-tag {
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+}
+
+/* ── ARCH SECTION ── */
+.arch-section {
+  position: relative;
+  z-index: 1;
+  padding: 120px 48px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.arch-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.arch-flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin-top: 64px;
+  flex-wrap: wrap;
+}
+
+.arch-node {
+  padding: 24px 32px;
+  border-radius: 14px;
+  border: 1px solid var(--border-glow);
+  background: var(--bg-card);
+  text-align: center;
+  min-width: 180px;
+  transition: all 0.3s;
+}
+
+.arch-node:hover {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 30px rgba(0,229,200,0.1);
+  transform: translateY(-3px);
+}
+
+.arch-node-title {
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.arch-node-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.arch-arrow {
+  font-size: 24px;
+  color: var(--accent-cyan);
+  padding: 0 20px;
+  opacity: 0.5;
+  font-family: var(--font-mono);
+}
+
+/* ── AGENT TYPES ── */
+.agents-section {
+  position: relative;
+  z-index: 1;
+  padding: 120px 48px;
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+.agent-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 64px;
+}
+
+.agent-card {
+  padding: 28px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: all 0.3s;
+  position: relative;
+}
+
+.agent-card:hover {
+  border-color: var(--border-glow);
+  transform: translateY(-3px);
+}
+
+.agent-card-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: inline-block;
+  margin-bottom: 16px;
+}
+
+.agent-card-tag.claude {
+  background: rgba(0,229,200,0.1);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(0,229,200,0.2);
+}
+
+.agent-card-tag.codex {
+  background: rgba(68,136,255,0.1);
+  color: var(--accent-blue);
+  border: 1px solid rgba(68,136,255,0.2);
+}
+
+.agent-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  letter-spacing: -0.3px;
+}
+
+.agent-card p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── CTA SECTION ── */
+.cta-section {
+  position: relative;
+  z-index: 1;
+  padding: 140px 48px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.cta-glow {
+  position: absolute;
+  width: 800px;
+  height: 400px;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse, rgba(0,229,200,0.06) 0%, transparent 70%);
+  pointer-events: none;
+  filter: blur(80px);
+}
+
+.cta-section h2 {
+  font-size: clamp(36px, 5vw, 60px);
+  font-weight: 900;
+  letter-spacing: -2px;
+  margin-bottom: 20px;
+  line-height: 1.1;
+}
+
+.cta-section p {
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-bottom: 40px;
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.5;
+}
+
+.cta-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 28px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-glow);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--accent-cyan);
+  margin-bottom: 24px;
+  cursor: pointer;
+  transition: all 0.3s;
+  user-select: all;
+}
+
+.cta-install:hover {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 40px rgba(0,229,200,0.1);
+}
+
+.cta-install .copy-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+}
+
+/* ── FOOTER ── */
+footer {
+  position: relative;
+  z-index: 1;
+  border-top: 1px solid var(--border);
+  padding: 40px 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+footer a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+footer a:hover { color: var(--accent-cyan); }
+
+.footer-links {
+  display: flex;
+  gap: 28px;
+}
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-on-scroll {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-on-scroll.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 1024px) {
+  .feature-grid { grid-template-columns: repeat(2, 1fr); }
+  .feature-card.featured { grid-column: span 2; grid-row: span 1; }
+  .agent-cards { grid-template-columns: repeat(2, 1fr); }
+  .preview-body { grid-template-columns: 1fr; }
+  .preview-sidebar, .preview-sessions { display: none; }
+  .arch-flow { flex-direction: column; }
+  .arch-arrow { transform: rotate(90deg); padding: 10px 0; }
+}
+
+@media (max-width: 768px) {
+  nav { padding: 0 24px; }
+  .nav-links { display: none; }
+  .hero { padding: 120px 24px 60px; }
+  .features-section, .agents-section { padding: 80px 24px; }
+  .feature-grid { grid-template-columns: 1fr; }
+  .feature-card.featured { grid-column: span 1; }
+  .agent-cards { grid-template-columns: 1fr; }
+  .stats-strip { flex-direction: column; gap: 32px; padding: 48px 24px; }
+  .arch-section { padding: 80px 24px; }
+  .cta-section { padding: 100px 24px; }
+  footer { flex-direction: column; gap: 20px; text-align: center; }
+}
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">
+    <div class="nav-logo-icon">a:</div>
+    <div class="nav-logo-text">Atoo Studio <span>ADE</span></div>
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#agents">Agents</a>
+    <a href="https://github.com/atoo-studio" target="_blank">GitHub</a>
+    <a href="#cta" class="nav-cta">Get Started →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-glow"></div>
+
+  <div class="hero-badge">
+    <span class="dot"></span>
+    Now supporting Claude Code, Codex & cross-family agent conversion
+  </div>
+
+  <h1>
+    The IDE for<br>
+    <span class="gradient-text">AI Agents</span>
+  </h1>
+
+  <p class="hero-sub">
+    Orchestrate, observe, and control AI coding agents across your entire stack.
+    MITM proxy, live preview, terminals, SSH, serial devices — one unified environment.
+  </p>
+
+  <div class="hero-actions">
+    <a href="#cta" class="btn-primary">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"/></svg>
+      Install Atoo Studio
+    </a>
+    <a href="#features" class="btn-secondary">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      Explore Features
+    </a>
+  </div>
+
+  <!-- Terminal Mockup -->
+  <div class="hero-preview">
+    <div class="preview-topbar">
+      <div class="preview-dots"><span></span><span></span><span></span></div>
+      <div class="preview-title">atoo-studio — KendoxDevOpsPortal — /workspaces/KendoxDevOpsPortal</div>
+    </div>
+    <div class="preview-body">
+      <div class="preview-sidebar">
+        <div class="preview-sidebar-header">Projects</div>
+        <div class="preview-project">
+          <span>📁</span> quell
+          <div class="badges">
+            <span class="badge badge-att">0</span>
+            <span class="badge badge-act">0</span>
+          </div>
+        </div>
+        <div class="preview-project active">
+          <span>📁</span> KendoxDevOps
+          <div class="badges">
+            <span class="badge badge-att">1</span>
+            <span class="badge badge-act">1</span>
+            <span class="badge badge-open">1</span>
+          </div>
+        </div>
+        <div class="preview-project">
+          <span>📁</span> playground
+          <div class="badges">
+            <span class="badge badge-att">0</span>
+            <span class="badge badge-act">0</span>
+          </div>
+        </div>
+      </div>
+      <div class="preview-main">
+        <div class="terminal-line"><span class="prompt">~/workspaces $</span> <span class="cmd">atoo agent start --type claude-code</span></div>
+        <div class="terminal-line"><span class="info">■</span> <span class="output">Initializing MITM proxy on :8443...</span></div>
+        <div class="terminal-line"><span class="info">■</span> <span class="output">Certificate authority loaded</span></div>
+        <div class="terminal-line"><span class="success">✓</span> <span class="output">Agent session created: sess_7f3a9b</span></div>
+        <div class="terminal-line"><span class="success">✓</span> <span class="output">MCP server registered (4 tools)</span></div>
+        <div class="terminal-line"><span class="success">✓</span> <span class="output">File watcher active (LD_PRELOAD + inotify)</span></div>
+        <div class="terminal-line"><span class="success">✓</span> <span class="output">Preview container ready (Chrome + Xvfb)</span></div>
+        <div class="terminal-line">&nbsp;</div>
+        <div class="terminal-line"><span class="prompt">agent:claude-code $</span> <span class="cmd">ready</span></div>
+        <div class="terminal-line"><span class="success">●</span> <span class="output">Agent is listening. Send a message to begin.</span> <span class="cursor-blink"></span></div>
+      </div>
+      <div class="preview-sessions">
+        <div class="preview-sidebar-header">Sessions</div>
+        <div class="session-item active">
+          <span class="session-dot green"></span>
+          New session
+          <span class="session-meta">active</span>
+        </div>
+        <div class="session-item">
+          <span class="session-dot blue"></span>
+          restart server
+          <span class="session-meta">165 ev</span>
+        </div>
+        <div class="session-item">
+          <span class="session-dot dim"></span>
+          ssh priv/pub key...
+          <span class="session-meta">2178 ev</span>
+        </div>
+        <div class="session-item">
+          <span class="session-dot dim"></span>
+          ansible script...
+          <span class="session-meta">52 ev</span>
+        </div>
+        <div class="session-item">
+          <span class="session-dot dim"></span>
+          rebuild everything!
+          <span class="session-meta">338 ev</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="stats-strip">
+  <div class="stat animate-on-scroll">
+    <div class="stat-value">4</div>
+    <div class="stat-label">Agent Types</div>
+  </div>
+  <div class="stat animate-on-scroll">
+    <div class="stat-value">16</div>
+    <div class="stat-label">Core Feature Modules</div>
+  </div>
+  <div class="stat animate-on-scroll">
+    <div class="stat-value">∞</div>
+    <div class="stat-label">Concurrent Sessions</div>
+  </div>
+  <div class="stat animate-on-scroll">
+    <div class="stat-value">&lt;50ms</div>
+    <div class="stat-label">Proxy Latency</div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section class="features-section" id="features">
+  <div class="section-label animate-on-scroll">Capabilities</div>
+  <h2 class="section-title animate-on-scroll">Everything agents need.<br>Nothing they don't.</h2>
+  <p class="section-desc animate-on-scroll">
+    A complete development environment purpose-built for AI agent workflows — from proxy interception to live browser preview.
+  </p>
+
+  <div class="feature-grid">
+    <div class="feature-card featured animate-on-scroll">
+      <div class="feature-icon cyan">🔀</div>
+      <div class="feature-title">MITM Proxy & API Orchestration</div>
+      <div class="feature-desc">
+        Intercept and orchestrate all Anthropic API traffic through an intelligent HTTPS proxy.
+        Observe token usage in real-time, approve or deny tool calls, and manage permission modes — all without modifying your agent code.
+      </div>
+      <div class="feature-tag-list">
+        <span class="feature-tag">HTTPS Interception</span>
+        <span class="feature-tag">Token Tracking</span>
+        <span class="feature-tag">Tool Approval</span>
+        <span class="feature-tag">Permission Modes</span>
+        <span class="feature-tag">Real-time Streaming</span>
+      </div>
+    </div>
+
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-icon blue">🖥️</div>
+      <div class="feature-title">Live Browser Preview</div>
+      <div class="feature-desc">
+        Docker-powered Chrome + Xvfb container with WebSocket screen streaming, mouse/keyboard control, viewport emulation, and DevTools proxy.
+      </div>
+    </div>
+
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-icon orange">📡</div>
+      <div class="feature-title">SSH & Remote Execution</div>
+      <div class="feature-desc">
+        Manage connections with password or key auth, browse remote files, run commands, and spawn terminals over SSH channels.
+      </div>
+    </div>
+
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-icon purple">🔌</div>
+      <div class="feature-title">MCP Server</div>
+      <div class="feature-desc">
+        Built-in Model Context Protocol server with tools for TCP service reporting, TLS certificate generation, serial device access, and session search.
+      </div>
+    </div>
+
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-icon green">📂</div>
+      <div class="feature-title">File Tracking & Change Store</div>
+      <div class="feature-desc">
+        Content-addressed object store with LD_PRELOAD hooks and inotify watchers. Every create, modify, delete, and rename tracked per session.
+      </div>
+    </div>
+
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-icon red">🔧</div>
+      <div class="feature-title">Serial Device Support</div>
+      <div class="feature-desc">
+        Full CUSE device support with DTR/RTS modem control signals on Linux, portable PTY fallback, and browser-based port selection.
+      </div>
+    </div>
+
+    <div class="feature-card animate-on-scroll">
+      <div class="feature-icon cyan">🌿</div>
+      <div class="feature-title">Git & Worktree Aware</div>
+      <div class="feature-desc">
+        Automatic git worktree detection, commit history, diffs, branch operations, and project-scoped session filtering that understands your repo structure.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section class="arch-section" id="architecture">
+  <div class="arch-inner">
+    <div class="section-label animate-on-scroll">Architecture</div>
+    <h2 class="section-title animate-on-scroll">Proxy-first design</h2>
+    <p class="section-desc animate-on-scroll">
+      Atoo Studio sits between your AI agents and the API, giving you full observability and control without changing a single line of agent code.
+    </p>
+    <div class="arch-flow">
+      <div class="arch-node animate-on-scroll">
+        <div class="arch-node-title">AI Agent</div>
+        <div class="arch-node-sub">Claude Code / Codex</div>
+      </div>
+      <div class="arch-arrow animate-on-scroll">→</div>
+      <div class="arch-node animate-on-scroll" style="border-color: var(--accent-cyan); box-shadow: 0 0 30px rgba(0,229,200,0.08);">
+        <div class="arch-node-title" style="color: var(--accent-cyan);">Atoo Studio Proxy</div>
+        <div class="arch-node-sub">MITM • MCP • File Watch</div>
+      </div>
+      <div class="arch-arrow animate-on-scroll">→</div>
+      <div class="arch-node animate-on-scroll">
+        <div class="arch-node-title">Anthropic API</div>
+        <div class="arch-node-sub">Claude / Messages</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- AGENT TYPES -->
+<section class="agents-section" id="agents">
+  <div class="section-label animate-on-scroll">Agent Support</div>
+  <h2 class="section-title animate-on-scroll">Multi-agent, multi-family</h2>
+  <p class="section-desc animate-on-scroll">
+    Run different agent types side-by-side. Fork sessions, convert between families, and track everything in a unified timeline.
+  </p>
+
+  <div class="agent-cards">
+    <div class="agent-card animate-on-scroll">
+      <div class="agent-card-tag claude">CLAUDE</div>
+      <h3>Claude Code</h3>
+      <p>Full IDE-integrated agent with file editing, terminal access, and tool orchestration.</p>
+    </div>
+    <div class="agent-card animate-on-scroll">
+      <div class="agent-card-tag claude">CLAUDE</div>
+      <h3>Claude Code Terminal</h3>
+      <p>Lightweight terminal-only agent for quick tasks and shell-based workflows.</p>
+    </div>
+    <div class="agent-card animate-on-scroll">
+      <div class="agent-card-tag claude">CHATRO</div>
+      <h3>Claude Terminal Chatro</h3>
+      <p>Chat-first terminal agent with conversational interface and rich output rendering.</p>
+    </div>
+    <div class="agent-card animate-on-scroll">
+      <div class="agent-card-tag codex">CODEX</div>
+      <h3>Codex Terminal Chatro</h3>
+      <p>OpenAI Codex agent with cross-family conversion support. Switch from Claude seamlessly.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section" id="cta">
+  <div class="cta-glow"></div>
+  <div class="section-label animate-on-scroll">Get Started</div>
+  <h2 class="animate-on-scroll">Start building with<br><span style="background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">agents today</span></h2>
+  <p class="animate-on-scroll">Install Atoo Studio and have your first agent session running in under a minute.</p>
+
+  <div class="cta-install animate-on-scroll">
+    <span>$ npm install -g atoo-studio</span>
+    <span class="copy-hint">click to copy</span>
+  </div>
+  <br>
+  <div class="animate-on-scroll" style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
+    <a href="#" class="btn-primary">Download for Desktop</a>
+    <a href="https://github.com/atoo-studio" class="btn-secondary" target="_blank">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div>© 2026 Atoo Studio. Built for the age of agents.</div>
+  <div class="footer-links">
+    <a href="#">Documentation</a>
+    <a href="#">Changelog</a>
+    <a href="#">Discord</a>
+    <a href="https://github.com/atoo-studio" target="_blank">GitHub</a>
+  </div>
+</footer>
+
+<script>
+// Scroll animation observer
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.animate-on-scroll').forEach(el => observer.observe(el));
+
+// Copy install command
+document.querySelector('.cta-install')?.addEventListener('click', function() {
+  navigator.clipboard?.writeText('npm install -g atoo-studio');
+  const hint = this.querySelector('.copy-hint');
+  if (hint) {
+    hint.textContent = 'copied!';
+    setTimeout(() => hint.textContent = 'click to copy', 2000);
+  }
+});
+</script>
+
+</body>
+</html>

@@ -1,274 +1,67 @@
-import puppeteer, { Browser, Page, CDPSession } from 'puppeteer';
-import { spawn, execSync } from 'child_process';
-import net from 'net';
-import { CDP_PORT_START, CDP_PORT_END } from '../config.js';
 import { WebSocket } from 'ws';
+import { PreviewBackend, PreviewInstanceBase, CreatePreviewOpts } from './preview/preview-backend.js';
+import { HeadlessBackend } from './preview/headless-backend.js';
+import { DockerBackend } from './preview/docker-backend.js';
 
-const CHROME_PATH = '/home/furti/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome';
-const FFMPEG_PATH = '/usr/bin/ffmpeg';
 const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-const CLEANUP_INTERVAL = 10 * 1000; // 10 seconds (also serves as screencast watchdog)
+const CLEANUP_INTERVAL = 10 * 1000; // 10 seconds (also serves as stream watchdog)
 
-export interface PreviewInstance {
-  id: string;
-  browser: Browser;
-  page: Page;
-  cdpSession: CDPSession;
-  cdpPort: number;
-  targetPort: number;
-  headerHost?: string;
-  protocol: 'http' | 'https';
-  viewport: {
-    width: number;
-    height: number;
-    deviceScaleFactor: number;
-    isMobile: boolean;
-    hasTouch: boolean;
-  };
-  quality: number;
-  screencastActive: boolean;
-  wsClients: Set<WebSocket>;
-  lastActivity: number;
-  recording: boolean;
-  recordedFrames: { data: Buffer; timestamp: number }[];
-  lastFrameTime: number;
-}
-
-export interface CreatePreviewOpts {
-  targetPort: number;
-  headerHost?: string;
-  protocol?: 'http' | 'https';
-  width?: number;
-  height?: number;
-  dpr?: number;
-  isMobile?: boolean;
-  hasTouch?: boolean;
-  quality?: number;
-}
+// Re-export types for backward compatibility
+export type { PreviewInstanceBase as PreviewInstance, CreatePreviewOpts } from './preview/preview-backend.js';
 
 class PreviewManager {
-  private instances = new Map<string, PreviewInstance>();
-  private usedPorts = new Set<number>();
+  private instances = new Map<string, PreviewInstanceBase>();
+  private backend!: PreviewBackend;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private initialized = false;
 
   constructor() {
     this.cleanupTimer = setInterval(() => this.cleanupInactive(), CLEANUP_INTERVAL);
-    this.killOrphanedChromes();
+    // Backend selection is deferred to init() since it's async
+    this.init();
   }
 
-  // Kill any Chrome processes from a previous ccproxy run that are still using our CDP port range
-  private killOrphanedChromes() {
-    for (let port = CDP_PORT_START; port <= CDP_PORT_END; port++) {
-      try {
-        const result = execSync(
-          `lsof -ti tcp:${port} -s tcp:listen 2>/dev/null || true`,
-          { encoding: 'utf-8' }
-        ).trim();
-        if (result) {
-          for (const pid of result.split('\n').filter(Boolean)) {
-            console.log(`[preview] Killing orphaned process on CDP port ${port} (PID ${pid})`);
-            try { process.kill(parseInt(pid, 10), 'SIGKILL'); } catch {}
-          }
-        }
-      } catch {}
+  private async init() {
+    // Force headless CDP mode (shadow overlay interception requires it)
+    this.backend = new HeadlessBackend();
+    console.log('[preview] Using headless backend (forced)');
+    this.backend.cleanupOrphans();
+    this.initialized = true;
+  }
+
+  private async ensureInitialized() {
+    // Spin until init() completes (typically < 100ms)
+    while (!this.initialized) {
+      await new Promise(r => setTimeout(r, 50));
     }
   }
 
-  private async allocateCdpPort(): Promise<number> {
-    for (let port = CDP_PORT_START; port <= CDP_PORT_END; port++) {
-      if (!this.usedPorts.has(port) && await this.isPortFree(port)) {
-        this.usedPorts.add(port);
-        return port;
-      }
-    }
-    throw new Error('No available CDP ports');
-  }
-
-  private isPortFree(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const server = net.createServer();
-      server.once('error', () => resolve(false));
-      server.once('listening', () => { server.close(() => resolve(true)); });
-      server.listen(port, '127.0.0.1');
-    });
-  }
-
-  private releaseCdpPort(port: number) {
-    this.usedPorts.delete(port);
+  get backendMode(): string {
+    return this.backend?.mode || 'initializing';
   }
 
   private makeKey(projectId: string, tabId: string): string {
     return `${projectId}/${tabId}`;
   }
 
-  get(projectId: string, tabId: string): PreviewInstance | undefined {
+  get(projectId: string, tabId: string): PreviewInstanceBase | undefined {
     return this.instances.get(this.makeKey(projectId, tabId));
   }
 
-  async create(projectId: string, tabId: string, opts: CreatePreviewOpts): Promise<PreviewInstance> {
+  // --- Public API (delegates to backend) ---
+
+  async create(projectId: string, tabId: string, opts: CreatePreviewOpts): Promise<PreviewInstanceBase> {
+    await this.ensureInitialized();
     const key = this.makeKey(projectId, tabId);
 
-    // Destroy existing if any
+    // Destroy existing instance if any
     if (this.instances.has(key)) {
       await this.destroy(projectId, tabId);
     }
 
-    const cdpPort = await this.allocateCdpPort();
-    const width = opts.width || 1920;
-    const height = opts.height || 1080;
-    const dpr = opts.dpr || 1;
-    const isMobile = opts.isMobile || false;
-    const hasTouch = opts.hasTouch || false;
-    const quality = opts.quality || 80;
-    const protocol = opts.protocol || 'http';
-
-    try {
-      const chromeArgs = [
-        `--remote-debugging-port=${cdpPort}`,
-        '--no-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--ignore-certificate-errors',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-      ];
-      // Map custom hostname to localhost so Chrome can resolve it and all sub-resource links
-      // Also map default port (80/443) to the target port so links without explicit port work
-      if (opts.headerHost) {
-        const defaultPort = protocol === 'https' ? 443 : 80;
-        chromeArgs.push(`--host-resolver-rules=MAP ${opts.headerHost}:${defaultPort} 127.0.0.1:${opts.targetPort}, MAP ${opts.headerHost} 127.0.0.1`);
-      }
-
-      const browser = await puppeteer.launch({
-        executablePath: CHROME_PATH,
-        headless: true,
-        args: chromeArgs,
-      });
-
-      const page = await browser.newPage();
-
-      await page.setViewport({
-        width,
-        height,
-        deviceScaleFactor: dpr,
-        isMobile,
-        hasTouch,
-      });
-
-      const cdpSession = await page.createCDPSession();
-
-      const instance: PreviewInstance = {
-        id: key,
-        browser,
-        page,
-        cdpSession,
-        cdpPort,
-        targetPort: opts.targetPort,
-        headerHost: opts.headerHost,
-        protocol,
-        viewport: { width, height, deviceScaleFactor: dpr, isMobile, hasTouch },
-        quality,
-        screencastActive: false,
-        wsClients: new Set(),
-        lastActivity: Date.now(),
-        recording: false,
-        recordedFrames: [],
-        lastFrameTime: Date.now(),
-      };
-
-      this.instances.set(key, instance);
-
-      // Listen for URL changes
-      cdpSession.on('Page.frameNavigated', (params: any) => {
-        if (params.frame?.parentId) return; // Only top-level
-        const url = params.frame?.url;
-        if (url) {
-          const msg = JSON.stringify({ type: 'url_changed', url });
-          for (const ws of instance.wsClients) {
-            if (ws.readyState === 1) ws.send(msg);
-          }
-        }
-      });
-
-      await cdpSession.send('Page.enable');
-
-      // Navigate to target (retry up to 5 times if the service isn't ready yet)
-      // Use custom hostname without port if specified (port mapping handled by --host-resolver-rules)
-      const targetUrl = opts.headerHost
-        ? `${protocol}://${opts.headerHost}`
-        : `${protocol}://localhost:${opts.targetPort}`;
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        try {
-          await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
-          break;
-        } catch (err: any) {
-          console.warn(`[preview] Navigation to ${targetUrl} attempt ${attempt}/5: ${err.message}`);
-          if (attempt < 5) {
-            await new Promise(r => setTimeout(r, 1000));
-          }
-        }
-      }
-
-      // Start screencast
-      await this.startScreencast(instance);
-
-      console.log(`[preview] Created instance ${key} → ${targetUrl} (CDP port ${cdpPort})`);
-      return instance;
-    } catch (err) {
-      this.releaseCdpPort(cdpPort);
-      throw err;
-    }
-  }
-
-  private async startScreencast(instance: PreviewInstance) {
-    if (instance.screencastActive) return;
-
-    // Remove any stale listeners before adding new one
-    instance.cdpSession.removeAllListeners('Page.screencastFrame');
-
-    instance.cdpSession.on('Page.screencastFrame', (frame: any) => {
-      instance.cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
-      instance.lastActivity = Date.now();
-      instance.lastFrameTime = Date.now();
-
-      // Send as binary: 0x01 prefix + raw JPEG bytes
-      const jpegBuf = Buffer.from(frame.data, 'base64');
-      const msg = Buffer.allocUnsafe(1 + jpegBuf.length);
-      msg[0] = 0x01; // frame type
-      jpegBuf.copy(msg, 1);
-
-      for (const ws of instance.wsClients) {
-        if (ws.readyState === 1) {
-          ws.send(msg);
-        }
-      }
-
-      // Buffer for recording
-      if (instance.recording) {
-        instance.recordedFrames.push({ data: jpegBuf, timestamp: Date.now() });
-      }
-    });
-
-    await instance.cdpSession.send('Page.startScreencast', {
-      format: 'jpeg',
-      quality: instance.quality,
-      maxWidth: instance.viewport.width,
-      maxHeight: instance.viewport.height,
-      everyNthFrame: 1,
-    });
-
-    instance.screencastActive = true;
-    instance.lastFrameTime = Date.now();
-  }
-
-  private async stopScreencast(instance: PreviewInstance) {
-    if (!instance.screencastActive) return;
-    try {
-      await instance.cdpSession.send('Page.stopScreencast');
-    } catch {}
-    instance.cdpSession.removeAllListeners('Page.screencastFrame');
-    instance.screencastActive = false;
+    const instance = await this.backend.create(key, opts);
+    this.instances.set(key, instance);
+    return instance;
   }
 
   async destroy(projectId: string, tabId: string) {
@@ -276,19 +69,8 @@ class PreviewManager {
     const instance = this.instances.get(key);
     if (!instance) return;
 
-    await this.stopScreencast(instance);
-    try {
-      await instance.browser.close();
-    } catch {}
-    this.releaseCdpPort(instance.cdpPort);
     this.instances.delete(key);
-
-    // Close all WS clients
-    for (const ws of instance.wsClients) {
-      ws.close(1000, 'Preview instance destroyed');
-    }
-
-    console.log(`[preview] Destroyed instance ${key}`);
+    await this.backend.destroy(instance);
   }
 
   async destroyAllForProject(projectId: string) {
@@ -309,159 +91,120 @@ class PreviewManager {
   }) {
     const instance = this.get(projectId, tabId);
     if (!instance) return;
-
-    const newVp = {
-      width: viewport.width,
-      height: viewport.height,
-      deviceScaleFactor: viewport.dpr ?? instance.viewport.deviceScaleFactor,
-      isMobile: viewport.isMobile ?? instance.viewport.isMobile,
-      hasTouch: viewport.hasTouch ?? instance.viewport.hasTouch,
-    };
-
-    // Skip if nothing changed (avoids screencast restart flicker from periodic sync)
-    const cur = instance.viewport;
-    if (cur.width === newVp.width && cur.height === newVp.height &&
-        cur.deviceScaleFactor === newVp.deviceScaleFactor &&
-        cur.isMobile === newVp.isMobile && cur.hasTouch === newVp.hasTouch) {
-      return;
-    }
-
-    await this.stopScreencast(instance);
-
-    instance.viewport = newVp;
-
-    await instance.page.setViewport({
-      width: instance.viewport.width,
-      height: instance.viewport.height,
-      deviceScaleFactor: instance.viewport.deviceScaleFactor,
-      isMobile: instance.viewport.isMobile,
-      hasTouch: instance.viewport.hasTouch,
-    });
-
-    await this.startScreencast(instance);
-    instance.lastActivity = Date.now();
+    await this.backend.setViewport(instance, viewport);
   }
 
   async setQuality(projectId: string, tabId: string, quality: number) {
     const instance = this.get(projectId, tabId);
     if (!instance) return;
-
-    instance.quality = quality;
-    await this.stopScreencast(instance);
-    await this.startScreencast(instance);
+    await this.backend.setQuality(instance, quality);
   }
 
   async navigate(projectId: string, tabId: string, url: string) {
     const instance = this.get(projectId, tabId);
     if (!instance) return;
-    try {
-      await instance.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
-    } catch (err: any) {
-      console.warn(`[preview] Navigate warning: ${err.message}`);
-    }
-    instance.lastActivity = Date.now();
+    await this.backend.navigate(instance, url);
+  }
+
+  async reload(projectId: string, tabId: string) {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return;
+    await this.backend.reload(instance);
   }
 
   async dispatchMouseEvent(projectId: string, tabId: string, params: any) {
     const instance = this.get(projectId, tabId);
     if (!instance) return;
-    await instance.cdpSession.send('Input.dispatchMouseEvent', params);
-    instance.lastActivity = Date.now();
+    await this.backend.dispatchMouseEvent(instance, params);
   }
 
   async dispatchKeyEvent(projectId: string, tabId: string, params: any) {
     const instance = this.get(projectId, tabId);
     if (!instance) return;
-    await instance.cdpSession.send('Input.dispatchKeyEvent', params);
-    instance.lastActivity = Date.now();
+    await this.backend.dispatchKeyEvent(instance, params);
   }
 
   async insertText(projectId: string, tabId: string, text: string) {
     const instance = this.get(projectId, tabId);
     if (!instance) return;
-    await instance.cdpSession.send('Input.insertText', { text });
-    instance.lastActivity = Date.now();
+    await this.backend.insertText(instance, text);
   }
 
   async dispatchScrollEvent(projectId: string, tabId: string, params: { x: number; y: number; deltaX: number; deltaY: number }) {
     const instance = this.get(projectId, tabId);
     if (!instance) return;
-    await instance.cdpSession.send('Input.dispatchMouseEvent', {
-      type: 'mouseWheel',
-      x: params.x,
-      y: params.y,
-      deltaX: params.deltaX,
-      deltaY: params.deltaY,
-    });
-    instance.lastActivity = Date.now();
+    await this.backend.dispatchScrollEvent(instance, params);
+  }
+
+  handleDialogResponse(projectId: string, tabId: string, dialogId: string, accept: boolean, promptText?: string) {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return;
+    this.backend.handleDialogResponse(instance, dialogId, accept, promptText);
+  }
+
+  async handleFileChooserResponse(projectId: string, tabId: string, backendNodeId: number, files: string[]) {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return;
+    await this.backend.handleFileChooserResponse(instance, backendNodeId, files);
+  }
+
+  getDownloadPath(projectId: string, tabId: string, guid: string): string | null {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return null;
+    return this.backend.getDownloadPath(instance, guid);
+  }
+
+  // --- Shadow overlay response handlers ---
+
+  async handleSelectResponse(projectId: string, tabId: string, selectorPath: string, value: string) {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return;
+    await this.backend.handleSelectResponse(instance, selectorPath, value);
+  }
+
+  async handlePickerResponse(projectId: string, tabId: string, selectorPath: string, value: string, inputType: string) {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return;
+    await this.backend.handlePickerResponse(instance, selectorPath, value, inputType);
+  }
+
+  handleAuthResponse(projectId: string, tabId: string, requestId: string, username: string, password: string) {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return;
+    this.backend.handleAuthResponse(instance, requestId, username, password);
+  }
+
+  handleAuthCancel(projectId: string, tabId: string, requestId: string) {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return;
+    this.backend.handleAuthCancel(instance, requestId);
+  }
+
+  async handleContextMenuAction(projectId: string, tabId: string, action: string, params: any) {
+    const instance = this.get(projectId, tabId);
+    if (!instance) return;
+    await this.backend.handleContextMenuAction(instance, action, params);
   }
 
   async screenshot(projectId: string, tabId: string, fullPage?: boolean): Promise<string> {
     const instance = this.get(projectId, tabId);
     if (!instance) throw new Error('Preview instance not found');
-    const data = await instance.page.screenshot({
-      fullPage: !!fullPage,
-      type: 'png',
-      encoding: 'base64',
-    }) as string;
-    return data;
+    return this.backend.screenshot(instance, fullPage);
   }
 
   startRecording(projectId: string, tabId: string) {
     const instance = this.get(projectId, tabId);
     if (!instance) return;
-    instance.recording = true;
-    instance.recordedFrames = [];
-    console.log(`[preview] Recording started for ${this.makeKey(projectId, tabId)}`);
+    this.backend.startRecording(instance);
   }
 
   async stopRecording(projectId: string, tabId: string): Promise<string> {
     const instance = this.get(projectId, tabId);
     if (!instance) throw new Error('Preview instance not found');
-
-    instance.recording = false;
-    const frames = instance.recordedFrames;
-    instance.recordedFrames = [];
-
-    if (frames.length === 0) {
-      throw new Error('No frames recorded');
-    }
-
-    console.log(`[preview] Recording stopped for ${this.makeKey(projectId, tabId)}, encoding ${frames.length} frames...`);
-
-    return new Promise<string>((resolve, reject) => {
-      const ffmpeg = spawn(FFMPEG_PATH, [
-        '-f', 'image2pipe',
-        '-framerate', '15',
-        '-i', 'pipe:0',
-        '-c:v', 'libvpx-vp9',
-        '-b:v', '1M',
-        '-f', 'webm',
-        'pipe:1',
-      ]);
-
-      const chunks: Buffer[] = [];
-      ffmpeg.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
-      ffmpeg.stderr.on('data', () => {}); // Suppress stderr
-
-      ffmpeg.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`ffmpeg exited with code ${code}`));
-          return;
-        }
-        const webm = Buffer.concat(chunks);
-        resolve(webm.toString('base64'));
-      });
-
-      ffmpeg.on('error', reject);
-
-      // Write frames
-      for (const frame of frames) {
-        ffmpeg.stdin.write(frame.data);
-      }
-      ffmpeg.stdin.end();
-    });
+    return this.backend.stopRecording(instance);
   }
+
+  // --- Cleanup ---
 
   private cleanupInactive() {
     const now = Date.now();
@@ -472,10 +215,10 @@ class PreviewManager {
         this.destroy(projectId, tabId);
         continue;
       }
-      // Watchdog: restart screencast if no frames received for 5s and there are active clients
-      if (instance.wsClients.size > 0 && instance.screencastActive && now - instance.lastFrameTime > 5000) {
-        console.log(`[preview] Screencast stalled for ${key}, restarting...`);
-        this.stopScreencast(instance).then(() => this.startScreencast(instance)).catch(() => {});
+      // Watchdog: restart stream if no frames received for 5s and there are active clients
+      if (instance.wsClients.size > 0 && now - instance.lastFrameTime > 5000) {
+        console.log(`[preview] Stream stalled for ${key}, restarting...`);
+        this.backend.restartStream(instance).catch(() => {});
       }
     }
   }
@@ -488,6 +231,9 @@ class PreviewManager {
     for (const [key] of this.instances) {
       const [projectId, tabId] = key.split('/');
       await this.destroy(projectId, tabId);
+    }
+    if (this.backend) {
+      await this.backend.shutdown();
     }
   }
 }

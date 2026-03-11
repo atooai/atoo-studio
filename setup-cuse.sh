@@ -32,6 +32,10 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 NATIVE_DIR="$SCRIPT_DIR/src/serial/native"
 BUILD_DIR="$NATIVE_DIR/build/Release"
+# Install to ~/.ccproxy/bin/ so node-gyp rebuilds don't wipe capabilities/suid
+INSTALL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
+INSTALL_HOME="$(eval echo "~$INSTALL_USER")"
+INSTALL_DIR="$INSTALL_HOME/.ccproxy/bin"
 
 echo "=== Setting up CUSE for ccproxy ==="
 
@@ -124,7 +128,29 @@ if [ "$IS_CONTAINER" = true ]; then
   fi
 fi
 
-# 1. Install libfuse3-dev if needed
+# 1. Ensure build tools are available (gcc, pkg-config)
+MISSING_PKGS=()
+command -v gcc &>/dev/null || MISSING_PKGS+=(gcc)
+command -v pkg-config &>/dev/null || MISSING_PKGS+=(pkg-config)
+
+if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+  echo "Installing missing build tools: ${MISSING_PKGS[*]}..."
+  if command -v apt-get &>/dev/null; then
+    apt-get install -y "${MISSING_PKGS[@]}"
+  elif command -v dnf &>/dev/null; then
+    # pkg-config is pkgconf-pkg-config on Fedora/RHEL
+    DNF_PKGS=("${MISSING_PKGS[@]/pkg-config/pkgconf-pkg-config}")
+    dnf install -y "${DNF_PKGS[@]}"
+  elif command -v pacman &>/dev/null; then
+    PAC_PKGS=("${MISSING_PKGS[@]/pkg-config/pkgconf}")
+    pacman -S --noconfirm "${PAC_PKGS[@]}"
+  else
+    echo "Error: Missing ${MISSING_PKGS[*]}. Install them manually."
+    exit 1
+  fi
+fi
+
+# 2. Install libfuse3-dev if needed
 if ! pkg-config --exists fuse3 2>/dev/null; then
   echo "Installing libfuse3-dev..."
   if command -v apt-get &>/dev/null; then
@@ -144,7 +170,7 @@ if ! pkg-config --exists fuse3 2>/dev/null; then
   fi
 fi
 
-# 2. Load cuse kernel module (skip in containers — must be done on host)
+# 3. Load cuse kernel module (skip in containers — must be done on host)
 if [ "$IS_CONTAINER" = true ]; then
   if [ ! -e /dev/cuse ]; then
     echo "Error: /dev/cuse not available. Load cuse module on the host first."
@@ -177,7 +203,7 @@ else
   fi
 fi
 
-# 3. Build the CUSE serial helper
+# 4. Build the CUSE serial helper
 echo "Building cuse_serial..."
 mkdir -p "$BUILD_DIR"
 gcc -Wall -Wextra -O2 \
@@ -188,9 +214,14 @@ gcc -Wall -Wextra -O2 \
 
 echo "Built: $BUILD_DIR/cuse_serial"
 
-# 4. Set capability so it can create /dev/ entries without full root
+# 5. Install to ~/.ccproxy/bin/ so node-gyp rebuilds don't wipe capabilities
+echo "Installing cuse_serial to $INSTALL_DIR/ ..."
+mkdir -p "$INSTALL_DIR"
+cp "$BUILD_DIR/cuse_serial" "$INSTALL_DIR/cuse_serial"
+
+# 6. Set capability so it can create /dev/ entries without full root
 echo "Setting CAP_SYS_ADMIN capability on cuse_serial..."
-if setcap cap_sys_admin+ep "$BUILD_DIR/cuse_serial" 2>/dev/null; then
+if setcap cap_sys_admin+ep "$INSTALL_DIR/cuse_serial" 2>/dev/null; then
   echo "Capability set. cuse_serial can run without root."
 else
   echo ""
@@ -198,8 +229,8 @@ else
   echo "  The cuse_serial binary will need to run as root."
   echo ""
   echo "  To allow non-root usage, set the suid bit instead:"
-  echo "    sudo chown root:root $BUILD_DIR/cuse_serial"
-  echo "    sudo chmod u+s $BUILD_DIR/cuse_serial"
+  echo "    sudo chown root:root $INSTALL_DIR/cuse_serial"
+  echo "    sudo chmod u+s $INSTALL_DIR/cuse_serial"
   echo ""
   echo "  Or run ccproxy itself as root (not recommended)."
   echo ""
@@ -207,13 +238,13 @@ else
   # In container mode, set suid as fallback since setcap doesn't work
   if [ "$IS_CONTAINER" = true ]; then
     echo "  Applying suid fallback for container environment..."
-    chown root:root "$BUILD_DIR/cuse_serial"
-    chmod u+s "$BUILD_DIR/cuse_serial"
+    chown root:root "$INSTALL_DIR/cuse_serial"
+    chmod u+s "$INSTALL_DIR/cuse_serial"
     echo "  Done: suid bit set on cuse_serial."
   fi
 fi
 
-# 5. Add udev rule so the created /dev/ttyVS* devices are world-accessible
+# 7. Add udev rule so the created /dev/ttyVS* devices are world-accessible
 if command -v udevadm &>/dev/null; then
   UDEV_RULE="/etc/udev/rules.d/99-ccproxy-serial.rules"
   echo 'KERNEL=="ttyVS[0-9]*", MODE="0666"' > "$UDEV_RULE"

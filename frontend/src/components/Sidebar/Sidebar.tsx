@@ -34,8 +34,16 @@ export function Sidebar() {
     <div id="sidebar" className={sidebarCollapsed ? 'collapsed' : ''}>
       <div className="sidebar-header">
         <div>
-          <div className="sidebar-logo">VCC</div>
-          <div className="sidebar-logo-sub">Command Center</div>
+          <div className="sidebar-logo">
+            <img className="sidebar-logo-icon" src="/logo_64x64.png" alt="" />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
+                <span className="sidebar-logo-text">too Studio</span>
+                <span className="sidebar-logo-badge">ADE</span>
+              </div>
+              <div className="sidebar-logo-sub">Agent Development Environment</div>
+            </div>
+          </div>
         </div>
         <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title="Collapse sidebar">▸</button>
       </div>

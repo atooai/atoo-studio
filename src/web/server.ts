@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import cookieParser from 'cookie-parser';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
@@ -15,17 +16,22 @@ import { changesRouter } from '../handlers/changes.js';
 import { projectsRouter } from '../handlers/projects.js';
 import { environmentsRouter, setBroadcastSettingsChange } from '../handlers/environments.js';
 import { sshRouter } from '../handlers/ssh.js';
+import { authRouter } from '../handlers/auth.js';
+import { usersRouter } from '../handlers/users.js';
 import { isAgentWsUpgrade, handleAgentWsUpgrade } from '../ws/agent-ws.js';
 import { agentRegistry } from '../agents/registry.js';
 import { createPortProxy, portProxyMiddleware, isPortProxyUpgrade, handlePortProxyUpgrade } from './port-proxy.js';
 import { isPreviewWsUpgrade, handlePreviewWsUpgrade } from './preview-ws.js';
+import { previewManager } from '../services/preview-manager.js';
 import { devtoolsProxyMiddleware, isDevtoolsWsUpgrade, handleDevtoolsWsUpgrade } from './devtools-proxy.js';
 import forge from 'node-forge';
 import { CA_CERT_PATH, CA_KEY_PATH, PROJECT_ROOT } from '../config.js';
 import { serialManager } from '../serial/manager.js';
 import { searchSessionHistory } from '../services/session-search.js';
+import { containersRouter, getContainerRuntimes } from '../handlers/containers.js';
 import { handleHookCallback } from '../agents/lib/claude/hooks.js';
 import { handleCodexNotifyCallback } from '../agents/lib/codex/notify.js';
+import { requireAuth, authenticateWsUpgrade, isAuthEnabled } from '../auth/middleware.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -51,6 +57,33 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   app.use(portProxyMiddleware(portProxy));
 
   app.use(express.json({ limit: '50mb' }));
+  app.use(cookieParser());
+
+  // Auth routes (public — handles its own auth checks internally)
+  app.use(authRouter);
+  app.use(usersRouter);
+
+  // Serve CA certificate for trust installation (PEM for Linux/macOS, DER .crt for Windows)
+  app.get('/ca.pem', (_req, res) => {
+    try {
+      const caPem = fs.readFileSync(CA_CERT_PATH, 'utf-8');
+      res.setHeader('Content-Type', 'application/x-pem-file');
+      res.setHeader('Content-Disposition', 'attachment; filename="atoo-studio-ca.pem"');
+      res.send(caPem);
+    } catch (err: any) {
+      res.status(500).json({ error: 'CA certificate not found' });
+    }
+  });
+  app.get('/ca.crt', (_req, res) => {
+    try {
+      const caPem = fs.readFileSync(CA_CERT_PATH, 'utf-8');
+      res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+      res.setHeader('Content-Disposition', 'attachment; filename="atoo-studio-ca.crt"');
+      res.send(caPem);
+    } catch (err: any) {
+      res.status(500).json({ error: 'CA certificate not found' });
+    }
+  });
 
   // API routes for the React frontend
 
@@ -277,6 +310,12 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
   });
 
+  // ═══════════════════════════════════════════════════════
+  // Auth middleware — protects all routes below this point
+  // Routes above (CA certs, MCP callbacks, hooks, codex) are exempt
+  // ═══════════════════════════════════════════════════════
+  app.use('/api', requireAuth);
+
   // Mount changes API routes
   app.use(changesRouter);
 
@@ -289,8 +328,49 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   // Mount SSH API routes
   app.use(sshRouter);
 
+  // Mount container management API routes
+  app.use(containersRouter);
+
   // Mount DevTools proxy
   app.use(devtoolsProxyMiddleware());
+
+  // Preview: upload files for file chooser interception
+  app.post('/api/preview/:projectId/:tabId/upload', (req, res) => {
+    const { projectId, tabId } = req.params;
+    const { files, backendNodeId } = req.body;
+    // files = [{ name: string, data: string (base64) }]
+    if (!Array.isArray(files) || !backendNodeId) {
+      return res.status(400).json({ error: 'files array and backendNodeId required' });
+    }
+    const instance = previewManager.get(decodeURIComponent(projectId), decodeURIComponent(tabId));
+    if (!instance) return res.status(404).json({ error: 'Preview instance not found' });
+
+    const tmpDir = path.join(os.tmpdir(), 'ccproxy-uploads', `${projectId}_${tabId}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    const filePaths: string[] = [];
+    for (const f of files) {
+      const filePath = path.join(tmpDir, f.name);
+      fs.writeFileSync(filePath, Buffer.from(f.data, 'base64'));
+      filePaths.push(filePath);
+    }
+
+    previewManager.handleFileChooserResponse(
+      decodeURIComponent(projectId), decodeURIComponent(tabId),
+      backendNodeId, filePaths,
+    ).then(() => res.json({ success: true }))
+     .catch((err: any) => res.status(500).json({ error: err.message }));
+  });
+
+  // Preview: download intercepted file
+  app.get('/api/preview/:projectId/:tabId/download/:guid', (req, res) => {
+    const { projectId, tabId, guid } = req.params;
+    const filePath = previewManager.getDownloadPath(
+      decodeURIComponent(projectId), decodeURIComponent(tabId), guid,
+    );
+    if (!filePath) return res.status(404).json({ error: 'Download not found' });
+    res.download(filePath);
+  });
 
   // List running shell terminals
   app.get('/api/terminals', (_req, res) => {
@@ -589,6 +669,17 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
       return;
     }
 
+    // Authenticate WebSocket upgrades when auth is enabled
+    if (isAuthEnabled()) {
+      const user = authenticateWsUpgrade(req);
+      if (!user) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      (req as any).user = user;
+    }
+
     const url = req.url || '';
 
     // /ws/agent/:sessionId — abstract agent WebSocket (new)
@@ -809,7 +900,136 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
               // Keep handler alive so scrollback continues accumulating even with no browsers
             });
           });
-        } else {
+        }
+
+        // /ws/container-logs/:runtime/:containerId — stream container logs
+        const logsMatch = url.match(/^\/ws\/container-logs\/([^/?]+)\/([^/?]+)/);
+        if (logsMatch) {
+          const [, runtime, containerId] = logsMatch;
+          const runtimes = getContainerRuntimes();
+          const validRuntimes = ['docker', 'podman', 'lxc'];
+          if (!validRuntimes.includes(runtime) || !(runtimes as any)[runtime]?.accessible) {
+            socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+          const idRegex = /^[a-zA-Z0-9][a-zA-Z0-9_.:/-]*$/;
+          if (!idRegex.test(containerId) || containerId.length > 256) {
+            socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            console.log(`[ws:container-logs] Streaming logs for ${runtime}/${containerId}`);
+            let cmd: string;
+            let args: string[];
+            if (runtime === 'lxc') {
+              cmd = 'lxc';
+              args = ['exec', containerId, '--', 'journalctl', '-f'];
+            } else {
+              cmd = runtime;
+              args = ['logs', '-f', '--tail', '200', containerId];
+            }
+
+            const logPty = pty.spawn(cmd, args, {
+              name: 'xterm-256color',
+              cols: 200,
+              rows: 50,
+            });
+
+            const handler = logPty.onData((data: string) => {
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'output', data }));
+              }
+            });
+
+            logPty.onExit(() => {
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'exit' }));
+                ws.close();
+              }
+            });
+
+            ws.on('close', () => {
+              console.log(`[ws:container-logs] Disconnected for ${runtime}/${containerId}`);
+              handler.dispose();
+              logPty.kill();
+            });
+          });
+          return;
+        }
+
+        // /ws/container-shell/:runtime/:containerId — interactive shell
+        const shellContainerMatch = url.match(/^\/ws\/container-shell\/([^/?]+)\/([^/?]+)/);
+        if (shellContainerMatch) {
+          const [, runtime, containerId] = shellContainerMatch;
+          const runtimes = getContainerRuntimes();
+          const validRuntimes = ['docker', 'podman', 'lxc'];
+          if (!validRuntimes.includes(runtime) || !(runtimes as any)[runtime]?.accessible) {
+            socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+          const idRegex = /^[a-zA-Z0-9][a-zA-Z0-9_.:/-]*$/;
+          if (!idRegex.test(containerId) || containerId.length > 256) {
+            socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            console.log(`[ws:container-shell] Shell into ${runtime}/${containerId}`);
+            let cmd: string;
+            let args: string[];
+            if (runtime === 'lxc') {
+              cmd = 'lxc';
+              args = ['exec', containerId, '--', '/bin/sh'];
+            } else {
+              cmd = runtime;
+              args = ['exec', '-it', containerId, '/bin/sh'];
+            }
+
+            const shellPty = pty.spawn(cmd, args, {
+              name: 'xterm-256color',
+              cols: 80,
+              rows: 24,
+            });
+
+            const handler = shellPty.onData((data: string) => {
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'output', data }));
+              }
+            });
+
+            shellPty.onExit(() => {
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'exit' }));
+                ws.close();
+              }
+            });
+
+            ws.on('message', (raw) => {
+              try {
+                const msg = JSON.parse(raw.toString());
+                if (msg.type === 'input' && typeof msg.data === 'string') {
+                  shellPty.write(msg.data);
+                } else if (msg.type === 'resize' && msg.cols && msg.rows) {
+                  shellPty.resize(msg.cols, msg.rows);
+                }
+              } catch {}
+            });
+
+            ws.on('close', () => {
+              console.log(`[ws:container-shell] Disconnected for ${runtime}/${containerId}`);
+              handler.dispose();
+              shellPty.kill();
+            });
+          });
+          return;
+        }
+
+        if (!logsMatch && !shellContainerMatch && !shellMatch) {
           socket.destroy();
         }
       }

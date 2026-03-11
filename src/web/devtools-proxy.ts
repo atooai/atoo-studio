@@ -4,6 +4,31 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Duplex } from 'stream';
 import { previewManager } from '../services/preview-manager.js';
 
+/** Make an HTTP GET request — via TCP port or unix socket */
+function httpGet(instance: { cdpPort?: number; cdpSocketPath?: string }, urlPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const opts = instance.cdpPort
+      ? { host: 'localhost', port: instance.cdpPort, path: urlPath }
+      : { socketPath: instance.cdpSocketPath!, path: urlPath };
+    const req = http.get(opts, (resp) => {
+      const chunks: Buffer[] = [];
+      resp.on('data', (c: Buffer) => chunks.push(c));
+      resp.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    });
+    req.on('error', reject);
+    req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
+  });
+}
+
+/** Build WS URL to Chrome CDP — via TCP or unix socket */
+function buildCdpWsUrl(instance: { cdpPort?: number; cdpSocketPath?: string }, cdpPath: string): string {
+  if (instance.cdpPort) {
+    return `ws://localhost:${instance.cdpPort}/${cdpPath}`;
+  }
+  // ws+unix:// for connecting via unix socket
+  return `ws+unix://${instance.cdpSocketPath}:/${cdpPath}`;
+}
+
 // HTTP proxy middleware for Chrome DevTools frontend
 export function devtoolsProxyMiddleware(): express.Router {
   const router = express.Router();
@@ -15,41 +40,26 @@ export function devtoolsProxyMiddleware(): express.Router {
     if (!instance) {
       return res.status(404).json({ error: 'Preview instance not found' });
     }
+    if (!instance.cdpPort && !instance.cdpSocketPath) {
+      return res.status(400).json({ error: 'DevTools not available for this instance' });
+    }
 
     try {
-      // Fetch the target list from Chrome to find the page target ID
-      const targetsJson = await new Promise<string>((resolve, reject) => {
-        http.get(`http://localhost:${instance.cdpPort}/json`, (resp) => {
-          const chunks: Buffer[] = [];
-          resp.on('data', (c: Buffer) => chunks.push(c));
-          resp.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-        }).on('error', reject);
-      });
-
+      const targetsJson = await httpGet(instance, '/json');
       const targets = JSON.parse(targetsJson);
       const pageTarget = targets.find((t: any) => t.type === 'page');
       if (!pageTarget) {
         return res.status(404).json({ error: 'No page target found' });
       }
 
-      // Also fetch the browser version info which has the browser WS endpoint
-      const versionJson = await new Promise<string>((resolve, reject) => {
-        http.get(`http://localhost:${instance.cdpPort}/json/version`, (resp) => {
-          const chunks: Buffer[] = [];
-          resp.on('data', (c: Buffer) => chunks.push(c));
-          resp.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-        }).on('error', reject);
-      });
+      const versionJson = await httpGet(instance, '/json/version');
       const version = JSON.parse(versionJson);
 
-      // Build the devtools frontend URL
-      // DevTools ws= param format: host:port/path (no protocol)
       const host = req.get('host')!;
       const wsPath = `ws/devtools/${encodeURIComponent(projectId)}/${encodeURIComponent(tabId)}/devtools/page/${pageTarget.id}`;
       const devtoolsFrontend = `/apps/${encodeURIComponent(projectId)}/${encodeURIComponent(tabId)}/devtools/inspector.html?${req.protocol === 'https' ? 'wss' : 'ws'}=${host}/${wsPath}`;
 
       console.log(`[devtools-proxy] Target: ${pageTarget.id} (${pageTarget.url})`);
-      console.log(`[devtools-proxy] Chrome WS: ${pageTarget.webSocketDebuggerUrl}`);
       console.log(`[devtools-proxy] Frontend URL: ${devtoolsFrontend}`);
 
       res.json({
@@ -71,15 +81,21 @@ export function devtoolsProxyMiddleware(): express.Router {
     if (!instance) {
       return res.status(404).json({ error: 'Preview instance not found' });
     }
+    if (!instance.cdpPort && !instance.cdpSocketPath) {
+      return res.status(400).json({ error: 'DevTools not available for this instance' });
+    }
 
     const devtoolsPath = (req.params as any)[0] || '';
     const queryString = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
-    const targetUrl = `http://localhost:${instance.cdpPort}/devtools/${devtoolsPath}${queryString}`;
+    const targetPath = `/devtools/${devtoolsPath}${queryString}`;
 
     try {
-      const proxyReq = http.get(targetUrl, (proxyRes) => {
+      const opts = instance.cdpPort
+        ? { host: 'localhost', port: instance.cdpPort, path: targetPath }
+        : { socketPath: instance.cdpSocketPath!, path: targetPath };
+
+      const proxyReq = http.get(opts, (proxyRes) => {
         res.status(proxyRes.statusCode || 200);
-        // Forward headers
         for (const [key, val] of Object.entries(proxyRes.headers)) {
           if (key !== 'transfer-encoding' && val) {
             res.set(key, val as string);
@@ -122,19 +138,18 @@ export function handleDevtoolsWsUpgrade(
   const cdpPath = match[3];
 
   const instance = previewManager.get(projectId, tabId);
-  if (!instance) {
+  if (!instance || (!instance.cdpPort && !instance.cdpSocketPath)) {
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
     socket.destroy();
     return;
   }
 
-  const targetWsUrl = `ws://localhost:${instance.cdpPort}/${cdpPath}`;
+  const targetWsUrl = buildCdpWsUrl(instance, cdpPath);
   console.log(`[devtools-proxy] WS upgrade: ${cdpPath} → ${targetWsUrl}`);
 
   wss.handleUpgrade(req, socket, head, (clientWs) => {
     const targetWs = new WebSocket(targetWsUrl);
 
-    // Buffer messages from client until target is connected
     const bufferedMessages: (Buffer | string)[] = [];
     let targetReady = false;
 
@@ -152,7 +167,6 @@ export function handleDevtoolsWsUpgrade(
       console.log(`[devtools-proxy] WS connected to Chrome CDP (${cdpPath})`);
       targetReady = true;
 
-      // Flush buffered messages
       for (const msg of bufferedMessages) {
         if (targetWs.readyState === 1) {
           targetWs.send(msg);

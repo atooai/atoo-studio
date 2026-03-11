@@ -196,6 +196,10 @@ async function handleClientMessage(
       await previewManager.navigate(projectId, tabId, msg.url);
       break;
 
+    case 'reload':
+      await previewManager.reload(projectId, tabId);
+      break;
+
     case 'viewport':
       await previewManager.setViewport(projectId, tabId, {
         width: msg.width,
@@ -208,6 +212,35 @@ async function handleClientMessage(
 
     case 'quality':
       await previewManager.setQuality(projectId, tabId, msg.quality);
+      break;
+
+    case 'dialog_response':
+      previewManager.handleDialogResponse(projectId, tabId, msg.dialogId, msg.accept, msg.promptText);
+      break;
+
+    case 'file_chooser_response':
+      await previewManager.handleFileChooserResponse(projectId, tabId, msg.backendNodeId, msg.files || []);
+      break;
+
+    // Shadow overlay responses
+    case 'select_response':
+      await previewManager.handleSelectResponse(projectId, tabId, msg.selectorPath, msg.value);
+      break;
+
+    case 'picker_response':
+      await previewManager.handlePickerResponse(projectId, tabId, msg.selectorPath, msg.value, msg.inputType);
+      break;
+
+    case 'auth_response':
+      previewManager.handleAuthResponse(projectId, tabId, msg.requestId, msg.username, msg.password);
+      break;
+
+    case 'auth_cancel':
+      previewManager.handleAuthCancel(projectId, tabId, msg.requestId);
+      break;
+
+    case 'context_menu_action':
+      await previewManager.handleContextMenuAction(projectId, tabId, msg.action, msg);
       break;
   }
 }

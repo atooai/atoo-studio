@@ -14,13 +14,26 @@ interface NativeBinding {
   closeFd(fd: number): void;
 }
 
-// Try loading from build/Release first (node-gyp output location)
-let native: NativeBinding;
-try {
-  native = require(path.join(__dirname, 'native', 'build', 'Release', 'pty_pair.node'));
-} catch {
-  // Fallback: when running from dist/, the native dir is at the source location
-  native = require(path.join(__dirname, '..', '..', '..', 'src', 'serial', 'native', 'build', 'Release', 'pty_pair.node'));
+let native: NativeBinding | null = null;
+
+function loadNative(): NativeBinding {
+  if (native) return native;
+  try {
+    native = require(path.join(__dirname, 'native', 'build', 'Release', 'pty_pair.node'));
+  } catch {
+    // Fallback: when running from dist/, the native dir is at the source location
+    native = require(path.join(__dirname, '..', '..', '..', 'src', 'serial', 'native', 'build', 'Release', 'pty_pair.node'));
+  }
+  return native!;
+}
+
+export function isPtyAvailable(): boolean {
+  try {
+    loadNative();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface PtyPair {
@@ -38,7 +51,8 @@ export interface PtyPair {
 const READ_BUF_SIZE = 4096;
 
 export function createPtyPair(): PtyPair {
-  const { masterFd, slavePath } = native.createPtyPair();
+  const n = loadNative();
+  const { masterFd, slavePath } = n.createPtyPair();
   const readBuf = Buffer.alloc(READ_BUF_SIZE);
   let closed = false;
 
@@ -50,29 +64,29 @@ export function createPtyPair(): PtyPair {
 
     write(data: Buffer): number {
       if (closed) return -1;
-      return native.writeMaster(masterFd, data, data.length);
+      return n.writeMaster(masterFd, data, data.length);
     },
 
     read(): Buffer | null {
       if (closed) return null;
-      const n = native.readMaster(masterFd, readBuf);
-      if (n <= 0) return null; // 0 = EAGAIN, -1 = closed/error
-      return Buffer.from(readBuf.subarray(0, n));
+      const nr = n.readMaster(masterFd, readBuf);
+      if (nr <= 0) return null; // 0 = EAGAIN, -1 = closed/error
+      return Buffer.from(readBuf.subarray(0, nr));
     },
 
     getModemBits(): { dtr: boolean; rts: boolean } {
       if (closed) return { dtr: false, rts: false };
-      return native.getModemBits(masterFd);
+      return n.getModemBits(masterFd);
     },
 
     setModemBits(dtr: boolean, rts: boolean): void {
-      if (!closed) native.setModemBits(masterFd, dtr, rts);
+      if (!closed) n.setModemBits(masterFd, dtr, rts);
     },
 
     close(): void {
       if (!closed) {
         closed = true;
-        native.closeFd(masterFd);
+        n.closeFd(masterFd);
       }
     },
   };

@@ -4,6 +4,7 @@ import path from 'path';
 import { vccDb } from '../state/db.js';
 import * as gitOps from '../services/git-ops.js';
 import { watchProject } from '../services/project-watcher.js';
+import { isAuthEnabled } from '../auth/middleware.js';
 
 export const environmentsRouter = Router();
 
@@ -17,8 +18,12 @@ export function setBroadcastSettingsChange(fn: typeof broadcastSettingsChange) {
 // ENVIRONMENT ENDPOINTS
 // ═══════════════════════════════════════════════════
 
-// List all environments (with project_count)
-environmentsRouter.get('/api/environments', (_req, res) => {
+// List environments (filtered by user when auth is enabled)
+environmentsRouter.get('/api/environments', (req, res) => {
+  if (isAuthEnabled() && req.user) {
+    const envs = vccDb.listEnvironmentsForUser(req.user.id);
+    return res.json(envs);
+  }
   const envs = vccDb.listEnvironments();
   res.json(envs);
 });
@@ -27,15 +32,73 @@ environmentsRouter.get('/api/environments', (_req, res) => {
 environmentsRouter.post('/api/environments', (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
+  if (isAuthEnabled() && req.user) {
+    const env = vccDb.createEnvironmentWithOwner(name, req.user.id);
+    return res.json(env);
+  }
   const env = vccDb.createEnvironment(name);
   res.json(env);
 });
 
-// Delete environment
+// Delete environment (owner only when auth is enabled)
 environmentsRouter.delete('/api/environments/:id', (req, res) => {
+  if (isAuthEnabled() && req.user) {
+    const owner = vccDb.getEnvironmentOwner(req.params.id);
+    if (owner !== req.user.id) {
+      return res.status(403).json({ error: 'Only the environment owner can delete it' });
+    }
+  }
   const deleted = vccDb.deleteEnvironment(req.params.id);
   if (!deleted) return res.status(404).json({ error: 'Environment not found' });
   res.json({ success: true });
+});
+
+// ═══════════════════════════════════════════════════
+// ENVIRONMENT SHARING
+// ═══════════════════════════════════════════════════
+
+// List shares for an environment
+environmentsRouter.get('/api/environments/:id/shares', (req, res) => {
+  if (isAuthEnabled() && req.user) {
+    if (!vccDb.canAccessEnvironment(req.user.id, req.params.id)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+  }
+  const shares = vccDb.listEnvironmentShares(req.params.id);
+  res.json(shares);
+});
+
+// Share environment with a user (owner only)
+environmentsRouter.post('/api/environments/:id/shares', (req, res) => {
+  const { user_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+
+  if (isAuthEnabled() && req.user) {
+    const owner = vccDb.getEnvironmentOwner(req.params.id);
+    if (owner !== req.user.id) {
+      return res.status(403).json({ error: 'Only the environment owner can share it' });
+    }
+  }
+
+  const targetUser = vccDb.getUser(user_id);
+  if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+  vccDb.shareEnvironment(req.params.id, user_id, req.user?.id || 'system');
+  res.json({ ok: true });
+});
+
+// Revoke share
+environmentsRouter.delete('/api/environments/:id/shares/:userId', (req, res) => {
+  if (isAuthEnabled() && req.user) {
+    const owner = vccDb.getEnvironmentOwner(req.params.id);
+    if (owner !== req.user.id) {
+      return res.status(403).json({ error: 'Only the environment owner can manage shares' });
+    }
+  }
+
+  const deleted = vccDb.unshareEnvironment(req.params.id, req.params.userId);
+  if (!deleted) return res.status(404).json({ error: 'Share not found' });
+  res.json({ ok: true });
 });
 
 // ═══════════════════════════════════════════════════
@@ -44,6 +107,9 @@ environmentsRouter.delete('/api/environments/:id', (req, res) => {
 
 // Get projects in an environment (with live isGit + pe_id)
 environmentsRouter.get('/api/environments/:id/projects', (req, res) => {
+  if (isAuthEnabled() && req.user && !vccDb.canAccessEnvironment(req.user.id, req.params.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   const env = vccDb.getEnvironment(req.params.id);
   if (!env) return res.status(404).json({ error: 'Environment not found' });
 
@@ -64,6 +130,9 @@ environmentsRouter.get('/api/environments/:id/projects', (req, res) => {
 
 // Create project + link to environment
 environmentsRouter.post('/api/environments/:id/projects', async (req, res) => {
+  if (isAuthEnabled() && req.user && !vccDb.canAccessEnvironment(req.user.id, req.params.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   const env = vccDb.getEnvironment(req.params.id);
   if (!env) return res.status(404).json({ error: 'Environment not found' });
 
