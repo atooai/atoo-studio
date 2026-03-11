@@ -355,7 +355,6 @@ export class HeadlessBackend implements PreviewBackend {
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
         // Permission auto-grant
-        '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
         '--auto-accept-camera-and-microphone-capture',
       ];

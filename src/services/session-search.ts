@@ -19,10 +19,16 @@ interface SearchMatch {
   text: string;        // formatted: [role] snippet
 }
 
+interface SessionInfo {
+  number: number;
+  uuid: string;
+}
+
 interface SearchResult {
   results: SearchMatch[];
   totalMatches: number;
   sessionsSearched: number;
+  sessions: SessionInfo[];  // deduplicated list of sessions that had matches
 }
 
 interface RangeMessage {
@@ -32,6 +38,7 @@ interface RangeMessage {
 
 interface RangeResult {
   session: number;
+  uuid: string | null;
   messages: RangeMessage[];
   totalMessages: number;
 }
@@ -49,9 +56,10 @@ export interface RangeOptions {
   type?: SearchType;
   sessionUuid?: string;
   sort?: SortOrder;
-  session: number;     // session/chainlink number (1-indexed)
-  from: number;        // start message number (inclusive)
-  to: number;          // end message number (inclusive)
+  session?: number;          // session/chainlink number (1-indexed)
+  targetSessionUuid?: string; // UUID of the session to fetch from (alternative to session number)
+  from: number;              // start message number (inclusive)
+  to: number;                // end message number (inclusive)
 }
 
 // --- Helpers ---
@@ -156,7 +164,7 @@ function parseJsonlMessage(jsonLine: string): ParsedMessage | null {
 async function getOrderedSessionFiles(
   cwd: string,
   options: SearchOptions,
-): Promise<Array<{ number: number; path: string }>> {
+): Promise<Array<{ number: number; path: string; uuid: string | null }>> {
   const { type = 'FullProjectSearch', sessionUuid, sort = 'newest_first' } = options;
 
   let jsonlFiles = await agentRegistry.getSessionFilesForProject(cwd);
@@ -180,7 +188,7 @@ async function getOrderedSessionFiles(
     jsonlFiles = filesWithMtime.map(f => f.path);
   }
 
-  return jsonlFiles.map((f, i) => ({ number: i + 1, path: f }));
+  return jsonlFiles.map((f, i) => ({ number: i + 1, path: f, uuid: extractUuidFromPath(f) }));
 }
 
 /**
@@ -220,7 +228,7 @@ export async function searchSessionHistory(
 ): Promise<SearchResult> {
   const sessionFiles = await getOrderedSessionFiles(cwd, options);
   if (!sessionFiles.length) {
-    return { results: [], totalMatches: 0, sessionsSearched: 0 };
+    return { results: [], totalMatches: 0, sessionsSearched: 0, sessions: [] };
   }
 
   const { sort = 'newest_first', type } = options;
@@ -292,7 +300,13 @@ export async function searchSessionHistory(
     }
   }
 
-  return { results: allMatches, totalMatches, sessionsSearched: sessionFiles.length };
+  // Build deduplicated list of sessions that had matches
+  const matchedSessionNumbers = new Set(allMatches.map(m => m.session));
+  const sessions: SessionInfo[] = sessionFiles
+    .filter(sf => matchedSessionNumbers.has(sf.number) && sf.uuid)
+    .map(sf => ({ number: sf.number, uuid: sf.uuid! }));
+
+  return { results: allMatches, totalMatches, sessionsSearched: sessionFiles.length, sessions };
 }
 
 // --- Range ---
@@ -312,9 +326,12 @@ export async function fetchSessionRange(
     sort: options.sort,
   });
 
-  const sf = sessionFiles.find(f => f.number === options.session);
+  // Look up by UUID first, fall back to session number
+  const sf = options.targetSessionUuid
+    ? sessionFiles.find(f => f.uuid === options.targetSessionUuid)
+    : sessionFiles.find(f => f.number === options.session);
   if (!sf) {
-    return { session: options.session, messages: [], totalMessages: 0 };
+    return { session: options.session ?? 0, uuid: options.targetSessionUuid ?? null, messages: [], totalMessages: 0 };
   }
 
   const allMessages = parseFileMessages(sf.path);
@@ -330,7 +347,8 @@ export async function fetchSessionRange(
   }
 
   return {
-    session: options.session,
+    session: sf.number,
+    uuid: sf.uuid,
     messages: rangeMessages,
     totalMessages: allMessages.length,
   };

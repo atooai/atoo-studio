@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { api } from '../../api';
 import { escapeHtml } from '../../utils';
@@ -208,63 +208,100 @@ function ChainCarousel({ group, agentIcons, projectId, openSessionIds }: {
   openSessionIds: Set<string>;
 }) {
   const [activeSlide, setActiveSlide] = useState(group.links.length - 1);
-  const current = group.links[activeSlide];
-  if (!current) return null;
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const isOpen = openSessionIds.has(current.id);
-  const isActive = current.kind === 'active' && current.data.status !== 'ended';
+  // Scroll to initial slide (latest) on mount
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) {
+      const child = el.children[group.links.length - 1] as HTMLElement | undefined;
+      if (child) child.scrollIntoView({ inline: 'start', block: 'nearest' });
+    }
+  }, []);
 
-  const handleClick = () => {
-    if (isOpen) return;
-    // Always resume the latest chain link
+  // Sync activeSlide from scroll position
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const scrollLeft = el.scrollLeft;
+    const childWidth = el.children[0]?.clientWidth || 1;
+    const idx = Math.round(scrollLeft / childWidth);
+    setActiveSlide(Math.min(Math.max(idx, 0), group.links.length - 1));
+  }, [group.links.length]);
+
+  // Scroll to slide when dot is clicked
+  const scrollToSlide = useCallback((i: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const child = el.children[i] as HTMLElement | undefined;
+    if (child) child.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+  }, []);
+
+  const handleResume = useCallback(() => {
     const latest = group.links[group.links.length - 1];
+    if (openSessionIds.has(latest.id)) return;
     if (latest.kind === 'active') {
       (window as any).resumeSession(projectId, latest.id);
     } else {
       (window as any).resumeHistoricalSession(projectId, latest.id);
     }
-  };
+  }, [group.links, projectId, openSessionIds]);
 
   return (
-    <div
-      id={`session-${current.id}`}
-      className={`session-item${isActive ? ' session-running' : ''}${isOpen ? ' session-open' : ''}`}
-      onClick={handleClick}
-      style={{ paddingLeft: '10px' }}
-    >
-      {current.data.agentType && agentIcons.get(current.data.agentType) && (
-        <img src={agentIcons.get(current.data.agentType)} alt="" className="session-agent-icon" />
-      )}
-      <SessionStatusDot node={current} />
-      <div className="session-info">
-        <div className="session-title">
-          {current.kind === 'historical' ? escapeHtml(current.data.title) : current.data.title}
-        </div>
-        <SessionMeta node={current} />
-        {(current.data.cliSessionId || (current.kind === 'historical' && current.data.id)) && (
-          <div className="session-uuid" title={current.data.cliSessionId || current.data.id}>
-            {current.data.cliSessionId || current.data.id}
-          </div>
-        )}
-        {/* Carousel dots */}
-        {group.links.length > 1 && (
-          <div className="session-chain-dots">
-            {group.links.map((link, i) => (
-              <button
-                key={link.id}
-                className={`session-chain-dot${i === activeSlide ? ' active' : ''}`}
-                onClick={(e) => { e.stopPropagation(); setActiveSlide(i); }}
-                title={`Chain link ${i + 1}`}
-              />
-            ))}
-          </div>
-        )}
+    <div className="session-chain-carousel">
+      <div
+        ref={scrollRef}
+        className="session-chain-scroll"
+        onScroll={handleScroll}
+      >
+        {group.links.map((node) => {
+          const s = node.data;
+          const isOpen = openSessionIds.has(node.id);
+          const isActive = node.kind === 'active' && s.status !== 'ended';
+          return (
+            <div
+              key={node.id}
+              id={`session-${node.id}`}
+              className={`session-item session-chain-slide${isActive ? ' session-running' : ''}${isOpen ? ' session-open' : ''}${node.kind === 'historical' ? ' session-historical' : ''}`}
+              onClick={handleResume}
+            >
+              {s.agentType && agentIcons.get(s.agentType) && (
+                <img src={agentIcons.get(s.agentType)} alt="" className="session-agent-icon" />
+              )}
+              <SessionStatusDot node={node} />
+              <div className="session-info">
+                <div className="session-title">
+                  {node.kind === 'historical' ? escapeHtml(s.title) : s.title}
+                </div>
+                <SessionMeta node={node} />
+                {(s.cliSessionId || (node.kind === 'historical' && s.id)) && (
+                  <div className="session-uuid" title={s.cliSessionId || s.id}>
+                    {s.cliSessionId || s.id}
+                  </div>
+                )}
+              </div>
+              {!isOpen && (
+                <button className="session-resume-btn" onClick={(e) => { e.stopPropagation(); handleResume(); }}>Resume</button>
+              )}
+              {isOpen && (
+                <span className="session-open-label">Open</span>
+              )}
+            </div>
+          );
+        })}
       </div>
-      {!isOpen && (
-        <button className="session-resume-btn" onClick={(e) => { e.stopPropagation(); handleClick(); }}>Resume</button>
-      )}
-      {isOpen && (
-        <span className="session-open-label">Open</span>
+      {/* Carousel dots */}
+      {group.links.length > 1 && (
+        <div className="session-chain-dots">
+          {group.links.map((link, i) => (
+            <button
+              key={link.id}
+              className={`session-chain-dot${i === activeSlide ? ' active' : ''}`}
+              onClick={() => scrollToSlide(i)}
+              title={`Chain link ${i + 1}`}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

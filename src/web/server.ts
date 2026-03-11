@@ -319,12 +319,15 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // MCP callback: fetch full messages from a session by range
   app.post('/api/mcp/fetch-history-range', async (req, res) => {
-    const { cwd, type, session_uuid, sort, session, from, to } = req.body;
+    const { cwd, type, session_uuid, sort, session, target_session_uuid, from, to } = req.body;
     if (!cwd || typeof cwd !== 'string') {
       return res.status(400).json({ error: 'cwd is required' });
     }
-    if (session == null || from == null || to == null) {
-      return res.status(400).json({ error: 'session, from, and to are required' });
+    if (session == null && !target_session_uuid) {
+      return res.status(400).json({ error: 'session or target_session_uuid is required' });
+    }
+    if (from == null || to == null) {
+      return res.status(400).json({ error: 'from and to are required' });
     }
     try {
       const result = await fetchSessionRange(cwd, {
@@ -332,6 +335,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         sessionUuid: session_uuid,
         sort: sort || 'newest_first',
         session,
+        targetSessionUuid: target_session_uuid,
         from,
         to,
       });
@@ -553,7 +557,11 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         );
 
         if (resumeUuid) {
-          resolvedResumeUuid = resumeUuid;
+          // Fork always writes Claude JSONL — convert if target is a different family
+          const parentAgentType = parentAgent.getInfo().agentType;
+          resolvedResumeUuid = await agentRegistry.convertForkForAgent(
+            resumeUuid, parentAgentType, type, cwd || parentAgent.getInfo().cwd || '.',
+          );
         } else {
           return res.status(400).json({ error: 'Agent does not support forking or fork point not found' });
         }

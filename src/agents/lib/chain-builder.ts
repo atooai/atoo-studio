@@ -8,90 +8,139 @@
  */
 import type { SessionEvent } from '../../events/types.js';
 import { buildLinkedUuid } from './session-id-utils.js';
-import { writeForkedClaudeJsonl } from './claude/jsonl-writer.js';
 
-const TAIL_EVENT_COUNT = 10;
+const MAX_PAIRS = 10;
 
 /**
- * Extract the events to carry forward into a chain link:
- * - All user messages (to preserve the full conversation intent)
- * - Last N events of any type (to preserve recent context)
- * Deduplicated — if a user message is already in the last N, it's not doubled.
+ * Extract text from an assistant event's content, stripping tool_use blocks and thinking.
+ * Returns only the final text response, or null if there's no text.
+ */
+function extractAssistantText(event: SessionEvent): string | null {
+  const content = (event as any).message?.content;
+  if (typeof content === 'string') return content || null;
+  if (Array.isArray(content)) {
+    const texts = content
+      .filter((b: any) => b.type === 'text')
+      .map((b: any) => b.text || '');
+    const joined = texts.join('\n').trim();
+    return joined || null;
+  }
+  return null;
+}
+
+/**
+ * Extract the last N user messages + their final assistant text responses.
+ * No tool calls, no tool results, no thinking, no intermediate events —
+ * just the clean conversation thread.
  */
 function extractChainEvents(events: SessionEvent[]): SessionEvent[] {
   if (events.length === 0) return [];
 
-  // Collect all user message events
-  const userEvents: SessionEvent[] = events.filter(e => e.type === 'user');
+  // Walk through events and pair each real user text message with the
+  // last assistant text response before the next user message.
+  // Also count hidden events (tool calls, tool results, thinking, etc.)
+  // between each user message so we can inform the LLM.
+  const pairs: { user: SessionEvent; assistant: SessionEvent | null; hiddenCount: number }[] = [];
+  let lastUserIdx = -1;
+  let hiddenCount = 0;
 
-  // Collect last N events
-  const tailEvents = events.slice(-TAIL_EVENT_COUNT);
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
 
-  // Merge: user events first, then tail events, deduplicated by uuid
-  const seen = new Set<string>();
+    // Real user text message (not tool_result)
+    if (e.type === 'user') {
+      const content = (e as any).message?.content;
+      const isToolResult = Array.isArray(content) && content.some((b: any) => b.type === 'tool_result');
+      if (isToolResult) {
+        hiddenCount++;
+        continue;
+      }
+
+      // Attribute accumulated hidden events to the previous pair
+      if (lastUserIdx >= 0) {
+        pairs[lastUserIdx].hiddenCount = hiddenCount;
+      }
+      hiddenCount = 0;
+
+      pairs.push({ user: e, assistant: null, hiddenCount: 0 });
+      lastUserIdx = pairs.length - 1;
+    } else if (e.type === 'assistant' && lastUserIdx >= 0) {
+      const text = extractAssistantText(e);
+      if (text) {
+        // Build a clean assistant event with text-only content
+        pairs[lastUserIdx].assistant = {
+          ...e,
+          message: {
+            ...(e as any).message,
+            content: [{ type: 'text' as const, text }],
+          },
+        } as SessionEvent;
+      }
+      // Count assistant events with only tool_use (no text) as hidden
+      if (!text) hiddenCount++;
+    } else {
+      // All other event types (progress, system, result, etc.) are hidden
+      hiddenCount++;
+    }
+  }
+  // Attribute final hidden count to last pair
+  if (lastUserIdx >= 0) {
+    pairs[lastUserIdx].hiddenCount = hiddenCount;
+  }
+
+  if (pairs.length === 0) return [];
+
+  // Take the last N pairs
+  const selected = pairs.slice(-MAX_PAIRS);
+
+  // Flatten to event list: user, assistant, user, assistant, ...
+  // Prepend hidden count to assistant responses
   const result: SessionEvent[] = [];
-
-  for (const e of userEvents) {
-    const key = e.uuid || JSON.stringify(e);
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(e);
+  for (const pair of selected) {
+    result.push(pair.user);
+    if (pair.assistant && pair.hiddenCount > 0) {
+      const a = pair.assistant as any;
+      const text = a.message.content[0].text;
+      result.push({
+        ...a,
+        message: {
+          ...a.message,
+          content: [{ type: 'text' as const, text: `[${pair.hiddenCount} intermediate tool calls/results hidden]\n\n${text}` }],
+        },
+      } as SessionEvent);
+    } else if (pair.assistant) {
+      result.push(pair.assistant);
     }
   }
-
-  for (const e of tailEvents) {
-    const key = e.uuid || JSON.stringify(e);
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(e);
-    }
-  }
-
-  // Re-sort by original order to maintain conversation flow
-  const indexMap = new Map<string, number>();
-  events.forEach((e, i) => {
-    const key = e.uuid || JSON.stringify(e);
-    if (!indexMap.has(key)) indexMap.set(key, i);
-  });
-
-  result.sort((a, b) => {
-    const aKey = a.uuid || JSON.stringify(a);
-    const bKey = b.uuid || JSON.stringify(b);
-    return (indexMap.get(aKey) ?? 0) - (indexMap.get(bKey) ?? 0);
-  });
 
   // Inject chain context header into the first user message
   if (result.length > 0) {
     const header = '[This is a chain continuation session. The messages below are carried forward from the previous session in this chain. For full context from earlier in the conversation, use the search_session_history tool with type "CurrentSessionChain".]';
-    const firstUserIdx = result.findIndex(e => e.type === 'user' && (e as any).message);
-    if (firstUserIdx >= 0) {
-      const first = result[firstUserIdx] as any;
-      const msg = first.message;
-      const content = typeof msg.content === 'string'
-        ? `${header}\n\n${msg.content}`
-        : Array.isArray(msg.content)
-          ? [{ type: 'text' as const, text: header }, ...msg.content]
-          : msg.content;
-      result[firstUserIdx] = { ...first, message: { ...msg, content } } as SessionEvent;
-    }
+    const first = result[0] as any;
+    const msg = first.message;
+    const content = typeof msg.content === 'string'
+      ? `${header}\n\n${msg.content}`
+      : Array.isArray(msg.content)
+        ? [{ type: 'text' as const, text: header }, ...msg.content]
+        : msg.content;
+    result[0] = { ...first, message: { ...msg, content } } as SessionEvent;
   }
 
   return result;
 }
 
 /**
- * Build a chain link session from a source session's events.
+ * Build chain link events and UUID from a source session's events.
+ * Does NOT write to disk — the caller decides which format to write (Claude/Codex).
  *
  * @param sourceEvents - Events from the source session
  * @param parentSessionId - The source session's ID (for parent-linking)
- * @param directory - The project working directory
- * @returns The new chain-linked session UUID, or null if source has no events
+ * @returns { uuid, events } or null if source has no conversation content
  */
 export function buildChainSession(
   sourceEvents: SessionEvent[],
   parentSessionId: string,
-  directory: string,
-): string | null {
+): { uuid: string; events: SessionEvent[] } | null {
   if (sourceEvents.length === 0) return null;
 
   const chainEvents = extractChainEvents(sourceEvents);
@@ -99,13 +148,11 @@ export function buildChainSession(
 
   // Verify there are actual conversational events (user/assistant) that will
   // survive JSONL reconstruction. Non-conversational events (progress, etc.)
-  // are filtered out by writeForkedClaudeJsonl, which would produce an empty file.
+  // are filtered out by the writers, which would produce an empty file.
   const CONVERSATIONAL_TYPES = new Set(['user', 'assistant', 'system', 'result', 'control_request', 'control_response']);
   const hasConversation = chainEvents.some(e => CONVERSATIONAL_TYPES.has(e.type));
   if (!hasConversation) return null;
 
   const chainUuid = buildLinkedUuid(parentSessionId, 'chain');
-  writeForkedClaudeJsonl(chainEvents, chainUuid, directory);
-
-  return chainUuid;
+  return { uuid: chainUuid, events: chainEvents };
 }

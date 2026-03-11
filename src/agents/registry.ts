@@ -261,23 +261,20 @@ class AgentRegistry {
 
     const cwd = options.cwd || '.';
 
-    // Build the chain session — writes JSONL with carried-forward events
-    const chainUuid = buildChainSession(events, sessionUuid, cwd);
-    if (!chainUuid) {
+    // Build chain events + UUID (does not write to disk)
+    const chain = buildChainSession(events, sessionUuid);
+    if (!chain) {
       throw new Error(`Session has no conversation content to chain — try sending a message first`);
     }
 
-    // If cross-family, convert the chain JSONL to target format
-    if (sourceFactory.agentFamily !== targetFactory.agentFamily) {
-      const chainEvents = await sourceFactory.readSessionEvents(chainUuid);
-      targetFactory.writeSessionForResume(chainEvents, chainUuid, cwd);
-    }
+    // Write in the target agent's native format
+    targetFactory.writeSessionForResume(chain.events, chain.uuid, cwd);
 
     const sessionId = `agent_${uuidv4()}`;
     return this.createAgent(targetFactory.agentType, sessionId, {
       cwd: options.cwd,
       skipPermissions: options.skipPermissions,
-      resumeSessionUuid: chainUuid,
+      resumeSessionUuid: chain.uuid,
       isChainContinuation: true,
     });
   }
@@ -304,19 +301,44 @@ class AgentRegistry {
 
     const cwd = options.cwd || '.';
 
-    // Build the chain session from the provided events
-    const chainUuid = buildChainSession(events, parentSessionId, cwd);
-    if (!chainUuid) {
+    // Build chain events + UUID (does not write to disk)
+    const chain = buildChainSession(events, parentSessionId);
+    if (!chain) {
       throw new Error('Session has no conversation content to chain — try sending a message first');
     }
+
+    // Write in the target agent's native format
+    targetFactory.writeSessionForResume(chain.events, chain.uuid, cwd);
 
     const sessionId = `agent_${uuidv4()}`;
     return this.createAgent(targetFactory.agentType, sessionId, {
       cwd: options.cwd,
       skipPermissions: options.skipPermissions,
-      resumeSessionUuid: chainUuid,
+      resumeSessionUuid: chain.uuid,
       isChainContinuation: true,
     });
+  }
+
+  /**
+   * Convert a fork JSONL (always written in Claude format by forkToResumable)
+   * to the target agent's native format if cross-family.
+   * Returns the UUID to use for resume (same UUID, but file now in target format).
+   */
+  async convertForkForAgent(forkUuid: string, sourceAgentType: string, targetAgentType: string, cwd: string): Promise<string> {
+    const sourceFactory = this.factories.get(sourceAgentType);
+    const targetFactory = this.factories.get(targetAgentType);
+    if (!sourceFactory || !targetFactory) return forkUuid;
+    if (sourceFactory.agentFamily === targetFactory.agentFamily) return forkUuid;
+
+    // Fork was written as Claude JSONL — read via a Claude factory
+    const claudeFactory = [...this.factories.values()].find(f => f.agentFamily === 'claude');
+    if (!claudeFactory) return forkUuid;
+
+    const events = await claudeFactory.readSessionEvents(forkUuid);
+    if (!events.length) return forkUuid;
+
+    targetFactory.writeSessionForResume(events, forkUuid, cwd);
+    return forkUuid;
   }
 
   private broadcastToClients(sessionId: string, message: WireMessage): void {

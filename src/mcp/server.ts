@@ -120,18 +120,19 @@ SEARCH MODE (provide "query"):
   Example result: "2:15 [assistant] the database schema uses..."
   → session 2, message 15
 
-RANGE MODE (provide "session" + "from" + "to"):
-  Fetch full messages by session:from-to range. Use after search to get context around a match.
-  Example: session=2, from=12, to=18 → returns messages 12-18 from session 2
+RANGE MODE (provide "session" or "target_session_uuid" + "from" + "to"):
+  Fetch full messages by range. Use after search to get context around a match.
+  Prefer target_session_uuid (stable) over session number (can shift between calls).
+  Example: target_session_uuid="a1b2c3d4-...", from=12, to=18
 
 Typical workflow:
-  1. Search → "found match at 2:15"
-  2. Fetch range 2:12-18 → get full context around the match
+  1. Search → results include a Sessions header mapping session numbers to UUIDs
+  2. Fetch range using the UUID → get full context around the match
   Done in 2 calls.
 
 Session numbering:
 - CurrentSessionChain: sessions are 1-indexed from oldest ancestor. Numbering is stable.
-- FullProjectSearch: sessions are numbered in sort order (1 = first in sort).
+- FullProjectSearch: sessions are numbered in sort order (1 = first in sort). Use UUIDs for stable references.
 
 Search types:
 - "FullProjectSearch" (default): searches ALL sessions for the project
@@ -149,21 +150,23 @@ IMPORTANT: Prefer to delegate to a subagent if your client supports it, so the m
       .describe('Sort order: newest_first (default) or oldest_first'),
     session: z.number().int().min(1).optional()
       .describe('Range mode: session/chainlink number to fetch from (1-indexed)'),
+    target_session_uuid: z.string().optional()
+      .describe('Range mode: UUID of the session to fetch from (alternative to session number — stable across calls)'),
     from: z.number().int().min(1).optional()
       .describe('Range mode: start message number (inclusive, 1-indexed)'),
     to: z.number().int().min(1).optional()
       .describe('Range mode: end message number (inclusive, 1-indexed)'),
   },
-  async ({ type, query, max_results_per_query, sort, session, from, to }) => {
+  async ({ type, query, max_results_per_query, sort, session, target_session_uuid, from, to }) => {
     try {
       const sessionUuid = process.env.ATOO_CURRENT_SESSION_UUID || undefined;
 
-      // Determine mode: range if session+from+to provided, search if query provided
-      const isRangeMode = session != null && from != null && to != null;
+      // Determine mode: range if (session or target_session_uuid)+from+to provided, search if query provided
+      const isRangeMode = (session != null || target_session_uuid != null) && from != null && to != null;
       const isSearchMode = query != null;
 
       if (!isRangeMode && !isSearchMode) {
-        return { content: [{ type: 'text' as const, text: 'Either "query" (search mode) or "session"+"from"+"to" (range mode) is required.' }] };
+        return { content: [{ type: 'text' as const, text: 'Either "query" (search mode) or "session"/"target_session_uuid"+"from"+"to" (range mode) is required.' }] };
       }
 
       if (isRangeMode) {
@@ -176,6 +179,7 @@ IMPORTANT: Prefer to delegate to a subagent if your client supports it, so the m
             session_uuid: sessionUuid,
             sort,
             session,
+            target_session_uuid,
             from,
             to,
             cwd: process.cwd(),
@@ -187,14 +191,19 @@ IMPORTANT: Prefer to delegate to a subagent if your client supports it, so the m
         }
         const data = await res.json() as {
           session: number;
+          uuid: string | null;
           messages: Array<{ message: number; text: string }>;
           totalMessages: number;
         };
         if (!data.messages.length) {
-          return { content: [{ type: 'text' as const, text: `No messages found for session ${session} range ${from}-${to}.` }] };
+          return { content: [{ type: 'text' as const, text: `No messages found for session ${session ?? target_session_uuid} range ${from}-${to}.` }] };
         }
         const lines = data.messages.map(m => `${data.session}:${m.message} ${m.text}`);
-        let output = lines.join('\n\n');
+        let output = '';
+        if (data.uuid) {
+          output += `Session ${data.session} [${data.uuid}]\n\n`;
+        }
+        output += lines.join('\n\n');
         output += `\n\n(${data.messages.length} message(s) from session ${data.session}, ${data.totalMessages} total messages in session)`;
         return { content: [{ type: 'text' as const, text: output }] };
 
@@ -220,13 +229,25 @@ IMPORTANT: Prefer to delegate to a subagent if your client supports it, so the m
           results: Array<{ session: number; message: number; text: string }>;
           totalMatches: number;
           sessionsSearched: number;
+          sessions: Array<{ number: number; uuid: string }>;
         };
         if (!data.results.length) {
           const queryStr = Array.isArray(query) ? query.join('", "') : query;
           return { content: [{ type: 'text' as const, text: `No matches found for "${queryStr}" across ${data.sessionsSearched} session(s) (scope: ${type}).` }] };
         }
+
+        // Build session header for UUID mapping (deduplicated)
+        let output = '';
+        if (data.sessions?.length) {
+          output += 'Sessions:\n';
+          for (const s of data.sessions) {
+            output += `  ${s.number}: ${s.uuid}\n`;
+          }
+          output += '\n';
+        }
+
         const lines = data.results.map(r => `${r.session}:${r.message} ${r.text}`);
-        let output = lines.join('\n');
+        output += lines.join('\n');
         if (data.totalMatches > data.results.length) {
           output += `\n\n(Showing ${data.results.length} of ${data.totalMatches} total matches across ${data.sessionsSearched} session(s))`;
         } else {

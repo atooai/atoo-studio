@@ -20,6 +20,7 @@ import type {
   ResultEvent,
   ControlRequestEvent,
 } from '../../../events/types.js';
+import { findMostRecentCodexSession } from '../session-precreate.js';
 
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
 
@@ -93,8 +94,17 @@ function reconstructUserMessage(event: UserEvent): object[] {
     if (results.length > 0) return results;
   }
 
-  // Plain text user message
-  const text = typeof content === 'string' ? content : '';
+  // Plain text user message — handle both string and array-of-text-blocks formats
+  let text = '';
+  if (typeof content === 'string') {
+    text = content;
+  } else if (Array.isArray(content)) {
+    // Extract text from text blocks (e.g. [{ type: 'text', text: '...' }])
+    text = content
+      .filter((b: any) => b.type === 'text' || b.type === 'input_text')
+      .map((b: any) => b.text || '')
+      .join('\n');
+  }
   if (!text) return [];
 
   return [
@@ -378,22 +388,57 @@ export function writeForkedCodexJsonl(
 
   const lines: string[] = [];
 
-  // Ensure there's a session_meta at the start
+  // Ensure there's a session_meta + developer prompt at the start.
+  // Codex CLI requires the developer prompt (permissions, sandbox config) to resume.
+  // Clone the header (session_meta + developer prompt) from the most recent real session.
   const hasInit = events.some(e => e.type === 'system' && (e as SystemEvent).subtype === 'init');
   if (!hasInit) {
-    lines.push(JSON.stringify({
-      timestamp: new Date().toISOString(),
-      type: 'session_meta',
-      payload: {
-        id: targetUuid,
+    const donorFile = findMostRecentCodexSession();
+    if (donorFile) {
+      try {
+        const donorContent = fs.readFileSync(donorFile, 'utf-8');
+        const donorLines = donorContent.split('\n').filter(l => l.trim());
+        const headerLines = donorLines.slice(0, 2); // session_meta + developer prompt
+
+        // Extract donor UUID to replace with ours
+        const donorMeta = JSON.parse(headerLines[0]);
+        const donorUuid = donorMeta?.payload?.id;
+
+        for (const line of headerLines) {
+          const replaced = donorUuid ? line.replace(new RegExp(donorUuid, 'g'), targetUuid) : line;
+          lines.push(replaced);
+        }
+      } catch {
+        // Fallback to minimal session_meta if donor read fails
+        lines.push(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          type: 'session_meta',
+          payload: {
+            id: targetUuid,
+            timestamp: new Date().toISOString(),
+            cwd,
+            originator: 'codex_cli_rs',
+            cli_version: '0.111.0',
+            source: 'cli',
+            model_provider: 'openai',
+          },
+        }));
+      }
+    } else {
+      lines.push(JSON.stringify({
         timestamp: new Date().toISOString(),
-        cwd,
-        originator: 'codex_cli_rs',
-        cli_version: '0.111.0',
-        source: 'cli',
-        model_provider: 'openai',
-      },
-    }));
+        type: 'session_meta',
+        payload: {
+          id: targetUuid,
+          timestamp: new Date().toISOString(),
+          cwd,
+          originator: 'codex_cli_rs',
+          cli_version: '0.111.0',
+          source: 'cli',
+          model_provider: 'openai',
+        },
+      }));
+    }
   }
 
   const { system, turns } = groupIntoTurns(events);

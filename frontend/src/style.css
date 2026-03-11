@@ -3930,11 +3930,36 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 .session-item.session-historical { opacity: 0.7; }
 .session-item.session-historical:hover { opacity: 1; }
 
+/* Chain carousel – horizontal scroll container */
+.session-chain-carousel {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+}
+.session-chain-scroll {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;          /* Firefox */
+}
+.session-chain-scroll::-webkit-scrollbar { display: none; }  /* Chrome/Safari */
+.session-chain-slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  max-width: 100%;
+  scroll-snap-align: start;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
 /* Chain carousel dots */
 .session-chain-dots {
   display: flex;
   gap: 4px;
-  margin-top: 3px;
+  justify-content: center;
+  padding: 3px 0 2px;
 }
 .session-chain-dot {
   width: 6px;

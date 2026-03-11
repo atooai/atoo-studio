@@ -124,7 +124,7 @@ export function precreateCodexSession(cwd: string): string {
 }
 
 /** Find the most recently modified Codex session JSONL file. */
-function findMostRecentCodexSession(): string | null {
+export function findMostRecentCodexSession(): string | null {
   try {
     let best: { path: string; mtime: number } | null = null as { path: string; mtime: number } | null;
 
