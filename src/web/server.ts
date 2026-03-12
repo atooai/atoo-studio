@@ -29,6 +29,7 @@ import forge from 'node-forge';
 import { CA_CERT_PATH, CA_KEY_PATH, PROJECT_ROOT } from '../config.js';
 import { serialManager } from '../serial/manager.js';
 import { searchSessionHistory, fetchSessionRange } from '../services/session-search.js';
+import { resolveChainHead, toRawHex } from '../agents/lib/session-id-utils.js';
 import { containersRouter, getContainerRuntimes } from '../handlers/containers.js';
 import { handleHookCallback } from '../agents/lib/claude/hooks.js';
 import { handleCodexNotifyCallback } from '../agents/lib/codex/notify.js';
@@ -47,6 +48,13 @@ interface TermBroadcast {
 }
 const terminalClients = new Map<string, TermBroadcast>();
 const shellClients = new Map<string, TermBroadcast>();
+
+// Pending session-switch requests (MCP tool blocks until user responds)
+interface PendingSessionSwitch {
+  resolve: (result: { action: 'rejected' | 'open' | 'open_and_close' }) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+const pendingSessionSwitches = new Map<string, PendingSessionSwitch>();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -291,6 +299,73 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     if (!requestId) return res.status(400).json({ error: 'requestId required' });
     serialManager.rejectRequest(requestId, new Error('User rejected the serial device request'));
     serialManager.closeRequest(requestId);
+    res.json({ success: true });
+  });
+
+  // MCP callback: suggest switching to another session
+  app.post('/api/mcp/suggest-session-switch', async (req, res) => {
+    const { session_uuid, refined_prompt, cwd, source_session_id } = req.body;
+    if (!session_uuid || !refined_prompt) {
+      return res.status(400).json({ error: 'session_uuid and refined_prompt are required' });
+    }
+
+    const requestId = uuidv4();
+
+    // Resolve chain head: find most recent session in the chain
+    let targetUuid = session_uuid;
+    try {
+      const allFiles = await agentRegistry.getSessionFilesForProject(cwd || process.cwd());
+      const allUuids = allFiles.map(f => {
+        const basename = path.basename(f, '.jsonl');
+        const m = basename.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+        return m ? m[1] : '';
+      }).filter(Boolean);
+      targetUuid = resolveChainHead(session_uuid, allUuids);
+    } catch (err) {
+      console.warn('[mcp] Failed to resolve chain head, using provided UUID:', err);
+    }
+
+    // Broadcast to all browsers
+    const msg = JSON.stringify({
+      type: 'session_switch_request',
+      requestId,
+      targetSessionUuid: targetUuid,
+      originalSessionUuid: session_uuid,
+      refinedPrompt: refined_prompt,
+      sourceSessionId: source_session_id || null,
+    });
+    for (const ws of store.statusClients) {
+      if (ws.readyState === 1) ws.send(msg);
+    }
+
+    // Block until user responds (60s timeout)
+    try {
+      const result = await new Promise<{ action: 'rejected' | 'open' | 'open_and_close' }>((resolve) => {
+        const timeout = setTimeout(() => {
+          pendingSessionSwitches.delete(requestId);
+          resolve({ action: 'rejected' });
+        }, 60000);
+        pendingSessionSwitches.set(requestId, { resolve, timeout });
+      });
+      res.json({ action: result.action, targetSessionUuid: targetUuid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Respond to a session-switch suggestion (called by frontend)
+  app.post('/api/mcp/respond-session-switch', (req, res) => {
+    const { requestId, action } = req.body;
+    if (!requestId || !action) {
+      return res.status(400).json({ error: 'requestId and action are required' });
+    }
+    const pending = pendingSessionSwitches.get(requestId);
+    if (!pending) {
+      return res.status(404).json({ error: 'No pending request with this ID' });
+    }
+    clearTimeout(pending.timeout);
+    pendingSessionSwitches.delete(requestId);
+    pending.resolve({ action });
     res.json({ success: true });
   });
 
@@ -859,6 +934,11 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         wss.handleUpgrade(req, socket, head, (ws) => {
           console.log(`[ws:terminal] Browser connected for session ${sessionId}`);
 
+          // Keep-alive pings to prevent idle timeouts
+          const pingInterval = setInterval(() => {
+            if (ws.readyState === 1) ws.ping();
+          }, 30000);
+
           // Get or create broadcast entry for this session's terminal
           if (!terminalClients.has(sessionId)) {
             // Seed scrollback from spawner's buffer (captures PTY output since spawn)
@@ -904,6 +984,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
           ws.on('close', () => {
             console.log(`[ws:terminal] Browser disconnected for session ${sessionId}`);
+            clearInterval(pingInterval);
             entry.clients.delete(ws);
             // Keep handler alive so scrollback continues accumulating even with no browsers
           });
@@ -961,6 +1042,11 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
             console.log(`[ws:shell] Browser connected for shell ${shellId}`);
             const ptyProcess = shellEntry.pty;
 
+            // Keep-alive pings to prevent idle timeouts
+            const pingInterval = setInterval(() => {
+              if (ws.readyState === 1) ws.ping();
+            }, 30000);
+
             // Get or create broadcast entry for this shell
             if (!shellClients.has(shellId)) {
               shellClients.set(shellId, { clients: new Set(), handler: null, scrollback: '' });
@@ -1002,6 +1088,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
             ws.on('close', () => {
               console.log(`[ws:shell] Browser disconnected for shell ${shellId}`);
+              clearInterval(pingInterval);
               entry.clients.delete(ws);
               // Keep handler alive so scrollback continues accumulating even with no browsers
             });
@@ -1028,6 +1115,9 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
           wss.handleUpgrade(req, socket, head, (ws) => {
             console.log(`[ws:container-logs] Streaming logs for ${runtime}/${containerId}`);
+            const pingInterval = setInterval(() => {
+              if (ws.readyState === 1) ws.ping();
+            }, 30000);
             let cmd: string;
             let args: string[];
             if (runtime === 'lxc') {
@@ -1059,6 +1149,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
             ws.on('close', () => {
               console.log(`[ws:container-logs] Disconnected for ${runtime}/${containerId}`);
+              clearInterval(pingInterval);
               handler.dispose();
               logPty.kill();
             });
@@ -1086,6 +1177,9 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
           wss.handleUpgrade(req, socket, head, (ws) => {
             console.log(`[ws:container-shell] Shell into ${runtime}/${containerId}`);
+            const pingInterval = setInterval(() => {
+              if (ws.readyState === 1) ws.ping();
+            }, 30000);
             let cmd: string;
             let args: string[];
             if (runtime === 'lxc') {
@@ -1128,6 +1222,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
             ws.on('close', () => {
               console.log(`[ws:container-shell] Disconnected for ${runtime}/${containerId}`);
+              clearInterval(pingInterval);
               handler.dispose();
               shellPty.kill();
             });

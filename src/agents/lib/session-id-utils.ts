@@ -119,3 +119,42 @@ export function walkChain(sessionId: string, allSessionIds: string[]): string[] 
 
   return chain;
 }
+
+/**
+ * Resolve the chain head (most recent session) for a given session ID.
+ * Walks the full chain (backward then forward) and returns the last entry.
+ *
+ * @param sessionId - Any session in the chain
+ * @param allSessionIds - All known session IDs to search through
+ * @returns The most recent session UUID in the chain
+ */
+export function resolveChainHead(sessionId: string, allSessionIds: string[]): string {
+  // First walk backward to find the chain root
+  const backwardChain = walkChain(sessionId, allSessionIds);
+  const root = backwardChain[0];
+
+  // Build forward lookup: parent's last16 hex → child session IDs (chain links only)
+  const childrenOf = new Map<string, string[]>();
+  for (const id of allSessionIds) {
+    if (parseLinkType(id) !== 'chain') continue;
+    const parentLink = getParentLink(id);
+    const children = childrenOf.get(parentLink) || [];
+    children.push(id);
+    childrenOf.set(parentLink, children);
+  }
+
+  // Walk forward from root, following chain children
+  let current = root;
+  const visited = new Set<string>([current]);
+  while (true) {
+    const currentLast16 = toRawHex(current).slice(-16);
+    const children = childrenOf.get(currentLast16) || [];
+    // Filter to unvisited chain children
+    const next = children.find(c => !visited.has(c));
+    if (!next) break;
+    visited.add(next);
+    current = next;
+  }
+
+  return current;
+}

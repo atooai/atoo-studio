@@ -67,6 +67,9 @@ export interface AppState {
   // Context menu state
   ctxMenu: { x: number; y: number; items: Array<{ label: string; icon: string; danger?: boolean; separator?: boolean; groupLabel?: string; action: () => void }> } | null;
 
+  // Pending session switch (refined prompt to inject after session opens)
+  pendingSessionSwitch: { targetSessionUuid: string; refinedPrompt: string; sourceSessionId: string | null } | null;
+
   // Session loading overlay
   sessionLoading: string | null; // label or null
 
@@ -124,6 +127,7 @@ export interface AppState {
   removeToast: (id: string) => void;
   setModal: (modal: { type: string; props?: any } | null) => void;
   setCtxMenu: (menu: AppState['ctxMenu']) => void;
+  setPendingSessionSwitch: (v: AppState['pendingSessionSwitch']) => void;
   setSessionLoading: (label: string | null) => void;
   setIsMobileLayout: (v: boolean) => void;
   setMobileView: (v: 'dashboard' | 'files' | 'git' | 'agents' | 'terminal') => void;
@@ -174,6 +178,7 @@ export const useStore = create<AppState>((set, get) => ({
   toasts: [],
   modal: null,
   ctxMenu: null,
+  pendingSessionSwitch: null,
   sessionLoading: null,
   isMobileLayout: false,
   mobileView: 'dashboard',
@@ -274,6 +279,7 @@ export const useStore = create<AppState>((set, get) => ({
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   setModal: (modal) => set({ modal }),
   setCtxMenu: (menu) => set({ ctxMenu: menu }),
+  setPendingSessionSwitch: (v) => set({ pendingSessionSwitch: v }),
   setSessionLoading: (label) => set({ sessionLoading: label }),
   setIsMobileLayout: (v) => set({ isMobileLayout: v }),
   setMobileView: (v) => set({ mobileView: v }),

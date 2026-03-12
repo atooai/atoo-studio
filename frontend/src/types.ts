@@ -35,6 +35,7 @@ export interface Session {
   contextUsage?: ContextUsage;
   contextInProgress?: boolean;
   activeSessionIdx?: number;
+  cliSessionId?: string;
 }
 
 export interface ContextUsage {

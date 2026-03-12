@@ -261,5 +261,56 @@ IMPORTANT: Prefer to delegate to a subagent if your client supports it, so the m
   },
 );
 
+server.tool(
+  'suggest_continue_in_other_session',
+  `Suggest to the user that they should continue their current task in an existing session that already has relevant context.
+
+Use this BEFORE planning or implementing when you discover (via search_session_history) that another session has already worked on the same feature, file, or bug. The user will see a popup with three options:
+- Reject: Stay in the current session (you should proceed normally)
+- Open: Switch to the target session (your current session stays open)
+- Open & Close Current: Switch to the target session and close this one
+
+The tool blocks until the user responds. If rejected, continue working in the current session.
+
+IMPORTANT: Always search session history first to find the relevant session UUID before calling this tool.`,
+  {
+    session_uuid: z.string()
+      .describe('UUID of the session that has relevant context. The tool automatically resolves the chain head (most recent session in the chain).'),
+    refined_prompt: z.string()
+      .describe('A refined version of the user\'s request, ready to be sent in the target session. Should be clear and self-contained.'),
+  },
+  async ({ session_uuid, refined_prompt }) => {
+    try {
+      const sourceSessionId = process.env.ATOO_CURRENT_SESSION_UUID || undefined;
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/suggest-session-switch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_uuid,
+          refined_prompt,
+          cwd: process.cwd(),
+          source_session_id: sourceSessionId,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        return { content: [{ type: 'text' as const, text: `Session switch suggestion failed: ${(err as any).error}` }] };
+      }
+      const data = await res.json() as { action: string; targetSessionUuid: string };
+
+      if (data.action === 'rejected') {
+        return { content: [{ type: 'text' as const, text: 'User rejected the suggestion. Continue working in the current session.' }] };
+      } else if (data.action === 'open') {
+        return { content: [{ type: 'text' as const, text: `User accepted. They are switching to session ${data.targetSessionUuid}. The refined prompt has been placed in that session's input. You can stop working on this task — the user will continue in the other session.` }] };
+      } else if (data.action === 'open_and_close') {
+        return { content: [{ type: 'text' as const, text: `User accepted and chose to close this session. They are switching to session ${data.targetSessionUuid}. Stop all work immediately.` }] };
+      }
+      return { content: [{ type: 'text' as const, text: `Unknown action: ${data.action}` }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Failed: ${err.message}` }] };
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 server.connect(transport);

@@ -277,6 +277,18 @@ function handleStatusMessage(msg: any) {
     });
     // Show modal for user to connect a serial device
     useStore.setState({ modal: { type: 'serial-connect', props: { requestId: msg.requestId } } });
+  } else if (msg.type === 'session_switch_request') {
+    useStore.setState({
+      modal: {
+        type: 'session-switch',
+        props: {
+          requestId: msg.requestId,
+          targetSessionUuid: msg.targetSessionUuid,
+          refinedPrompt: msg.refinedPrompt,
+          sourceSessionId: msg.sourceSessionId,
+        },
+      },
+    });
   } else if (msg.type === 'serial_closed' && msg.requestId) {
     const req = store.serialRequests.find((r) => r.requestId === msg.requestId);
     if (req && req.status === 'connected') {

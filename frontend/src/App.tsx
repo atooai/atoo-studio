@@ -749,10 +749,27 @@ function registerGlobalFunctions() {
             };
             store.updateProject(proj.id, p => {
               // Remove the old session (backend destroys it), add the new one
+              const oldSession = p.sessions.find(s => s.id === agentSessionId);
               const remaining = p.sessions.filter(s => s.id !== agentSessionId);
+
+              // Move the old session's cliSessionId into historicalSessions so chain
+              // link detection can find the parent and group them in the carousel
+              let historicalSessions = p.historicalSessions || [];
+              const oldCliId = oldSession?.cliSessionId;
+              if (oldCliId && !historicalSessions.some(h => h.id === oldCliId)) {
+                historicalSessions = [...historicalSessions, {
+                  id: oldCliId,
+                  agentType: oldSession?.agentType,
+                  title: oldSession?.title || 'Untitled',
+                  lastModified: new Date().toISOString(),
+                  eventCount: oldSession?.messages?.length || 0,
+                }];
+              }
+
               return {
                 ...p,
                 sessions: [...remaining, session],
+                historicalSessions,
                 activeSessionIdx: remaining.filter(s => s.status !== 'ended').length,
               };
             });
@@ -1483,6 +1500,15 @@ function registerGlobalFunctions() {
 
   // xterm.js terminal
   win.attachXterm = attachXterm;
+
+  // Inject text into a session's TUI terminal input (does NOT press Enter)
+  win.injectTuiInput = (sessionId: string, text: string) => {
+    const tuiTermId = `tui-${sessionId}`;
+    const inst = terminalInstances[tuiTermId];
+    if (inst?.ws?.readyState === 1) {
+      inst.ws.send(JSON.stringify({ type: 'input', data: text }));
+    }
+  };
 }
 
 // Splitter functions (imperative, kept as-is for performance)
@@ -1595,17 +1621,20 @@ async function refreshGitData(projectId: string) {
 // xterm.js terminal support
 let xtermModule: any = null;
 let fitAddonModule: any = null;
+let webLinksAddonModule: any = null;
 const terminalInstances: Record<string, any> = {};
 
 async function loadXterm() {
   if (xtermModule) return;
-  const [xterm, fit] = await Promise.all([
+  const [xterm, fit, webLinks] = await Promise.all([
     import('@xterm/xterm'),
     import('@xterm/addon-fit'),
+    import('@xterm/addon-web-links'),
     import('@xterm/xterm/css/xterm.css'),
   ]);
   xtermModule = xterm;
   fitAddonModule = fit;
+  webLinksAddonModule = webLinks;
 }
 
 function attachXterm(termId: string, targetId: string, container: HTMLElement, wsType = 'terminal') {
@@ -1665,6 +1694,36 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+
+    // URL links: Ctrl+click opens in new tab
+    const WebLinksAddon = webLinksAddonModule.WebLinksAddon;
+    term.loadAddon(new WebLinksAddon((_e: MouseEvent, uri: string) => {
+      window.open(uri, '_blank', 'noopener');
+    }));
+
+    // File path links: Ctrl+click opens in Monaco editor
+    const filePathRegex = /(?:^|\s)((?:\.\.?\/)?(?:[\w.@-]+\/)*[\w.@-]+\.\w+)(?::(\d+))?/;
+    term.registerLinkProvider({
+      provideLinks(y: number, cb: (links: any[] | undefined) => void) {
+        const line = (term as any).buffer.active.getLine(y - 1);
+        if (!line) { cb(undefined); return; }
+        const text = line.translateToString();
+        const links: any[] = [];
+        let match;
+        const globalRegex = new RegExp(filePathRegex.source, 'g');
+        while ((match = globalRegex.exec(text)) !== null) {
+          const filePath = match[1];
+          const startX = match.index + match[0].indexOf(filePath);
+          links.push({
+            range: { start: { x: startX + 1, y }, end: { x: startX + filePath.length + (match[2] ? match[2].length + 1 : 0), y } },
+            text: match[0].trim(),
+            activate() { (window as any).openFileInEditor?.(filePath); },
+          });
+        }
+        cb(links.length ? links : undefined);
+      },
+    });
+
     term.open(el);
     fitAddon.fit();
 
