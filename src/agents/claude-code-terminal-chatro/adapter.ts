@@ -134,8 +134,16 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     this.emit('exit');
   }
 
-  // Terminal-only interaction: these are no-ops
-  sendMessage(_text: string, _attachments?: Attachment[]): void {}
+  // Terminal-only: type message directly into the PTY
+  sendMessage(text: string, _attachments?: Attachment[]): void {
+    if (!text || !this.envId) return;
+    const pty = getPty(this.envId);
+    if (!pty) return;
+    setTimeout(() => {
+      const p = getPty(this.envId!);
+      if (p) p.write(text + '\n');
+    }, 2000);
+  }
   approve(_requestId: string, _updatedInput?: any): void {}
   deny(_requestId: string): void {}
   answerQuestion(_requestId: string, _answers: Record<string, string>): void {}

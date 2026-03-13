@@ -90,8 +90,17 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
     this.emit('exit');
   }
 
-  // Terminal-only: messages are not parsed from the PTY stream.
-  sendMessage(_text: string, _attachments?: Attachment[]): void {}
+  // Terminal-only: type message directly into the PTY
+  sendMessage(text: string, _attachments?: Attachment[]): void {
+    if (!text || !this.envId) return;
+    const pty = getPty(this.envId);
+    if (!pty) return;
+    // Delay to let the CLI TUI initialize and show its prompt
+    setTimeout(() => {
+      const p = getPty(this.envId!);
+      if (p) p.write(text + '\n');
+    }, 2000);
+  }
   approve(_requestId: string, _updatedInput?: any): void {}
   deny(_requestId: string): void {}
   answerQuestion(_requestId: string, _answers: Record<string, string>): void {}
