@@ -142,6 +142,24 @@ function IssueCard({ issue, canWrite, projectId, onStateChanged }: {
     }
   };
 
+  const startAnalyse = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    (window as any).newSessionWithMessage(
+      `Analyse GitHub issue #${issue.number} ("${issue.title}"). ` +
+      `Retrieve the full issue details using the gh CLI, understand the problem described, ` +
+      `review the relevant code, and provide a thorough analysis. Do NOT make any code changes.`
+    );
+  };
+
+  const startAutoFix = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    (window as any).newSessionWithMessage(
+      `AutoFix GitHub issue #${issue.number} ("${issue.title}"). ` +
+      `Retrieve the full issue details using the gh CLI, understand the problem, ` +
+      `find the root cause in the codebase, and implement a fix.`
+    );
+  };
+
   const stateClass = issue.state === 'OPEN' ? 'open' : 'closed';
 
   return (
@@ -172,16 +190,24 @@ function IssueCard({ issue, canWrite, projectId, onStateChanged }: {
           {issue.milestone && <span>{issue.milestone.title}</span>}
         </div>
       </div>
-      {canWrite && (
-        <button
-          className={`gh-card-action-btn ${stateClass}`}
-          onClick={toggleState}
-          disabled={busy}
-          title={issue.state === 'OPEN' ? 'Close issue' : 'Reopen issue'}
-        >
-          {busy ? '...' : issue.state === 'OPEN' ? 'Close' : 'Reopen'}
+      <div className="gh-card-actions">
+        <button className="gh-card-action-btn gh-action-analyse" onClick={startAnalyse} title="Analyse this issue">
+          Analyse
         </button>
-      )}
+        <button className="gh-card-action-btn gh-action-autofix" onClick={startAutoFix} title="Auto-fix this issue">
+          AutoFix
+        </button>
+        {canWrite && (
+          <button
+            className={`gh-card-action-btn ${stateClass}`}
+            onClick={toggleState}
+            disabled={busy}
+            title={issue.state === 'OPEN' ? 'Close issue' : 'Reopen issue'}
+          >
+            {busy ? '...' : issue.state === 'OPEN' ? 'Close' : 'Reopen'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -211,6 +237,16 @@ function PullCard({ pull, canWrite, projectId, onStateChanged }: {
     } finally {
       setBusy(false);
     }
+  };
+
+  const startReview = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    (window as any).newSessionWithMessage(
+      `Review GitHub pull request #${pull.number} ("${pull.title}"). ` +
+      `Retrieve the full PR details and diff using the gh CLI, review the code changes thoroughly, ` +
+      `check for bugs, security issues, performance concerns, and code quality. ` +
+      `Provide a detailed review with actionable feedback.`
+    );
   };
 
   const stateClass = pull.state === 'MERGED' ? 'merged' : pull.state === 'OPEN' ? 'open' : 'closed';
@@ -261,16 +297,21 @@ function PullCard({ pull, canWrite, projectId, onStateChanged }: {
           {pull.comments?.totalCount > 0 && <span>{pull.comments.totalCount} comments</span>}
         </div>
       </div>
-      {canWrite && pull.state !== 'MERGED' && (
-        <button
-          className={`gh-card-action-btn ${stateClass}`}
-          onClick={toggleState}
-          disabled={busy}
-          title={pull.state === 'OPEN' ? 'Close PR' : 'Reopen PR'}
-        >
-          {busy ? '...' : pull.state === 'OPEN' ? 'Close' : 'Reopen'}
+      <div className="gh-card-actions">
+        <button className="gh-card-action-btn gh-action-review" onClick={startReview} title="Review this PR">
+          Review
         </button>
-      )}
+        {canWrite && pull.state !== 'MERGED' && (
+          <button
+            className={`gh-card-action-btn ${stateClass}`}
+            onClick={toggleState}
+            disabled={busy}
+            title={pull.state === 'OPEN' ? 'Close PR' : 'Reopen PR'}
+          >
+            {busy ? '...' : pull.state === 'OPEN' ? 'Close' : 'Reopen'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

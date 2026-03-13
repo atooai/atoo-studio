@@ -757,6 +757,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   background: var(--accent-amber-dim);
   color: var(--accent-amber);
 }
+.lp-root-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent-blue-dim, rgba(59,130,246,0.15));
+  color: var(--accent-blue, #3b82f6);
+}
 
 /* Toolbar */
 .lp-toolbar {
@@ -3755,6 +3764,25 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 .gh-card-action-btn.closed:hover:not(:disabled) {
   border-color: var(--accent-green);
   color: var(--accent-green);
+}
+.gh-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+  align-self: center;
+}
+.gh-action-analyse:hover:not(:disabled) {
+  border-color: var(--accent-blue, #58a6ff);
+  color: var(--accent-blue, #58a6ff);
+}
+.gh-action-autofix:hover:not(:disabled) {
+  border-color: var(--accent-green, #3fb950);
+  color: var(--accent-green, #3fb950);
+}
+.gh-action-review:hover:not(:disabled) {
+  border-color: var(--accent-purple, #bc8cff);
+  color: var(--accent-purple, #bc8cff);
 }
 
 /* PR-specific */
@@ -7207,4 +7235,485 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   max-width: 95vw !important;
   max-height: 90vh !important;
   margin: 5vh auto !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   CAROUSEL WORKSPACE LAYOUT
+   ═══════════════════════════════════════════════════════ */
+
+/* ── Main horizontal carousel container ── */
+.workspace.layout-carousel {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  height: 100%;
+  gap: 2px;
+}
+
+.workspace.layout-carousel::-webkit-scrollbar { display: none; }
+.workspace.layout-carousel { scrollbar-width: none; }
+
+/* ── Generic vertical slide ── */
+.carousel-slide {
+  scroll-snap-align: center;
+  flex: 0 0 auto;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.carousel-slide:last-child { border-right: none; }
+
+/* Slide label tab */
+.carousel-slide-label {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  background: var(--bg-surface-2);
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+/* ── Slide sizes ── */
+
+/* 1. Explorer + Editor combined */
+.carousel-slide.slide-explorer-editor {
+  width: clamp(600px, 55vw, 1000px);
+  scroll-snap-align: start;
+}
+
+/* 2. Sessions (agents + panels) */
+.carousel-slide.slide-sessions {
+  width: clamp(500px, 50vw, 900px);
+}
+
+/* 3. Terminals */
+.carousel-slide.slide-terminals {
+  width: clamp(400px, 40vw, 750px);
+}
+
+/* 4. Preview */
+.carousel-slide.slide-preview {
+  width: clamp(500px, calc(100% - 80px), 1400px);
+  scroll-snap-align: end;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Slide 1: Explorer + Editor (side-by-side)
+   ═══════════════════════════════════════════════════════ */
+.carousel-explorer-editor {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.carousel-explorer-pane {
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.carousel-explorer-pane .file-tree,
+.carousel-explorer-pane .git-history {
+  flex: 1 1 50%;
+  min-height: 0;
+}
+
+.carousel-editor-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.carousel-editor-pane .editor-area {
+  height: 100% !important;
+  flex: 1 1 auto;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Slide 2: Sessions — agents (left, vertical carousel) | panels (right, fixed)
+   ═══════════════════════════════════════════════════════ */
+.carousel-sessions-layout {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left column: agent sessions */
+.carousel-agents-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Right column: fixed panels sidebar */
+.carousel-panels-col {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.carousel-panels-col .rp-header { flex: 0 0 auto; }
+
+.carousel-panels-col .sessions-panel,
+.carousel-panels-col .github-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Shared headers */
+.carousel-agents-header,
+.carousel-terminals-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--bg-surface-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.carousel-area-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* Single agent / terminal (no sub-carousel) */
+.carousel-single-agent,
+.carousel-single-terminal {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Agent / terminal tab header */
+.carousel-agent-tab {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-surface-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* ═══════════════════════════════════════════════════════
+   TUI / Terminal content areas
+   ═══════════════════════════════════════════════════════ */
+.carousel-tui-view,
+.carousel-terminal-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Unified Vertical Carousel
+   (shared by agent sessions & terminals)
+   ═══════════════════════════════════════════════════════ */
+.vcarousel-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Collapsed tab stacks (above / below) ── */
+.vcarousel-stack {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.vcarousel-stack-top { border-bottom: 1px solid var(--border); }
+.vcarousel-stack-bottom { border-top: 1px solid var(--border); }
+
+.vcarousel-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-surface-2);
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.vcarousel-tab:last-child { border-bottom: none; }
+
+.vcarousel-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.vcarousel-tab-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Status dots in vertical carousel ── */
+.vcarousel-layout .tab-dot,
+.carousel-single-agent .tab-dot,
+.carousel-single-terminal .tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.vcarousel-layout .tab-dot.active,
+.carousel-single-agent .tab-dot.active {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px var(--accent-green);
+}
+
+.vcarousel-layout .tab-dot.attention,
+.carousel-single-agent .tab-dot.attention {
+  background: var(--accent-amber);
+  box-shadow: 0 0 6px var(--accent-amber);
+  animation: pulse-dot 1.5s infinite;
+}
+
+.vcarousel-layout .tab-dot.open,
+.carousel-single-agent .tab-dot.open {
+  background: var(--text-muted);
+}
+
+/* Highlight entire tab row when attention */
+.vcarousel-tab:has(.tab-dot.attention) {
+  background: var(--accent-amber-dim);
+}
+
+.vcarousel-tab:has(.tab-dot.active) {
+  color: var(--text-secondary);
+}
+
+.vcarousel-peek:has(.tab-dot.attention) {
+  background: var(--accent-amber-dim);
+}
+
+/* Active header glow for attention state */
+.vcarousel-active-header:has(.tab-dot.attention) {
+  border-left-color: var(--accent-amber);
+  background: linear-gradient(90deg, var(--accent-amber-dim), var(--bg-surface-3) 60%);
+}
+
+.vcarousel-active-header:has(.tab-dot.active) {
+  border-left-color: var(--accent-green);
+}
+
+/* ── Close button (shared across tab, peek, active header) ── */
+.vcarousel-close {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.vcarousel-close:hover {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+}
+
+/* ── 50px peek previews ── */
+.vcarousel-peek {
+  flex: 0 0 50px;
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+  transition: background var(--transition-fast);
+}
+
+.vcarousel-peek:hover {
+  background: var(--bg-hover);
+}
+
+.vcarousel-peek-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vcarousel-peek-fade {
+  flex: 1 1 auto;
+  position: relative;
+}
+
+.vcarousel-peek-top {
+  display: flex;
+  flex-direction: column-reverse;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface-2);
+}
+
+.vcarousel-peek-top .vcarousel-peek-fade {
+  background: linear-gradient(to top, var(--bg-surface-2), transparent);
+}
+
+.vcarousel-peek-bottom {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface-2);
+}
+
+.vcarousel-peek-bottom .vcarousel-peek-fade {
+  background: linear-gradient(to bottom, var(--bg-surface-2), transparent);
+}
+
+/* ── Active (focused) item ── */
+.vcarousel-active {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.vcarousel-active-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-surface-3);
+  border-bottom: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--accent-blue);
+}
+
+/* ── Slide-in animation ── */
+@keyframes vcarousel-slide-down {
+  from { opacity: 0; transform: translateY(-30px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes vcarousel-slide-up {
+  from { opacity: 0; transform: translateY(30px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.vcarousel-enter-down {
+  animation: vcarousel-slide-down 200ms ease-out;
+}
+
+.vcarousel-enter-up {
+  animation: vcarousel-slide-up 200ms ease-out;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Shared carousel components
+   ═══════════════════════════════════════════════════════ */
+
+.carousel-mini-btn {
+  background: var(--bg-surface-3);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.carousel-mini-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Empty states */
+.carousel-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--text-muted);
+}
+
+.carousel-empty-icon {
+  font-size: 24px;
+  opacity: 0.4;
+}
+
+.carousel-empty-text {
+  font-size: 12px;
+}
+
+/* ── Peek hint gradients on main carousel edges ── */
+.workspace.layout-carousel::before,
+.workspace.layout-carousel::after {
+  content: '';
+  position: sticky;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  flex: 0 0 24px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.workspace.layout-carousel::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-base), transparent);
+}
+
+.workspace.layout-carousel::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-base), transparent);
+}
+
+/* ── Active topbar button ── */
+.topbar-btn.active {
+  background: var(--accent-blue-dim);
+  color: var(--accent-blue);
 }

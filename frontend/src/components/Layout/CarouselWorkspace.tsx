@@ -1,0 +1,430 @@
+import React, { useRef, useEffect, useCallback } from 'react';
+import { useStore } from '../../state/store';
+import { sendAgentCommand } from '../../api/websocket';
+import { FileTree } from '../FileTree/FileTree';
+import { GitHistory } from '../Git/GitHistory';
+import { EditorArea } from '../Editor/Editor';
+import { SessionsPanel } from '../Sessions/Sessions';
+import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
+import { PreviewPanel } from '../Preview/Preview';
+import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
+
+const HOVER_DELAY = 400; // ms before hover triggers scroll
+
+/* ══════════════════════════════════════════════════════
+   Debounced hover-to-scroll helper (horizontal)
+   ══════════════════════════════════════════════════════ */
+function useHoverScroll(containerRef: React.RefObject<HTMLElement | null>) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelHover = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const handleChildHover = useCallback((childEl: HTMLElement) => {
+    cancelHover();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const childRect = childEl.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+
+    const isClipped =
+      childRect.left < containerRect.left + 20 ||
+      childRect.right > containerRect.right - 20;
+
+    if (isClipped) {
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        childEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }, HOVER_DELAY);
+    }
+  }, [containerRef, cancelHover]);
+
+  useEffect(() => cancelHover, [cancelHover]);
+
+  return { handleChildHover, cancelHover };
+}
+
+/* ══════════════════════════════════════════════════════
+   Main Carousel Slide (horizontal)
+   ══════════════════════════════════════════════════════ */
+function CarouselSlide({
+  id,
+  className,
+  children,
+  label,
+  onHover,
+  onLeave,
+}: {
+  id: string;
+  className?: string;
+  children: React.ReactNode;
+  label?: string;
+  onHover?: (el: HTMLElement) => void;
+  onLeave?: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  const handleMouseEnter = useCallback(() => {
+    if (ref.current && onHover) onHover(ref.current);
+  }, [onHover]);
+
+  return (
+    <div
+      ref={ref}
+      className={`carousel-slide ${className || ''}`}
+      data-slide={id}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={onLeave}
+    >
+      {label && <div className="carousel-slide-label">{label}</div>}
+      {children}
+    </div>
+  );
+}
+
+/* ── Clear attention on user interaction (mouse, keyboard, xterm input) ── */
+function useAttentionClear(sessionId: string, status: string, containerRef?: React.RefObject<HTMLElement | null>) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onInteraction = useCallback(() => {
+    if (status !== 'attention') return;
+    if (timerRef.current) return;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      sendAgentCommand(sessionId, { action: 'session_viewed' });
+    }, 2000);
+  }, [sessionId, status]);
+
+  // Listen for xterm-activity custom events (keyboard input inside xterm)
+  useEffect(() => {
+    const el = containerRef?.current;
+    if (!el) return;
+    const handler = () => onInteraction();
+    el.addEventListener('xterm-activity', handler);
+    return () => el.removeEventListener('xterm-activity', handler);
+  }, [onInteraction, containerRef]);
+
+  useEffect(() => {
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []);
+
+  return onInteraction;
+}
+
+/* ── Per-session TUI view ── */
+function SessionTui({ session }: { session: any }) {
+  const tuiRef = useRef<HTMLDivElement>(null);
+  const onInteraction = useAttentionClear(session.id, session.status, tuiRef);
+
+  useEffect(() => {
+    if (tuiRef.current) {
+      (window as any).attachXterm(`carousel-tui-${session.id}`, session.id, tuiRef.current);
+    }
+  }, [session.id]);
+
+  return <div className="carousel-tui-view" ref={tuiRef} onPointerMoveCapture={onInteraction} onClickCapture={onInteraction} onKeyDownCapture={onInteraction}></div>;
+}
+
+/* ── Per-terminal view ── */
+function TerminalView({ terminal }: { terminal: any }) {
+  const termRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (termRef.current && terminal) {
+      if (terminal.shellId) {
+        (window as any).attachXterm(terminal.id, terminal.shellId, termRef.current, 'shell');
+      } else if (terminal.sessionId) {
+        (window as any).attachXterm(terminal.id, terminal.sessionId, termRef.current, 'terminal');
+      }
+    }
+  }, [terminal?.id]);
+
+  return <div className="carousel-terminal-view" ref={termRef}></div>;
+}
+
+/* ══════════════════════════════════════════════════════
+   Vertical Carousel — shared by agents & terminals
+
+   Layout:
+     [tabs above]         ← collapsed headers for items above
+     [50px peek above]    ← preview of item above the focused one
+     [focused item]       ← fills remaining space
+     [50px peek below]    ← preview of item below the focused one
+     [tabs below]         ← collapsed headers for items below
+   ══════════════════════════════════════════════════════ */
+function VerticalCarousel({
+  items,
+  renderHeader,
+  renderContent,
+  onClose,
+}: {
+  items: any[];
+  renderHeader: (item: any, idx: number) => React.ReactNode;
+  renderContent: (item: any, idx: number) => React.ReactNode;
+  onClose?: (idx: number) => void;
+}) {
+  const [focusedIdx, setFocusedIdx] = React.useState(0);
+  const [animDir, setAnimDir] = React.useState<'up' | 'down' | null>(null);
+
+  const idx = Math.max(0, Math.min(focusedIdx, items.length - 1));
+
+  const switchTo = useCallback((newIdx: number) => {
+    if (newIdx === idx) return;
+    setAnimDir(newIdx < idx ? 'up' : 'down');
+    setFocusedIdx(newIdx);
+  }, [idx]);
+
+  // Clear animation class after transition
+  useEffect(() => {
+    if (animDir) {
+      const t = setTimeout(() => setAnimDir(null), 250);
+      return () => clearTimeout(t);
+    }
+  }, [animDir, idx]);
+
+  const above = items.slice(0, idx);
+  const below = items.slice(idx + 1);
+  const focused = items[idx];
+  const peekAbove = idx > 0 ? items[idx - 1] : null;
+  const peekBelow = idx < items.length - 1 ? items[idx + 1] : null;
+
+  return (
+    <div className="vcarousel-layout">
+      {/* Collapsed tabs above */}
+      {above.length > (peekAbove ? 1 : 0) && (
+        <div className="vcarousel-stack vcarousel-stack-top">
+          {above.slice(0, peekAbove ? -1 : undefined).map((item: any, i: number) => (
+            <div key={item.id} className="vcarousel-tab" onMouseEnter={() => switchTo(i)} onClick={() => switchTo(i)}>
+              {renderHeader(item, i)}
+              {onClose && <span className="vcarousel-close" onClick={(e) => { e.stopPropagation(); onClose(i); }}>&times;</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 50px peek of item above */}
+      {peekAbove && (
+        <div
+          className="vcarousel-peek vcarousel-peek-top"
+          onMouseEnter={() => switchTo(idx - 1)}
+          onClick={() => switchTo(idx - 1)}
+        >
+          <div className="vcarousel-peek-header">
+            {renderHeader(peekAbove, idx - 1)}
+            {onClose && <span className="vcarousel-close" onClick={(e) => { e.stopPropagation(); onClose(idx - 1); }}>&times;</span>}
+          </div>
+          <div className="vcarousel-peek-fade"></div>
+        </div>
+      )}
+
+      {/* Focused item */}
+      {focused && (
+        <div className={`vcarousel-active ${animDir === 'up' ? 'vcarousel-enter-up' : animDir === 'down' ? 'vcarousel-enter-down' : ''}`} key={focused.id}>
+          <div className="vcarousel-active-header">
+            {renderHeader(focused, idx)}
+            {onClose && <span className="vcarousel-close" onClick={(e) => { e.stopPropagation(); onClose(idx); }}>&times;</span>}
+          </div>
+          {renderContent(focused, idx)}
+        </div>
+      )}
+
+      {/* 50px peek of item below */}
+      {peekBelow && (
+        <div
+          className="vcarousel-peek vcarousel-peek-bottom"
+          onMouseEnter={() => switchTo(idx + 1)}
+          onClick={() => switchTo(idx + 1)}
+        >
+          <div className="vcarousel-peek-fade"></div>
+          <div className="vcarousel-peek-header">
+            {renderHeader(peekBelow, idx + 1)}
+            {onClose && <span className="vcarousel-close" onClick={(e) => { e.stopPropagation(); onClose(idx + 1); }}>&times;</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Collapsed tabs below */}
+      {below.length > (peekBelow ? 1 : 0) && (
+        <div className="vcarousel-stack vcarousel-stack-bottom">
+          {below.slice(peekBelow ? 1 : 0).map((item: any, origIdx: number) => {
+            const realIdx = idx + 1 + (peekBelow ? 1 : 0) + origIdx;
+            return (
+              <div key={item.id} className="vcarousel-tab" onMouseEnter={() => switchTo(realIdx)} onClick={() => switchTo(realIdx)}>
+                {renderHeader(item, realIdx)}
+                {onClose && <span className="vcarousel-close" onClick={(e) => { e.stopPropagation(); onClose(realIdx); }}>&times;</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   Sessions slide: agents (vertical carousel) | panels (fixed right)
+   ══════════════════════════════════════════════════════ */
+function SessionsSlide({ proj }: { proj: any }) {
+  const { rightPanelTab, setRightPanelTab } = useStore();
+  const { status: ghStatus } = useGitHubStatus(proj.id);
+  const ghAvailable = ghStatus?.available ?? false;
+
+  const activeSessions = proj.sessions.filter((s: any) => s.status !== 'ended');
+
+  return (
+    <div className="carousel-sessions-layout">
+      {/* Left: agent sessions */}
+      <div className="carousel-agents-col">
+        <div className="carousel-agents-header">
+          <span className="carousel-area-title">Agent Sessions</span>
+          <button className="carousel-mini-btn" onClick={() => (window as any).newSession()} title="New session">+</button>
+        </div>
+
+        {activeSessions.length === 0 ? (
+          <div className="carousel-empty-state">
+            <div className="carousel-empty-icon">&#x25C9;</div>
+            <div className="carousel-empty-text">No active sessions</div>
+            <button className="carousel-mini-btn" onClick={() => (window as any).newSession()}>Start session</button>
+          </div>
+        ) : activeSessions.length === 1 ? (
+          <div className="carousel-single-agent">
+            <div className="vcarousel-active-header">
+              <span className={`tab-dot ${activeSessions[0].status}`}></span>
+              <span>{activeSessions[0].title || 'Claude Session'}</span>
+              <span className="vcarousel-close" onClick={() => (window as any).closeSession(proj.id, 0)}>&times;</span>
+            </div>
+            <SessionTui session={activeSessions[0]} />
+          </div>
+        ) : (
+          <VerticalCarousel
+            items={activeSessions}
+            onClose={(i) => (window as any).closeSession(proj.id, i)}
+            renderHeader={(s, i) => (
+              <>
+                <span className={`tab-dot ${s.status}`}></span>
+                <span className="vcarousel-tab-title">{s.title || `Session ${i + 1}`}</span>
+              </>
+            )}
+            renderContent={(s) => <SessionTui session={s} />}
+          />
+        )}
+      </div>
+
+      {/* Right: fixed Sessions/Issues/PRs panel */}
+      <div className="carousel-panels-col">
+        <div className="rp-header">
+          <div className="rp-tabs">
+            <button className={`rp-tab${rightPanelTab === 'sessions' ? ' active' : ''}`} onClick={() => setRightPanelTab('sessions')}>Sessions</button>
+            <button className={`rp-tab${rightPanelTab === 'issues' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`} onClick={() => ghAvailable && setRightPanelTab('issues')}>Issues</button>
+            <button className={`rp-tab${rightPanelTab === 'prs' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`} onClick={() => ghAvailable && setRightPanelTab('prs')}>PRs</button>
+          </div>
+        </div>
+        {rightPanelTab === 'sessions' && <SessionsPanel />}
+        {rightPanelTab === 'issues' && ghStatus && <IssuesPanel projectId={proj.id} ghStatus={ghStatus} />}
+        {rightPanelTab === 'prs' && ghStatus && <PullsPanel projectId={proj.id} ghStatus={ghStatus} />}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   Terminals slide (vertical carousel, same pattern)
+   ══════════════════════════════════════════════════════ */
+function TerminalsSlide({ proj }: { proj: any }) {
+  const terminals = proj.terminals || [];
+
+  if (terminals.length === 0) {
+    return (
+      <div className="carousel-empty-state" style={{ flex: 1 }}>
+        <div className="carousel-empty-icon">&#x203A;_</div>
+        <div className="carousel-empty-text">No terminals</div>
+        <button className="carousel-mini-btn" onClick={() => (window as any).addTerminal()}>Open terminal</button>
+      </div>
+    );
+  }
+
+  if (terminals.length === 1) {
+    return (
+      <div className="carousel-single-terminal">
+        <div className="vcarousel-active-header">
+          <span className="tab-term-icon">›_</span>
+          <span>{terminals[0].name || 'bash'}</span>
+          <span className="vcarousel-close" onClick={() => (window as any).closeTerminal(proj.id, 0)}>&times;</span>
+        </div>
+        <TerminalView terminal={terminals[0]} />
+      </div>
+    );
+  }
+
+  return (
+    <VerticalCarousel
+      items={terminals}
+      onClose={(i) => (window as any).closeTerminal(proj.id, i)}
+      renderHeader={(t, i) => (
+        <>
+          <span className="tab-term-icon">›_</span>
+          <span className="vcarousel-tab-title">{t.name || `Terminal ${i + 1}`}</span>
+        </>
+      )}
+      renderContent={(t) => <TerminalView terminal={t} />}
+    />
+  );
+}
+
+/* ══════════════════════════════════════════════════════
+   Main Carousel Workspace
+   ══════════════════════════════════════════════════════ */
+export function CarouselWorkspace() {
+  const { activeProjectId, projects, previewVisible } = useStore();
+  const proj = projects.find(p => p.id === activeProjectId);
+  if (!proj) return null;
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { handleChildHover, cancelHover } = useHoverScroll(containerRef);
+
+  return (
+    <div className="workspace layout-carousel" id="workspace" ref={containerRef}>
+      <SessionLoadingOverlay />
+
+      {/* 1. Explorer + Editor (combined) */}
+      <CarouselSlide id="explorer-editor" className="slide-explorer-editor" label="Explorer & Editor" onHover={handleChildHover} onLeave={cancelHover}>
+        <div className="carousel-explorer-editor">
+          <div className="carousel-explorer-pane">
+            <FileTree />
+            <div className="lp-splitter" id="lp-splitter" onMouseDown={(e) => (window as any).startLpSplitterDrag(e.nativeEvent)}></div>
+            <GitHistory />
+          </div>
+          <div className="carousel-editor-pane">
+            <EditorArea />
+          </div>
+        </div>
+      </CarouselSlide>
+
+      {/* 2. Agent Sessions | Sessions Panel */}
+      <CarouselSlide id="sessions" className="slide-sessions" label="Sessions" onHover={handleChildHover} onLeave={cancelHover}>
+        <SessionsSlide proj={proj} />
+      </CarouselSlide>
+
+      {/* 3. Bash Terminals (always visible) */}
+      <CarouselSlide id="terminals" className="slide-terminals" label="Terminals" onHover={handleChildHover} onLeave={cancelHover}>
+        <div className="carousel-terminals-header">
+          <span className="carousel-area-title">Terminals</span>
+          <button className="carousel-mini-btn" onClick={() => (window as any).addTerminal()} title="New terminal">+</button>
+        </div>
+        <TerminalsSlide proj={proj} />
+      </CarouselSlide>
+
+      {/* 4. App Preview */}
+      {previewVisible && (
+        <CarouselSlide id="preview" className="slide-preview" label="Preview" onHover={handleChildHover} onLeave={cancelHover}>
+          <PreviewPanel />
+        </CarouselSlide>
+      )}
+    </div>
+  );
+}

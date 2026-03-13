@@ -20,6 +20,7 @@ export function Workspace() {
 
   // Clear attention on user interaction when already viewing the session tab
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const handleSessionInteraction = useCallback(() => {
     if (!session || session.status !== 'attention' || activeTabType !== 'session') return;
     // Debounce: clear after 2s of first interaction
@@ -37,6 +38,15 @@ export function Workspace() {
       }
     }, 2000);
   }, [session?.id, session?.status, activeTabType, activeProjectId]);
+
+  // Listen for xterm-activity custom events (keyboard input inside xterm)
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const handler = () => handleSessionInteraction();
+    el.addEventListener('xterm-activity', handler);
+    return () => el.removeEventListener('xterm-activity', handler);
+  }, [handleSessionInteraction]);
 
   useEffect(() => {
     return () => {
@@ -64,7 +74,7 @@ export function Workspace() {
         <div className="editor-splitter" id="editor-splitter" onMouseDown={(e) => (window as any).startEditorSplitterDrag(e.nativeEvent)}></div>
         <div className="sessions-area">
           <CenterTabs proj={proj} />
-          <div className="center-content" id="center-content" onMouseMove={handleSessionInteraction} onClick={handleSessionInteraction}>
+          <div className="center-content" id="center-content" ref={contentRef} onMouseMoveCapture={handleSessionInteraction} onClickCapture={handleSessionInteraction} onKeyDownCapture={handleSessionInteraction}>
             <SessionLoadingOverlay />
             {session && activeTabType === 'session' && (
               <ViewToggle session={session} proj={proj} />

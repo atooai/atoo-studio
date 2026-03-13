@@ -289,6 +289,16 @@ function handleStatusMessage(msg: any) {
         },
       },
     });
+  } else if (msg.type === 'open_file_request') {
+    useStore.setState({
+      modal: {
+        type: 'open-file',
+        props: {
+          requestId: msg.requestId,
+          filePath: msg.filePath,
+        },
+      },
+    });
   } else if (msg.type === 'serial_closed' && msg.requestId) {
     const req = store.serialRequests.find((r) => r.requestId === msg.requestId);
     if (req && req.status === 'connected') {

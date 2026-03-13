@@ -59,13 +59,22 @@ const spawnerScrollback = new Map<string, string>();
 export type ActivityStatus = 'open' | 'active' | 'attention';
 
 interface ActivityState {
-  lastDataTimestamp: number | null;  // null = never received data
   attentionAcknowledged: boolean;
   currentStatus: ActivityStatus;
+  // Burst tracking: swallow short PTY activity (e.g. resize re-renders)
+  // - Set 'active' instantly for good UX
+  // - But only transition to 'attention' if the burst was sustained (>= BURST_PROMOTE_MS)
+  // - Short bursts (< BURST_PROMOTE_MS) revert to the pre-burst status instead
+  burstStartTime: number | null;   // when the current burst began
+  burstPromoted: boolean;          // true once burst exceeded BURST_PROMOTE_MS
+  burstIdleTimer: ReturnType<typeof setTimeout> | null;  // fires after BURST_IDLE_MS of silence
+  preBurstStatus: ActivityStatus;  // status to revert to if burst is short
 }
 
 const activityStates = new Map<string, ActivityState>();
-const INACTIVITY_THRESHOLD_MS = 5000;
+
+const BURST_IDLE_MS = 1000;      // 1s of PTY silence = burst ended
+const BURST_PROMOTE_MS = 3000;   // 3s of sustained output = real work (not a re-render)
 
 // Explicit envId → sessionId mapping for agent-registry sessions
 // (store.sessions may use different IDs than the agent registry)
@@ -90,13 +99,6 @@ export function unregisterActivitySession(envId: string, sessionId: string): voi
   }
 }
 
-function deriveActivityStatus(state: ActivityState): ActivityStatus {
-  if (state.lastDataTimestamp === null) return 'open';
-  const elapsed = Date.now() - state.lastDataTimestamp;
-  if (elapsed < INACTIVITY_THRESHOLD_MS) return 'active';
-  return state.attentionAcknowledged ? 'open' : 'attention';
-}
-
 function broadcastActivityStatus(envId: string, status: ActivityStatus): void {
   const broadcasted = new Set<string>();
 
@@ -117,43 +119,101 @@ function broadcastActivityStatus(envId: string, status: ActivityStatus): void {
   }
 }
 
-function updateActivityStatus(envId: string, state: ActivityState): void {
-  const newStatus = deriveActivityStatus(state);
-  if (newStatus !== state.currentStatus) {
-    state.currentStatus = newStatus;
-    broadcastActivityStatus(envId, newStatus);
+function setStatus(envId: string, state: ActivityState, status: ActivityStatus): void {
+  if (status !== state.currentStatus) {
+    state.currentStatus = status;
+    broadcastActivityStatus(envId, status);
   }
 }
 
+/**
+ * Called when PTY produces visible output.
+ *
+ * Burst filter algorithm:
+ * 1. Set 'active' instantly (good UX — user sees agent is working)
+ * 2. Start/extend a burst window; reset the 1s idle timer on each data chunk
+ * 3. If output sustains for >= 3s, "promote" the burst — it's real work
+ * 4. When PTY goes idle for 1s (burst ends):
+ *    - If promoted: normal flow → 'attention' (agent finished real work)
+ *    - If NOT promoted: revert to pre-burst status (was just a re-render)
+ */
 function markActivityData(envId: string): void {
   let state = activityStates.get(envId);
   if (!state) {
-    state = { lastDataTimestamp: null, attentionAcknowledged: false, currentStatus: 'open' };
+    state = {
+      attentionAcknowledged: false,
+      currentStatus: 'open',
+      burstStartTime: null,
+      burstPromoted: false,
+      burstIdleTimer: null,
+      preBurstStatus: 'open',
+    };
     activityStates.set(envId, state);
   }
-  state.lastDataTimestamp = Date.now();
+
+  const now = Date.now();
+
+  // New burst: record pre-burst status and start time
+  if (state.burstStartTime === null) {
+    state.preBurstStatus = state.currentStatus;
+    state.burstStartTime = now;
+    state.burstPromoted = false;
+  }
+
+  // Check if burst should be promoted (sustained output >= BURST_PROMOTE_MS)
+  if (!state.burstPromoted && (now - state.burstStartTime) >= BURST_PROMOTE_MS) {
+    state.burstPromoted = true;
+  }
+
+  // Set active instantly and clear attention acknowledgement
   state.attentionAcknowledged = false;
-  updateActivityStatus(envId, state);
+  setStatus(envId, state, 'active');
+
+  // Reset the idle timer — burst continues as long as data keeps flowing
+  if (state.burstIdleTimer) clearTimeout(state.burstIdleTimer);
+  state.burstIdleTimer = setTimeout(() => onBurstIdle(envId), BURST_IDLE_MS);
+}
+
+/**
+ * Called when PTY has been silent for BURST_IDLE_MS — the burst is over.
+ */
+function onBurstIdle(envId: string): void {
+  const state = activityStates.get(envId);
+  if (!state) return;
+
+  const wasPromoted = state.burstPromoted;
+  const preBurstStatus = state.preBurstStatus;
+
+  // Clear burst tracking
+  state.burstStartTime = null;
+  state.burstPromoted = false;
+  state.burstIdleTimer = null;
+
+  if (wasPromoted) {
+    // Real work finished — transition to 'attention' (unless already viewed)
+    setStatus(envId, state, state.attentionAcknowledged ? 'open' : 'attention');
+  } else {
+    // Short burst (re-render) — revert silently to pre-burst status
+    setStatus(envId, state, preBurstStatus);
+  }
 }
 
 export function markActivityViewed(envId: string): void {
   const state = activityStates.get(envId);
   if (!state) return;
   state.attentionAcknowledged = true;
-  updateActivityStatus(envId, state);
+  // If there's no active burst, update status immediately
+  if (state.burstStartTime === null) {
+    setStatus(envId, state, 'open');
+  }
 }
 
 function removeActivityState(envId: string): void {
+  const state = activityStates.get(envId);
+  if (state?.burstIdleTimer) clearTimeout(state.burstIdleTimer);
   activityStates.delete(envId);
   envToSessionIds.delete(envId);
 }
-
-// Global interval to detect inactivity transitions (active → attention)
-setInterval(() => {
-  for (const [envId, state] of activityStates.entries()) {
-    updateActivityStatus(envId, state);
-  }
-}, 2000);
 
 // ═══════════════════════════════════════════════════════
 // Generic PTY spawn

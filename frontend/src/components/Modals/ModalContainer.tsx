@@ -15,6 +15,7 @@ import { SerialModal } from './SerialModal';
 import { ForwardedConnectionsModal } from './ForwardedConnectionsModal';
 import { ContainerManager } from '../Containers/ContainerManager';
 import { SessionSwitchModal } from './SessionSwitchModal';
+import { OpenFileModal } from './OpenFileModal';
 
 export function ModalContainer() {
   const { modal, setModal } = useStore();
@@ -39,6 +40,7 @@ export function ModalContainer() {
       {modal.type === 'forwarded-connections' && <ForwardedConnectionsModal onClose={close} />}
       {modal.type === 'container-manager' && <ContainerManager onClose={close} />}
       {modal.type === 'session-switch' && <SessionSwitchModal {...modal.props} onClose={close} />}
+      {modal.type === 'open-file' && <OpenFileModal requestId={modal.props?.requestId} filePath={modal.props?.filePath} onClose={close} />}
     </div>
   );
 }

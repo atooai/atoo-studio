@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../state/store';
+import { api } from '../../api';
 import { getFileIconSvg, FOLDER_ARROW_CLOSED, FOLDER_ARROW_OPEN } from '../../icons';
 import type { FileNode, GitChange } from '../../types';
 
@@ -107,10 +108,13 @@ function isDirectory(nodes: FileNode[], path: string): boolean {
 }
 
 export function FileTree() {
-  const { activeProjectId, projects, fileFilter, fileView, stashOpen } = useStore();
+  const { activeProjectId, projects, fileFilter, fileView, stashOpen, explorerRoot } = useStore();
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [systemFiles, setSystemFiles] = useState<FileNode[]>([]);
   const proj = projects.find(p => p.id === activeProjectId);
   if (!proj) return null;
+
+  const isSystem = explorerRoot === 'system';
 
   const gitMap: Record<string, string> = {};
   const gitStaged: Record<string, boolean> = {};
@@ -121,6 +125,14 @@ export function FileTree() {
 
   // Merge deleted files into the tree
   const filesWithDeleted = mergeDeletedFiles(proj.files || [], gitMap, '');
+  const displayFiles = isSystem ? systemFiles : filesWithDeleted;
+
+  // Fetch system root files when in system mode
+  useEffect(() => {
+    if (!isSystem || !proj) return;
+    const params = new URLSearchParams({ rootPath: '/', showHidden: 'true' });
+    api('GET', `/api/projects/${proj.id}/files?${params}`).then(setSystemFiles).catch(() => setSystemFiles([]));
+  }, [isSystem, proj?.id]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Delete' && selectedPath) {
@@ -150,8 +162,8 @@ export function FileTree() {
         {fileFilter === 'changed'
           ? <ChangedFiles gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} />
           : fileView === 'flat'
-            ? <FlatList nodes={filesWithDeleted} parentPath="" gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} />
-            : <TreeNodes nodes={filesWithDeleted} parentPath="" gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} dirtyDirs={dirtyDirs} depth={0} selectedPath={selectedPath} onSelect={setSelectedPath} />
+            ? <FlatList nodes={displayFiles} parentPath="" gitMap={isSystem ? {} : gitMap} gitStaged={isSystem ? {} : gitStaged} gitOldPaths={isSystem ? {} : gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} pathPrefix={isSystem ? '/' : undefined} />
+            : <TreeNodes nodes={displayFiles} parentPath="" gitMap={isSystem ? {} : gitMap} gitStaged={isSystem ? {} : gitStaged} gitOldPaths={isSystem ? {} : gitOldPaths} dirtyDirs={isSystem ? new Set() : dirtyDirs} depth={0} selectedPath={selectedPath} onSelect={setSelectedPath} pathPrefix={isSystem ? '/' : undefined} />
         }
       </div>
       {stashOpen && proj.stashes && proj.stashes.length > 0 && (
@@ -162,7 +174,7 @@ export function FileTree() {
 }
 
 function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) {
-  const { fileFilter, setFileFilter, fileView, setFileView, showHidden, setShowHidden, stashOpen, setStashOpen } = useStore();
+  const { fileFilter, setFileFilter, fileView, setFileView, showHidden, setShowHidden, explorerRoot, setExplorerRoot, stashOpen, setStashOpen } = useStore();
 
   const toggleHidden = () => {
     const next = !showHidden;
@@ -172,10 +184,15 @@ function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) 
     (window as any).selectProject(proj.id, proj.pe_id || '');
   };
 
+  const toggleRoot = () => {
+    setExplorerRoot(explorerRoot === 'workspace' ? 'system' : 'workspace');
+  };
+
   return (
     <>
       <div className="lp-header">
         <span className="lp-title">Explorer</span>
+        {explorerRoot === 'system' && <span className="lp-root-label">/</span>}
         {changeCount > 0 && <span className="lp-change-count">{changeCount}</span>}
       </div>
       <div className="lp-toolbar">
@@ -190,6 +207,7 @@ function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) 
         </div>
         <div className="lp-toolbar-sep"></div>
         <div className="lp-toolbar-group">
+          <button className={`lp-tb-btn ${explorerRoot === 'system' ? 'active' : ''}`} onClick={toggleRoot} title={explorerRoot === 'workspace' ? 'Switch to system root (/)' : 'Switch to workspace root'}>⌂</button>
           <button className={`lp-tb-btn ${showHidden ? 'active' : ''}`} onClick={toggleHidden} title="Show hidden directories (node_modules, .git, etc.)">⦿</button>
           <button className={`lp-tb-btn ${(!proj.stashes || proj.stashes.length === 0) ? 'disabled' : ''}`} onClick={() => setStashOpen(!stashOpen)} title="Stashes">⊟</button>
         </div>
@@ -206,14 +224,14 @@ function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) 
   );
 }
 
-function TreeNodes({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, depth, selectedPath, onSelect }: { nodes: FileNode[]; parentPath: string; gitMap: Record<string, string>; gitStaged: Record<string, boolean>; gitOldPaths: Record<string, string>; dirtyDirs: Set<string>; depth: number; selectedPath: string | null; onSelect: (p: string) => void }) {
+function TreeNodes({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, depth, selectedPath, onSelect, pathPrefix }: { nodes: FileNode[]; parentPath: string; gitMap: Record<string, string>; gitStaged: Record<string, boolean>; gitOldPaths: Record<string, string>; dirtyDirs: Set<string>; depth: number; selectedPath: string | null; onSelect: (p: string) => void; pathPrefix?: string }) {
   if (!nodes) return null;
   return (
     <>
       {nodes.map(node => {
         const fullPath = parentPath ? parentPath + '/' + node.name : node.name;
         if (node.type === 'dir') {
-          return <DirNode key={fullPath} node={node} fullPath={fullPath} gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} dirtyDirs={dirtyDirs} depth={depth} selectedPath={selectedPath} onSelect={onSelect} />;
+          return <DirNode key={fullPath} node={node} fullPath={fullPath} gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} dirtyDirs={dirtyDirs} depth={depth} selectedPath={selectedPath} onSelect={onSelect} pathPrefix={pathPrefix} />;
         }
         const gitBadge = gitMap[fullPath];
         return (
@@ -225,13 +243,13 @@ function TreeNodes({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, dirtyDir
             data-type="file"
             draggable
             onClick={() => onSelect(fullPath)}
-            onDoubleClick={() => (window as any).openFileInEditor(fullPath)}
-            onContextMenu={(e) => { e.preventDefault(); (window as any).showCtxMenu(e.nativeEvent, fullPath, 'file'); }}
-            onDragStart={(e) => { (window as any).dragStart(fullPath, 'file', e.currentTarget, e.dataTransfer); }}
-            onDragEnd={() => (window as any).dragEnd()}
-            onDragOver={(e) => { e.stopPropagation(); (window as any).dragOverItem(fullPath, 'file', e.currentTarget, e); }}
-            onDragLeave={(e) => (window as any).dragLeaveItem(e.currentTarget)}
-            onDrop={(e) => { e.preventDefault(); e.stopPropagation(); (window as any).dropItem(fullPath, 'file', e.dataTransfer); }}
+            onDoubleClick={() => (window as any).openFileInEditor(pathPrefix ? pathPrefix + fullPath : fullPath)}
+            onContextMenu={(e) => { e.preventDefault(); (window as any).showCtxMenu(e.nativeEvent, pathPrefix ? pathPrefix + fullPath : fullPath, 'file'); }}
+            onDragStart={(e) => { if (!pathPrefix) (window as any).dragStart(fullPath, 'file', e.currentTarget, e.dataTransfer); }}
+            onDragEnd={() => { if (!pathPrefix) (window as any).dragEnd(); }}
+            onDragOver={(e) => { if (!pathPrefix) { e.stopPropagation(); (window as any).dragOverItem(fullPath, 'file', e.currentTarget, e); } }}
+            onDragLeave={(e) => { if (!pathPrefix) (window as any).dragLeaveItem(e.currentTarget); }}
+            onDrop={(e) => { if (!pathPrefix) { e.preventDefault(); e.stopPropagation(); (window as any).dropItem(fullPath, 'file', e.dataTransfer); } }}
           >
             <span className="file-tree-icon" dangerouslySetInnerHTML={{ __html: getFileIconSvg(node.name) }} />
             <span className="file-tree-name file">{node.name}</span>
@@ -243,7 +261,7 @@ function TreeNodes({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, dirtyDir
   );
 }
 
-function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, depth, selectedPath, onSelect }: { node: FileNode; fullPath: string; gitMap: Record<string, string>; gitStaged: Record<string, boolean>; gitOldPaths: Record<string, string>; dirtyDirs: Set<string>; depth: number; selectedPath: string | null; onSelect: (p: string) => void }) {
+function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, depth, selectedPath, onSelect, pathPrefix }: { node: FileNode; fullPath: string; gitMap: Record<string, string>; gitStaged: Record<string, boolean>; gitOldPaths: Record<string, string>; dirtyDirs: Set<string>; depth: number; selectedPath: string | null; onSelect: (p: string) => void; pathPrefix?: string }) {
   const [open, setOpen] = useState(false);
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gitBadge = gitMap[fullPath];
@@ -290,14 +308,14 @@ function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, de
       </div>
       {open && (
         <div className="dir-children">
-          <TreeNodes nodes={node.children || []} parentPath={fullPath} gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} dirtyDirs={dirtyDirs} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} />
+          <TreeNodes nodes={node.children || []} parentPath={fullPath} gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} dirtyDirs={dirtyDirs} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} pathPrefix={pathPrefix} />
         </div>
       )}
     </>
   );
 }
 
-function FlatList({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, selectedPath, onSelect }: { nodes: FileNode[]; parentPath: string; gitMap: Record<string, string>; gitStaged: Record<string, boolean>; gitOldPaths: Record<string, string>; selectedPath: string | null; onSelect: (p: string) => void }) {
+function FlatList({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, selectedPath, onSelect, pathPrefix }: { nodes: FileNode[]; parentPath: string; gitMap: Record<string, string>; gitStaged: Record<string, boolean>; gitOldPaths: Record<string, string>; selectedPath: string | null; onSelect: (p: string) => void; pathPrefix?: string }) {
   const items: Array<{ fullPath: string; name: string; dir: string; node: FileNode }> = [];
   function walk(items2: FileNode[], prefix: string) {
     for (const node of items2) {
@@ -322,13 +340,13 @@ function FlatList({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, selectedP
             data-path={fullPath}
             data-type="file"
             onClick={() => onSelect(fullPath)}
-            onDoubleClick={() => (window as any).openFileInEditor(fullPath)}
-            onContextMenu={(e) => { e.preventDefault(); (window as any).showCtxMenu(e.nativeEvent, fullPath, 'file'); }}
+            onDoubleClick={() => (window as any).openFileInEditor(pathPrefix ? pathPrefix + fullPath : fullPath)}
+            onContextMenu={(e) => { e.preventDefault(); (window as any).showCtxMenu(e.nativeEvent, pathPrefix ? pathPrefix + fullPath : fullPath, 'file'); }}
           >
             <span className="file-tree-icon" dangerouslySetInnerHTML={{ __html: getFileIconSvg(name) }} />
             <span className="file-flat-path">
               <span className="file-flat-name">{name}</span>
-              {dir && <span style={{ color: 'var(--text-muted)' }}> {dir}/</span>}
+              {dir && <span style={{ color: 'var(--text-muted)' }}> {pathPrefix || ''}{dir}/</span>}
             </span>
             {gitBadge && <GitBadge status={gitBadge} staged={gitStaged[fullPath]} oldPath={gitOldPaths[fullPath]} />}
           </div>

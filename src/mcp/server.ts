@@ -312,5 +312,32 @@ IMPORTANT: Always search session history first to find the relevant session UUID
   },
 );
 
+server.tool(
+  'open_file',
+  `Open a file in the user's browser editor. The user will be prompted to confirm before the file is opened. Use this when you want the user to see or review a specific file. The tool blocks until the user responds (approve or reject). Provide the full absolute path to the file.`,
+  {
+    file_path: z.string().describe('Absolute path to the file to open (e.g. "/home/user/project/src/main.ts")'),
+  },
+  async ({ file_path }) => {
+    try {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/open-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path }),
+      });
+      const data = await res.json() as any;
+      if (!res.ok) {
+        return { content: [{ type: 'text' as const, text: `Failed to open file: ${data.error}` }] };
+      }
+      if (data.action === 'rejected') {
+        return { content: [{ type: 'text' as const, text: `User rejected opening the file: ${file_path}` }] };
+      }
+      return { content: [{ type: 'text' as const, text: `File opened in the user's browser: ${file_path}` }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Failed to open file: ${err.message}` }] };
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 server.connect(transport);

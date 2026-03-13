@@ -84,8 +84,8 @@ export function TopBar() {
           {containerRuntimes && Object.values(containerRuntimes).some(r => r.installed) && (
             <button className="topbar-btn" onClick={() => setModal({ type: 'container-manager' })} title="Manage Docker/Podman/LXC containers">⊞ Containers</button>
           )}
+          <LayoutToggle />
           <button className="topbar-btn" onClick={() => (window as any).togglePreviewPanel()} title="Toggle app preview panel">⬒ Preview</button>
-          <button className="topbar-btn" onClick={() => (window as any).newSession()} title="Start new Claude session">+ New Session</button>
           {!isStandalone && (
             <button className="topbar-btn" onClick={handleInstall} title="Install as desktop application">
               ⤓ Install App
@@ -266,5 +266,19 @@ function EnvSelector() {
         </div>
       </div>
     </div>
+  );
+}
+
+function LayoutToggle() {
+  const { workspaceLayout, setWorkspaceLayout } = useStore();
+  const isCarousel = workspaceLayout === 'carousel';
+  return (
+    <button
+      className={`topbar-btn ${isCarousel ? 'active' : ''}`}
+      onClick={() => setWorkspaceLayout(isCarousel ? 'classic' : 'carousel')}
+      title={isCarousel ? 'Switch to classic layout' : 'Switch to carousel layout'}
+    >
+      {isCarousel ? '⊞' : '⇔'} {isCarousel ? 'Classic' : 'Carousel'}
+    </button>
   );
 }

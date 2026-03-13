@@ -56,6 +56,13 @@ interface PendingSessionSwitch {
 }
 const pendingSessionSwitches = new Map<string, PendingSessionSwitch>();
 
+// Pending open-file requests (MCP tool blocks until user responds)
+interface PendingOpenFile {
+  resolve: (result: { action: 'approved' | 'rejected' }) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+const pendingOpenFiles = new Map<string, PendingOpenFile>();
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createWebServer(tlsOptions?: { key: string; cert: string }): https.Server | http.Server {
@@ -365,6 +372,52 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
     clearTimeout(pending.timeout);
     pendingSessionSwitches.delete(requestId);
+    pending.resolve({ action });
+    res.json({ success: true });
+  });
+
+  // MCP callback: open a file in the user's browser (with confirmation)
+  app.post('/api/mcp/open-file', async (req, res) => {
+    const { file_path } = req.body;
+    if (!file_path || typeof file_path !== 'string') {
+      return res.status(400).json({ error: 'file_path is required' });
+    }
+
+    const requestId = uuidv4();
+
+    // Broadcast to all browsers
+    const msg = JSON.stringify({ type: 'open_file_request', requestId, filePath: file_path });
+    for (const ws of store.statusClients) {
+      if (ws.readyState === 1) ws.send(msg);
+    }
+
+    // Block until user responds (30s timeout)
+    try {
+      const result = await new Promise<{ action: 'approved' | 'rejected' }>((resolve) => {
+        const timeout = setTimeout(() => {
+          pendingOpenFiles.delete(requestId);
+          resolve({ action: 'rejected' });
+        }, 30000);
+        pendingOpenFiles.set(requestId, { resolve, timeout });
+      });
+      res.json({ action: result.action });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Respond to an open-file request (called by frontend)
+  app.post('/api/mcp/respond-open-file', (req, res) => {
+    const { requestId, action } = req.body;
+    if (!requestId || !action) {
+      return res.status(400).json({ error: 'requestId and action are required' });
+    }
+    const pending = pendingOpenFiles.get(requestId);
+    if (!pending) {
+      return res.status(404).json({ error: 'No pending request with this ID' });
+    }
+    clearTimeout(pending.timeout);
+    pendingOpenFiles.delete(requestId);
     pending.resolve({ action });
     res.json({ success: true });
   });

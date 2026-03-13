@@ -17,11 +17,13 @@ export interface AppState {
   fileFilter: 'all' | 'changed';
   fileView: 'tree' | 'flat';
   showHidden: boolean;
+  explorerRoot: 'workspace' | 'system';
   stashOpen: boolean;
   activeTabType: 'session' | 'terminal';
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
   rightPanelTab: 'sessions' | 'issues' | 'prs';
+  workspaceLayout: 'classic' | 'carousel';
 
   // Editor state
   openFiles: EditorFile[];
@@ -93,11 +95,13 @@ export interface AppState {
   setFileFilter: (f: 'all' | 'changed') => void;
   setFileView: (v: 'tree' | 'flat') => void;
   setShowHidden: (v: boolean) => void;
+  setExplorerRoot: (v: 'workspace' | 'system') => void;
   setStashOpen: (v: boolean) => void;
   setActiveTabType: (t: 'session' | 'terminal') => void;
   setSidebarCollapsed: (v: boolean) => void;
   setRightPanelCollapsed: (v: boolean) => void;
   setRightPanelTab: (t: 'sessions' | 'issues' | 'prs') => void;
+  setWorkspaceLayout: (v: 'classic' | 'carousel') => void;
   setOpenFiles: (files: EditorFile[]) => void;
   setActiveFileIdx: (idx: number) => void;
   setMonacoReady: (v: boolean) => void;
@@ -151,11 +155,13 @@ export const useStore = create<AppState>((set, get) => ({
   fileFilter: 'all',
   fileView: 'tree',
   showHidden: false,
+  explorerRoot: 'workspace',
   stashOpen: false,
   activeTabType: 'session',
   sidebarCollapsed: false,
   rightPanelCollapsed: false,
   rightPanelTab: 'sessions',
+  workspaceLayout: 'classic',
   openFiles: [],
   activeFileIdx: -1,
   monacoReady: false,
@@ -200,11 +206,13 @@ export const useStore = create<AppState>((set, get) => ({
   setFileFilter: (f) => set({ fileFilter: f }),
   setFileView: (v) => set({ fileView: v }),
   setShowHidden: (v) => set({ showHidden: v }),
+  setExplorerRoot: (v) => set({ explorerRoot: v }),
   setStashOpen: (v) => set({ stashOpen: v }),
   setActiveTabType: (t) => set({ activeTabType: t }),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
   setRightPanelCollapsed: (v) => set({ rightPanelCollapsed: v }),
   setRightPanelTab: (t) => set({ rightPanelTab: t }),
+  setWorkspaceLayout: (v) => set({ workspaceLayout: v }),
   setOpenFiles: (files) => set({ openFiles: files }),
   setActiveFileIdx: (idx) => set({ activeFileIdx: idx }),
   setMonacoReady: (v) => set({ monacoReady: v }),

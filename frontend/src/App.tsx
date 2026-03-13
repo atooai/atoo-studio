@@ -7,6 +7,7 @@ import { Sidebar } from './components/Sidebar/Sidebar';
 import { TopBar } from './components/TopBar/TopBar';
 import { Overview } from './components/Overview/Overview';
 import { Workspace } from './components/Layout/Workspace';
+import { CarouselWorkspace } from './components/Layout/CarouselWorkspace';
 import { StartPage } from './components/Layout/StartPage';
 import { ToastContainer } from './components/Layout/Toast';
 import { ModalContainer } from './components/Modals/ModalContainer';
@@ -34,6 +35,11 @@ function useIsMobile() {
   }, [setIsMobileLayout]);
 
   return useStore(s => s.isMobileLayout);
+}
+
+function WorkspaceRouter() {
+  const layout = useStore(s => s.workspaceLayout);
+  return layout === 'carousel' ? <CarouselWorkspace /> : <Workspace />;
 }
 
 export function App() {
@@ -108,7 +114,7 @@ export function App() {
         <TopBar />
         <div id="main">
           {showOverview && <Overview />}
-          {showWorkspace && <Workspace />}
+          {showWorkspace && <WorkspaceRouter />}
         </div>
       </div>
       <ToastContainer />
@@ -639,7 +645,7 @@ function registerGlobalFunctions() {
 
   // Session management
   // Internal: create agent session with a specific agent type/mode
-  const createAgentSession = async (agentType: string, agentMode: string) => {
+  const createAgentSession = async (agentType: string, agentMode: string, initialMessage?: string) => {
     const store = useStore.getState();
     if (!store.activeProjectId) return;
     const proj = store.projects.find(p => p.id === store.activeProjectId);
@@ -651,6 +657,7 @@ function registerGlobalFunctions() {
         agentType,
         cwd: proj.path,
         skipPermissions: true,
+        ...(initialMessage ? { message: initialMessage } : {}),
       });
       setPendingAgentCreation(false);
 
@@ -700,6 +707,21 @@ function registerGlobalFunctions() {
         onSelect: (agent: any) => {
           store.setModal(null);
           createAgentSession(agent.agentType, agent.mode);
+        },
+      },
+    });
+  };
+
+  win.newSessionWithMessage = async (message: string) => {
+    const store = useStore.getState();
+    if (!store.activeProjectId) return;
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: (agent: any) => {
+          store.setModal(null);
+          createAgentSession(agent.agentType, agent.mode, message);
         },
       },
     });
@@ -1068,7 +1090,8 @@ function registerGlobalFunctions() {
     if (idx >= 0) {
       store.setActiveFileIdx(idx);
     } else {
-      const fullPath = (proj.path) + '/' + filePath;
+      const isAbsolute = filePath.startsWith('/');
+      const fullPath = isAbsolute ? filePath : (proj.path) + '/' + filePath;
       try {
         const gitMap: Record<string, string> = {};
         (proj.gitChanges || []).forEach(c => { gitMap[c.file] = c.status; });
@@ -1519,7 +1542,7 @@ function startLpSplitterDrag(e: MouseEvent) {
   e.preventDefault();
   const splitter = document.getElementById('lp-splitter');
   const historyPanel = document.getElementById('git-history-panel');
-  const leftPanel = historyPanel?.closest('.left-panel');
+  const leftPanel = historyPanel?.closest('.left-panel') || historyPanel?.closest('.carousel-explorer-pane');
   if (!splitter || !historyPanel || !leftPanel) return;
   dragStart(); splitter.classList.add('dragging');
   const startY = e.clientY;
@@ -1734,7 +1757,11 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
     ws.onopen = () => { ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })); };
     ws.onmessage = (e: any) => { try { const msg = JSON.parse(e.data); if (msg.type === 'output' && msg.data) term.write(msg.data); } catch {} };
     ws.onclose = () => { term.write('\r\n\x1b[90m[terminal disconnected]\x1b[0m\r\n'); };
-    term.onData((data: string) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data })); });
+    term.onData((data: string) => {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data }));
+      // Bubble user activity up so attention-clear handlers can detect it
+      container.dispatchEvent(new CustomEvent('xterm-activity', { bubbles: true }));
+    });
     term.onResize(({ cols, rows }: any) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
 
     const resizeHandler = () => fitAddon.fit();
