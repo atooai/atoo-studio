@@ -4,17 +4,13 @@ import os from 'os';
 import https from 'https';
 import forge from 'node-forge';
 import { fileURLToPath } from 'url';
-import { CertManager } from './proxy/cert-manager.js';
-import { createMitmProxy } from './proxy/mitm-proxy.js';
-import { createApiApp } from './router.js';
 import { createWebServer } from './web/server.js';
 import { killAllCliProcesses } from './spawner.js';
-import { PROXY_PORT, WEB_PORT, CA_CERT_PATH, CA_KEY_PATH, WEB_CERT_PATH, WEB_KEY_PATH } from './config.js';
+import { WEB_PORT, CA_CERT_PATH, CA_KEY_PATH, WEB_CERT_PATH, WEB_KEY_PATH } from './config.js';
 import { cleanupStaleMcpConfigs } from './mcp/config.js';
 import { fsMonitor } from './fs-monitor.js';
 import { db } from './state/db.js';
 import { agentRegistry } from './agents/registry.js';
-import { ClaudeCodeAgentFactory } from './agents/claude-code/index.js';
 import { ClaudeCodeTerminalAgentFactory } from './agents/claude-code-terminal/index.js';
 import { ClaudeCodeTerminalChatROAgentFactory } from './agents/claude-code-terminal-chatro/index.js';
 import { CodexTerminalChatROAgentFactory } from './agents/codex-terminal-chatro/index.js';
@@ -26,35 +22,21 @@ async function main() {
   console.log('=== Atoo Studio ===');
   console.log('');
 
-  // 1. Load CA certificate
-  const certManager = new CertManager();
-  console.log('[init] CA certificate loaded');
-
-  // 2. Connect to filesystem monitor (graceful — no-op if unavailable)
+  // 1. Connect to filesystem monitor (graceful — no-op if unavailable)
   fsMonitor.connect().catch(err => console.warn('[init] FS monitor not available:', err.message));
 
-  // 2b. Register agent factories
-  agentRegistry.registerFactory(new ClaudeCodeAgentFactory());
+  // 2. Register agent factories
   agentRegistry.registerFactory(new ClaudeCodeTerminalAgentFactory());
   agentRegistry.registerFactory(new ClaudeCodeTerminalChatROAgentFactory());
   agentRegistry.registerFactory(new CodexTerminalChatROAgentFactory());
 
-  // 3. Create the internal API app (handles decrypted Anthropic traffic)
-  const apiApp = createApiApp();
-
-  // 3. Create and start the MITM proxy (bind to 0.0.0.0 for WSL access from Windows)
-  const proxyServer = createMitmProxy(apiApp, certManager);
-  proxyServer.listen(PROXY_PORT, '0.0.0.0', () => {
-    console.log(`[init] MITM proxy listening on 0.0.0.0:${PROXY_PORT}`);
-  });
-
-  // 3.5. Clean up stale per-session MCP config files (older than 24h)
+  // 3. Clean up stale per-session MCP config files (older than 24h)
   cleanupStaleMcpConfigs();
 
-  // 4. Generate CA-signed TLS cert for web frontend
+  // 3.5. Generate CA-signed TLS cert for web frontend
   const tlsOptions = getOrCreateWebCert();
 
-  // 5. Create and start the web frontend server over HTTPS (bind to 0.0.0.0 for WSL access from Windows)
+  // 4. Create and start the web frontend server over HTTPS (bind to 0.0.0.0 for WSL access from Windows)
   const webServer = createWebServer(tlsOptions);
 
   // Dynamic SAN expansion: detect new hosts from incoming requests and hot-swap cert
@@ -68,9 +50,6 @@ async function main() {
 
   // Detect local IPs for display
   const localIps = getLocalIps();
-  console.log('');
-  console.log('Start Claude Code with:');
-  console.log(`  HTTPS_PROXY=http://localhost:${PROXY_PORT} NODE_EXTRA_CA_CERTS=${CA_CERT_PATH} claude`);
   console.log('');
   for (const ip of localIps) {
     console.log(`Web frontend: https://${ip}:${WEB_PORT}`);
@@ -95,7 +74,6 @@ async function main() {
     sshManager.disconnectAll();
     killAllCliProcesses();
     db.close();
-    proxyServer.close();
     webServer.close();
     process.exit(0);
   });
@@ -106,7 +84,6 @@ async function main() {
     sshManager.disconnectAll();
     killAllCliProcesses();
     db.close();
-    proxyServer.close();
     webServer.close();
     process.exit(0);
   });

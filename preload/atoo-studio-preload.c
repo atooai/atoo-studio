@@ -6,8 +6,9 @@
  *   2. Report the event to the TypeScript monitor via Unix socket
  *
  * Environment variables:
- *   ATOO_SESSION_ID   — session/tracking identifier
- *   ATOO_SOCKET_PATH  — path to Unix domain socket (default: ~/.atoo-studio/preload.sock)
+ *   ATOO_SESSION_ID     — session/tracking identifier
+ *   ATOO_SOCKET_PATH    — path to Unix domain socket (default: ~/.atoo-studio/preload.sock)
+ *   ATOO_PRELOAD_DEBUG  — set to "1" to enable stderr debug logging
  *
  * Graceful degradation: if socket or env vars are unavailable, all intercepted
  * functions pass through to real implementations with near-zero overhead.
@@ -54,6 +55,10 @@ static int          g_sock_fd = -1;
 static int          g_initialized = 0;
 static uint64_t     g_counter = 0;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* Debug logging — only when ATOO_PRELOAD_DEBUG=1 */
+static int          g_debug = 0;
+#define DBG(...) do { if (g_debug) fprintf(stderr, __VA_ARGS__); } while (0)
 
 /* Per-thread re-entrancy guard */
 static __thread int in_hook = 0;
@@ -291,22 +296,22 @@ static int json_escape(const char *src, char *dst, size_t dstsz) {
  */
 static void snapshot_and_report(const char *op, const char *abspath, const char *old_path) {
     if (!g_initialized) {
-        fprintf(stderr, "[atoo-studio-preload] SKIP (not initialized): %s %s\n", op, abspath);
+        DBG("[atoo-studio-preload] SKIP (not initialized): %s %s\n", op, abspath);
         return;
     }
     if (is_excluded(abspath)) {
-        fprintf(stderr, "[atoo-studio-preload] SKIP (excluded): %s %s\n", op, abspath);
+        DBG("[atoo-studio-preload] SKIP (excluded): %s %s\n", op, abspath);
         return;
     }
     /* Don't exclude based on old_path — atomic writes rename from /tmp/ to final path */
 
-    fprintf(stderr, "[atoo-studio-preload] EVENT: %s %s (old=%s)\n", op, abspath, old_path ? old_path : "none");
+    DBG("[atoo-studio-preload] EVENT: %s %s (old=%s)\n", op, abspath, old_path ? old_path : "none");
 
     pthread_mutex_lock(&g_mutex);
 
     /* Check if already snapshotted this path */
     if (set_contains(&g_snapped, abspath)) {
-        fprintf(stderr, "[atoo-studio-preload] SKIP (already snapshotted): %s\n", abspath);
+        DBG("[atoo-studio-preload] SKIP (already snapshotted): %s\n", abspath);
         pthread_mutex_unlock(&g_mutex);
         return;
     }
@@ -362,12 +367,12 @@ static void snapshot_and_report(const char *op, const char *abspath, const char 
     if (ensure_socket() == 0) {
         ssize_t wr = write(g_sock_fd, msg, (size_t)len);
         if (wr < 0) {
-            fprintf(stderr, "[atoo-studio-preload] SOCKET WRITE FAILED: %s\n", strerror(errno));
+            DBG("[atoo-studio-preload] SOCKET WRITE FAILED: %s\n", strerror(errno));
             /* Connection lost, close and let next call retry */
             close(g_sock_fd);
             g_sock_fd = -1;
         } else {
-            fprintf(stderr, "[atoo-studio-preload] SENT %zd bytes to socket\n", wr);
+            DBG("[atoo-studio-preload] SENT %zd bytes to socket\n", wr);
         }
     }
 
@@ -393,6 +398,9 @@ static void preload_init(void) {
     real_ftruncate  = dlsym(RTLD_NEXT, "ftruncate");
 
     /* Read config from environment */
+    const char *dbg = getenv("ATOO_PRELOAD_DEBUG");
+    g_debug = (dbg && dbg[0] == '1');
+
     const char *sid = getenv("ATOO_SESSION_ID");
     if (!sid || !sid[0]) return; /* Not configured — pass through */
 
@@ -427,7 +435,7 @@ static void preload_init(void) {
     g_sock_fd = connect_socket();
 
     g_initialized = 1;
-    fprintf(stderr, "[atoo-studio-preload] INIT pid=%d session=%s socket=%s connected=%d\n",
+    DBG("[atoo-studio-preload] INIT pid=%d session=%s socket=%s connected=%d\n",
             (int)getpid(), g_session_id, g_socket_path, g_sock_fd >= 0);
 }
 

@@ -176,7 +176,6 @@ export class FsMonitor {
         if (!fs.existsSync(objectPath)) {
           fs.renameSync(event.snapshot, objectPath);
         } else {
-          // Already stored, just remove the duplicate snapshot
           try { fs.unlinkSync(event.snapshot); } catch {}
         }
 

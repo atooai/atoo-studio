@@ -10,7 +10,7 @@ import cookieParser from 'cookie-parser';
 import { store } from '../state/store.js';
 import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
-import { getProcessPid, getPreloadSessionId, getPty, getEnvIdForSession, getScrollback, killCliProcess } from '../spawner.js';
+import { getProcessPid, getPty, getEnvIdForSession, getScrollback, killCliProcess } from '../spawner.js';
 import { fsMonitor } from '../fs-monitor.js';
 import { changesRouter } from '../handlers/changes.js';
 import { projectsRouter } from '../handlers/projects.js';
@@ -481,16 +481,9 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   // ═══════════════════════════════════════════════════════
   app.use('/api', requireAuth);
 
-  // List CLI environments (runtime)
+  // List CLI environments (runtime) — no longer applicable without MITM proxy
   app.get('/api/cli-environments', (_req, res) => {
-    const envs = Array.from(store.environments.values()).map((e) => ({
-      id: e.id,
-      machine_name: e.machineName,
-      directory: e.directory,
-      branch: e.branch,
-      registered_at: e.registeredAt.toISOString(),
-    }));
-    res.json(envs);
+    res.json([]);
   });
 
   // Browse directories for folder picker
@@ -770,12 +763,10 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     res.json({ ip: '127.0.0.1' });
   });
 
-  // Proxy status
+  // Status
   app.get('/api/status', (_req, res) => {
     res.json({
-      environments: store.environments.size,
       sessions: store.sessions.size,
-      active_ingress: store.ingressClients.size,
     });
   });
 
@@ -789,7 +780,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     const { agentType, cwd, skipPermissions, message, linkedIssue,
             resumeSessionUuid, forkParentSessionId, forkAfterEventUuid, forkFromEventUuid } = req.body;
 
-    const type = agentType || 'claude-code';
+    const type = agentType || 'claude-code-terminal-chatro';
     const sessionId = `agent_${uuidv4()}`;
 
     try {

@@ -9,10 +9,7 @@ export const PROJECT_ROOT = __config_dirname.includes('/dist/src')
   : path.resolve(__config_dirname, '..');     // src/ → project root
 
 export const PROXY_PORT = 8081;
-export const INTERNAL_PORT = 0; // random port for internal Express app
 export const WEB_PORT = 3010;
-export const ANTHROPIC_HOST = 'api.anthropic.com';
-export const ANTHROPIC_ORIGIN = `https://${ANTHROPIC_HOST}`;
 export const CERTS_DIR = path.join(PROJECT_ROOT, 'certs') + '/';
 export const CA_CERT_PATH = `${CERTS_DIR}ca.pem`;
 export const CA_KEY_PATH = `${CERTS_DIR}ca-key.pem`;

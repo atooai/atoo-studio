@@ -12,10 +12,11 @@ import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
 import { toWireMessages } from '../../events/wire.js';
 import { forkEventsToResumable } from '../lib/claude/jsonl-writer.js';
-import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
+import { getProcessPid, getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
 import { JsonlWatcher, type SubagentMetadata } from './jsonl-watcher.js';
 import { fsSessionScanner } from '../lib/claude/fs-sessions.js';
+import { initFileTracking, ToolResultFileTracker } from '../lib/fs-tracking.js';
 
 import { precreateClaudeSession } from '../lib/session-precreate.js';
 
@@ -34,6 +35,7 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
   private destroyed = false;
 
   private jsonlWatcher: JsonlWatcher | null = null;
+  private toolTracker: ToolResultFileTracker | null = null;
   private wireMessages: WireMessage[] = [];
   private events: SessionEvent[] = []; // canonical event store
   private pendingToolUses = new Map<string, { name: string; input: any }>();
@@ -80,15 +82,28 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       });
 
       // Spawn the terminal PTY — always with --resume since we pre-created the file
-      this.envId = spawnTerminalCliProcess({
+      const { envId, preloadSessionId } = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
         resumeSessionUuid: resumeUuid,
         isChainContinuation: options.isChainContinuation,
       });
+      this.envId = envId;
 
       // Register envId → sessionId mapping for activity tracking
       registerActivitySession(this.envId, this.sessionId);
+
+      // Start file change detection (all 3 levels)
+      const pid = getProcessPid(this.envId);
+      if (pid) {
+        initFileTracking({
+          sessionId: this.cliSessionId!,
+          cwd: this.cwd,
+          pid,
+          preloadSessionId,
+        });
+      }
+      this.toolTracker = new ToolResultFileTracker(this.cliSessionId!);
 
       // Start tailing the known JSONL file — UUID is known, no discovery needed
       this.jsonlWatcher.startTailingKnownUuid(resumeUuid);
@@ -259,6 +274,9 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     // Store the raw event as a SessionEvent
     this.events.push(event as SessionEvent);
 
+    // Level 3: detect file-modifying tool results
+    this.toolTracker?.processEvent(event as SessionEvent);
+
     // Track sidechain sessions (from main file events)
     if (!metadata && event.isSidechain && event.parentUuid) {
       if (event.sessionId) {
@@ -307,7 +325,7 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       canFork: true,
       canResume: true,
       hasTerminal: true,
-      hasFileTracking: false,
+      hasFileTracking: true,
       availableModes: [],
       availableModels: [],
     };

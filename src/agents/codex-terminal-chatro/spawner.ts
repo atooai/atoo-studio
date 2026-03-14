@@ -4,15 +4,17 @@
  */
 import crypto from 'crypto';
 import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
 import { spawnProcess } from '../../spawner.js';
 import { getMcpServerDef, MCP_SYSTEM_PROMPT, CHAIN_SYSTEM_PROMPT, registerMcpToken } from '../../mcp/config.js';
+import { addPreloadEnv } from '../lib/fs-tracking.js';
 
 export function spawnCodexCliProcess(options: {
   skipPermissions?: boolean;
   cwd?: string;
   resumeSessionUuid?: string;
   isChainContinuation?: boolean;
-}): string {
+}): { envId: string; preloadSessionId: string } {
   const cwd = options.cwd || process.env.HOME || os.homedir();
 
   let command: string;
@@ -50,15 +52,18 @@ export function spawnCodexCliProcess(options: {
     args = [...baseArgs];
   }
 
-  const env = { ...process.env };
+  const preloadSessionId = uuidv4();
+  const env: Record<string, string | undefined> = { ...process.env };
+  addPreloadEnv(env, preloadSessionId);
 
   const { envId } = spawnProcess({
     command,
     args,
     cwd,
     env,
+    preloadSessionId,
     logPrefix: 'codex-terminal-chatro',
   });
 
-  return envId;
+  return { envId, preloadSessionId };
 }

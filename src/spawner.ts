@@ -241,7 +241,7 @@ export interface SpawnOptions {
   cols?: number;
   rows?: number;
   envId?: string;         // Caller can provide; otherwise auto-generated
-  preloadSessionId?: string;
+  preloadSessionId?: string;  // UUID for LD_PRELOAD file tracking
   logPrefix?: string;     // For log lines, e.g. "claude" or "gemini"
 }
 
@@ -386,29 +386,6 @@ export function killAllCliProcesses(): void {
 
 export function getPty(envId: string): ITerminal | undefined {
   return spawnedProcesses.get(envId)?.pty;
-}
-
-/**
- * Re-register a process under a different envId (e.g. when the CLI
- * registers with the MITM proxy and we learn the real environment ID).
- */
-export function reassignEnvId(oldEnvId: string, newEnvId: string): void {
-  const proc = spawnedProcesses.get(oldEnvId);
-  if (!proc) return;
-  const scrollback = spawnerScrollback.get(oldEnvId) || '';
-  const activity = activityStates.get(oldEnvId);
-  const sessionIds = envToSessionIds.get(oldEnvId);
-
-  spawnedProcesses.delete(oldEnvId);
-  spawnerScrollback.delete(oldEnvId);
-  activityStates.delete(oldEnvId);
-  envToSessionIds.delete(oldEnvId);
-
-  proc.envId = newEnvId;
-  spawnedProcesses.set(newEnvId, proc);
-  spawnerScrollback.set(newEnvId, scrollback);
-  if (activity) activityStates.set(newEnvId, activity);
-  if (sessionIds) envToSessionIds.set(newEnvId, sessionIds);
 }
 
 export function getEnvIdForSession(sessionId: string): string | undefined {

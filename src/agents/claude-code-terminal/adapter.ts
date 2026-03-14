@@ -10,8 +10,9 @@ import type {
 } from '../types.js';
 import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
-import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
+import { getProcessPid, getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
+import { initFileTracking } from '../lib/fs-tracking.js';
 
 import { precreateClaudeSession } from '../lib/session-precreate.js';
 
@@ -48,15 +49,27 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
     this.cliSessionId = resumeUuid;
 
     try {
-      this.envId = spawnTerminalCliProcess({
+      const { envId, preloadSessionId } = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
         resumeSessionUuid: resumeUuid,
         isChainContinuation: options.isChainContinuation,
       });
+      this.envId = envId;
 
       // Register envId → sessionId mapping for activity tracking
       registerActivitySession(this.envId, this.sessionId);
+
+      // Start file change detection (levels 1+2: LD_PRELOAD + inotify)
+      const pid = getProcessPid(this.envId);
+      if (pid) {
+        initFileTracking({
+          sessionId: this.cliSessionId!,
+          cwd: this.cwd,
+          pid,
+          preloadSessionId,
+        });
+      }
 
       this.setStatus('idle');
       this.emit('ready');
@@ -154,7 +167,7 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
       canFork: false,
       canResume: true,
       hasTerminal: true,
-      hasFileTracking: false,
+      hasFileTracking: true,
       availableModes: [],
       availableModels: [],
     };

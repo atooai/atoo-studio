@@ -15,9 +15,10 @@ import { toWireMessages } from '../../events/wire.js';
 import { mapCodexJsonlLine } from '../lib/codex/jsonl-mapper.js';
 import { codexSessionScanner } from '../lib/codex/fs-sessions.js';
 import { forkEventsToResumable } from '../lib/claude/jsonl-writer.js';
-import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
+import { getProcessPid, getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnCodexCliProcess } from './spawner.js';
 import { CodexJsonlWatcher } from './jsonl-watcher.js';
+import { initFileTracking, ToolResultFileTracker } from '../lib/fs-tracking.js';
 
 import { precreateCodexSession } from '../lib/session-precreate.js';
 
@@ -35,6 +36,7 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
   private destroyed = false;
 
   private jsonlWatcher: CodexJsonlWatcher | null = null;
+  private toolTracker: ToolResultFileTracker | null = null;
   private wireMessages: WireMessage[] = [];
   private events: SessionEvent[] = [];
   private pendingToolUses = new Map<string, { name: string; input: any }>();
@@ -62,15 +64,28 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
       }
 
       // Spawn the terminal PTY — always with resume since we pre-created the file
-      this.envId = spawnCodexCliProcess({
+      const { envId, preloadSessionId } = spawnCodexCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
         resumeSessionUuid: resumeUuid,
         isChainContinuation: options.isChainContinuation,
       });
+      this.envId = envId;
 
       // Register envId → sessionId mapping for activity tracking
       registerActivitySession(this.envId, this.sessionId);
+
+      // Start file change detection (all 3 levels)
+      const pid = getProcessPid(this.envId);
+      if (pid) {
+        initFileTracking({
+          sessionId: this.cliSessionId!,
+          cwd: this.cwd,
+          pid,
+          preloadSessionId,
+        });
+      }
+      this.toolTracker = new ToolResultFileTracker(this.cliSessionId!);
 
       // Start tailing the known session file — UUID is known, no discovery needed
       this.startTailing(resumeUuid);
@@ -248,6 +263,9 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
   private handleEvent(event: SessionEvent): void {
     this.events.push(event);
 
+    // Level 3: detect file-modifying tool results
+    this.toolTracker?.processEvent(event);
+
     const mapped = toWireMessages(this.sessionId, event, this.pendingToolUses);
 
     for (const msg of mapped) {
@@ -269,7 +287,7 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
       canFork: true,
       canResume: true,
       hasTerminal: true,
-      hasFileTracking: false,
+      hasFileTracking: true,
       availableModes: [],
       availableModels: [],
     };

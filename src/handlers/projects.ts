@@ -57,27 +57,7 @@ projectsRouter.get('/api/projects/:id/sessions', (req, res) => {
   const project = db.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: 'Project not found' });
 
-  const sessions = Array.from(store.sessions.values())
-    .filter(s => {
-      const env = store.environments.get(s.environmentId);
-      return env?.directory === project.path;
-    })
-    .map(s => {
-      const initEvent = s.events.find((e) => e.type === 'system' && (e as any).subtype === 'init') as any;
-      const ctxUsage = store.contextUsages.get(s.id);
-      return {
-        id: s.id,
-        title: s.title,
-        status: s.status,
-        agent_status: store.getAgentStatus(s.id),
-        created_at: s.createdAt.toISOString(),
-        event_count: s.events.length,
-        model: initEvent?.model || ctxUsage?.model || null,
-        permission_mode: initEvent?.permissionMode || s.permissionMode || null,
-      };
-    });
-
-  res.json(sessions);
+  res.json([]);
 });
 
 // ═══════════════════════════════════════════════════
