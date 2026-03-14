@@ -161,6 +161,10 @@ Atoo Studio exposes 11 MCP tools that agents can call:
 | `github_issue_pr_changed` | Notify the UI when a GitHub issue or PR is created/modified |
 | `connect_database` | Open the database explorer with a specific connection |
 
+## Status
+
+Actively used for daily development work across multiple projects. Still evolving fast — expect rough edges. Contributions and feedback welcome.
+
 ## Roadmap
 
 - [ ] More agent adapters (Gemini CLI, Aider, and others)
