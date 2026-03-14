@@ -55,7 +55,7 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
     }
 
     // Determine session UUID: use provided resume UUID, or pre-create a new one
-    const resumeUuid = options.resumeSessionUuid || precreateClaudeSession(this.cwd);
+    const resumeUuid = options.resumeSessionUuid || precreateClaudeSession(this.cwd, options.initialMessage);
     this.cliSessionId = resumeUuid;
 
     try {

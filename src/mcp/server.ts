@@ -436,6 +436,31 @@ Bad tags: "working on implementing the new authentication system" (too long)`,
   },
 );
 
+server.tool(
+  'github_issue_pr_changed',
+  `MANDATORY: You MUST call this tool EVERY TIME you make ANY change to a GitHub issue or pull request. This includes: commenting, editing title/body/description, changing state (open/close/merge), adding/removing labels, adding/removing assignees, changing milestone, requesting reviewers, or any other modification via the gh CLI or GitHub API. Call this immediately after the change is made. No exceptions — failure to report changes means the UI won't update.`,
+  {
+    repository: z.string().describe('Repository in owner/repo format (e.g. "octocat/hello-world")'),
+    type: z.enum(['issue', 'pr']).describe('Whether the changed item is an issue or pull request'),
+    number: z.number().int().min(1).describe('The issue or pull request number'),
+  },
+  async ({ repository, type, number }) => {
+    try {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/github-changed`, {
+        method: 'POST',
+        headers: mcpHeaders(),
+        body: JSON.stringify({ repository, type, number }),
+      });
+      if (!res.ok) {
+        return { content: [{ type: 'text' as const, text: `Warning: failed to notify UI of GitHub change (HTTP ${res.status})` }] };
+      }
+      return { content: [{ type: 'text' as const, text: `Notified atoo-studio UI that ${type} #${number} in ${repository} was changed.` }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Warning: could not reach atoo-studio (${err.message}). UI may not reflect the change.` }] };
+    }
+  },
+);
+
 const DB_TYPES = [
   'postgresql', 'mysql', 'mariadb', 'sqlite', 'redis', 'mongodb',
   'duckdb', 'elasticsearch', 'opensearch', 'clickhouse', 'cockroachdb',

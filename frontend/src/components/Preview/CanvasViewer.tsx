@@ -337,6 +337,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       type: 'mouse', event: 'mousePressed',
       x, y,
       button: cdpButton(e.button),
+      buttons: e.buttons,
       clickCount: e.detail || 1,
       modifiers: cdpModifiers(e),
     });
@@ -350,6 +351,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       type: 'mouse', event: 'mouseReleased',
       x, y,
       button: cdpButton(e.button),
+      buttons: e.buttons,
       clickCount: e.detail || 1,
       modifiers: cdpModifiers(e),
     });
@@ -362,6 +364,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       type: 'mouse', event: 'mouseMoved',
       x, y,
       button: 'none',
+      buttons: e.buttons,
       modifiers: cdpModifiers(e),
     });
   }, [arealMode, scaleCoords, send]);
@@ -380,6 +383,14 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+  }, []);
+
+  // Pointer capture ensures mousemove fires during drag even if cursor leaves canvas
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    e.currentTarget.releasePointerCapture(e.pointerId);
   }, []);
 
   // Keyboard handlers
@@ -459,6 +470,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       <canvas
         ref={canvasRef}
         className="canvas-viewer"
+        draggable={false}
         style={{
           width: typeof displayW === 'number' ? `${displayW}px` : displayW,
           height: typeof displayH === 'number' ? `${displayH}px` : displayH,
@@ -468,6 +480,9 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
         onMouseMove={handleMouseMove}
         onWheel={handleWheel}
         onContextMenu={handleContextMenu}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onDragStart={e => e.preventDefault()}
       />
       {arealMode && (
         <ArealOverlay

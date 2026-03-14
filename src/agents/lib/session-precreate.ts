@@ -18,7 +18,7 @@ const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
  *
  * @returns The generated session UUID
  */
-export function precreateClaudeSession(cwd: string): string {
+export function precreateClaudeSession(cwd: string, initialMessage?: string): string {
   const uuid = uuidv4();
   const resolvedCwd = path.resolve(cwd);
   let dirHash = resolvedCwd.replace(/[^a-zA-Z0-9]/g, '-');
@@ -31,6 +31,11 @@ export function precreateClaudeSession(cwd: string): string {
   const userUuid = uuidv4();
   const assistantUuid = uuidv4();
 
+  let greeting = 'Hello from Atoo Studio — Agentic Development Environment!';
+  if (initialMessage) {
+    greeting += '\n\n' + initialMessage;
+  }
+
   const userEvent = JSON.stringify({
     parentUuid: null,
     isSidechain: false,
@@ -38,7 +43,7 @@ export function precreateClaudeSession(cwd: string): string {
     cwd: resolvedCwd,
     sessionId: uuid,
     type: 'user',
-    message: { role: 'user', content: 'Hello from Atoo Studio — Agentic Development Environment!' },
+    message: { role: 'user', content: greeting },
     uuid: userUuid,
     timestamp: now,
     permissionMode: 'bypassPermissions',

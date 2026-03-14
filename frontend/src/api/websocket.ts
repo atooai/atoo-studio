@@ -331,6 +331,11 @@ function handleStatusMessage(msg: any) {
       };
     });
     useStore.setState({ projects });
+  } else if (msg.type === 'github_issue_pr_changed') {
+    // Dispatch a custom DOM event so GitHubList and IssueDetailPanel can react
+    window.dispatchEvent(new CustomEvent('github-issue-pr-changed', {
+      detail: { repository: msg.repository, itemType: msg.itemType, number: msg.number },
+    }));
   } else if (msg.type === 'service_started' && msg.services) {
     const proj = store.projects.find((p) => msg.cwd && msg.cwd.startsWith(p.path));
     const projName = proj?.name || msg.cwd || 'Unknown';

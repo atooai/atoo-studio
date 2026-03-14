@@ -318,17 +318,18 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
   const proj = useStore.getState().projects.find(p => p.id === projectId);
   if (!proj) return;
 
-  // Load settings from DB (always apply to reset per-project state like preview tabs)
+  // Restore in-memory view state immediately (instant switch, no flicker)
+  restoreProjectViewState(projectId);
+
+  // Then load persisted settings from DB (overrides in-memory cache on first load or if DB is newer)
   const apeId = useStore.getState().activeProjectEnvironmentId;
   if (apeId) {
     try {
       const dbSettings = await api('GET', `/api/project-links/${apeId}/settings`);
-      applyProjectSettings(dbSettings || {}, proj);
-    } catch {
-      applyProjectSettings({}, proj);
-    }
-  } else {
-    applyProjectSettings({}, proj);
+      if (dbSettings && Object.keys(dbSettings).length > 0) {
+        applyProjectSettings(dbSettings, proj);
+      }
+    } catch {}
   }
 
   if (!fromRouter && apeId) {
@@ -617,6 +618,9 @@ function saveProjectViewState(projectId: string | null) {
     activeTabType: store.activeTabType,
     editorAreaHeight: document.getElementById('editor-area')?.style.height || '',
     editorAreaOpen: document.getElementById('editor-area')?.classList.contains('open') || false,
+    previewTabs: store.previewTabs,
+    previewActiveIdx: store.previewActiveIdx,
+    previewVisible: store.previewVisible,
   });
 }
 
@@ -627,6 +631,9 @@ function restoreProjectViewState(projectId: string) {
     store.setOpenFiles(saved.openFiles || []);
     store.setActiveFileIdx(saved.activeFileIdx ?? -1);
     store.setActiveTabType(saved.activeTabType || 'session');
+    store.setPreviewTabs(saved.previewTabs || []);
+    store.setPreviewActiveIdx(saved.previewActiveIdx ?? 0);
+    if (saved.previewVisible !== undefined) store.setPreviewVisible(saved.previewVisible);
     setTimeout(() => {
       const editorArea = document.getElementById('editor-area');
       if (saved.editorAreaOpen) {
@@ -641,6 +648,9 @@ function restoreProjectViewState(projectId: string) {
     store.setOpenFiles([]);
     store.setActiveFileIdx(-1);
     store.setActiveTabType('session');
+    store.setPreviewTabs([]);
+    store.setPreviewActiveIdx(0);
+    store.setPreviewVisible(false);
     setTimeout(() => {
       const editorArea = document.getElementById('editor-area');
       editorArea?.classList.remove('open');
@@ -684,7 +694,7 @@ function registerGlobalFunctions() {
 
   // Session management
   // Internal: create agent session with a specific agent type/mode
-  const createAgentSession = async (agentType: string, agentMode: string, initialMessage?: string) => {
+  const createAgentSession = async (agentType: string, agentMode: string, initialMessage?: string, linkedIssue?: { type: 'issue' | 'pr'; number: number; title: string; url: string }) => {
     const store = useStore.getState();
     if (!store.activeProjectId) return;
     const proj = store.projects.find(p => p.id === store.activeProjectId);
@@ -721,6 +731,7 @@ function registerGlobalFunctions() {
         model: result.model || null,
         _capabilities: result.capabilities,
         cliSessionId: result.cliSessionId || null,
+        ...(linkedIssue ? { linkedIssue } : {}),
       };
       store.updateProject(proj.id, p => ({
         ...p,
@@ -764,6 +775,51 @@ function registerGlobalFunctions() {
         },
       },
     });
+  };
+
+  // Open issue-bound agent session
+  win.newIssueSession = async (issue: { number: number; title: string; url: string }) => {
+    const store = useStore.getState();
+    if (!store.activeProjectId) return;
+
+    const linkedIssue = { type: 'issue' as const, ...issue };
+    const message = `This session is dedicated to GitHub issue #${issue.number} ("${issue.title}"). ` +
+      `Use the gh CLI to retrieve issue details and work with this issue as needed.`;
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: (agent: any) => {
+          store.setModal(null);
+          createAgentSession(agent.agentType, agent.mode, message, linkedIssue);
+        },
+      },
+    });
+  };
+
+  // Open PR-bound agent session
+  win.newPrSession = async (pr: { number: number; title: string; url: string }) => {
+    const store = useStore.getState();
+    if (!store.activeProjectId) return;
+
+    const linkedIssue = { type: 'pr' as const, ...pr };
+    const message = `This session is dedicated to GitHub PR #${pr.number} ("${pr.title}"). ` +
+      `Use the gh CLI to retrieve PR details and work with this pull request as needed.`;
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: (agent: any) => {
+          store.setModal(null);
+          createAgentSession(agent.agentType, agent.mode, message, linkedIssue);
+        },
+      },
+    });
+  };
+
+  // Send a message to a specific session (used by issue detail panel)
+  win.sendMessageToSession = (sessionId: string, text: string) => {
+    sendAgentCommand(sessionId, { action: 'send_message', text });
   };
 
   /**
@@ -1641,6 +1697,7 @@ function registerGlobalFunctions() {
   win.startEditorSplitterDrag = startEditorSplitterDrag;
   win.startSidebarSplitDrag = startSidebarSplitDrag;
   win.startVSplitDrag = startVSplitDrag;
+  win.startIssueSplitDrag = startIssueSplitDrag;
 
   // xterm.js terminal
   win.attachXterm = attachXterm;
@@ -1671,6 +1728,29 @@ function startLpSplitterDrag(e: MouseEvent) {
   const totalH = (leftPanel as HTMLElement).offsetHeight;
   const onMove = (ev: MouseEvent) => { historyPanel.style.height = Math.max(80, Math.min(totalH - 150, startH + (startY - ev.clientY))) + 'px'; };
   const onUp = () => { dragEnd(); splitter.classList.remove('dragging'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function startIssueSplitDrag(e: MouseEvent) {
+  e.preventDefault();
+  const panel = document.querySelector('.issue-detail-panel') as HTMLElement;
+  const splitView = document.querySelector('.issue-split-view') as HTMLElement;
+  if (!panel || !splitView) return;
+  dragStart();
+  const startY = e.clientY;
+  const startH = panel.offsetHeight;
+  const totalH = splitView.offsetHeight;
+  const onMove = (ev: MouseEvent) => {
+    const newH = Math.max(80, Math.min(totalH - 120, startH + (ev.clientY - startY)));
+    panel.style.height = newH + 'px';
+    panel.style.maxHeight = newH + 'px';
+  };
+  const onUp = () => {
+    dragEnd();
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }

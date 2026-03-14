@@ -253,6 +253,7 @@ export class HeadlessBackend implements PreviewBackend {
     // Listen for binding calls from the page
     cdpSession.on('Runtime.bindingCalled', (params: any) => {
       const { name, payload } = params;
+      console.log(`[preview/headless] Binding called: ${name}`);
       let data: any;
       try {
         data = JSON.parse(payload);
@@ -265,6 +266,7 @@ export class HeadlessBackend implements PreviewBackend {
           broadcastJson(instance, { type: 'select_opened', ...data });
           break;
         case '__atoo_pickerOpened':
+          console.log(`[preview/headless] Picker opened: type=${data.type}, selectorPath=${data.selectorPath}`);
           broadcastJson(instance, { type: 'picker_opened', ...data });
           break;
         case '__atoo_tooltipShow':
@@ -441,6 +443,16 @@ export class HeadlessBackend implements PreviewBackend {
           console.warn(`[preview/headless] Navigation to ${targetUrl} attempt ${attempt}/5: ${err.message}`);
           if (attempt < 5) await new Promise(r => setTimeout(r, 1000));
         }
+      }
+
+      // Also evaluate the injected script immediately in the current page
+      // (addScriptToEvaluateOnNewDocument only runs on future navigations)
+      try {
+        await cdpSession.send('Runtime.evaluate', {
+          expression: getInjectedScript(),
+        });
+      } catch (err: any) {
+        console.warn(`[preview/headless] Failed to evaluate capture script: ${err.message}`);
       }
 
       await this.startScreencast(instance);

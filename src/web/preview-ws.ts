@@ -138,6 +138,7 @@ async function handleClientMessage(
         x: msg.x,
         y: msg.y,
         button: msg.button || 'none',
+        buttons: msg.buttons ?? 0,
         clickCount: msg.clickCount || 0,
         deltaX: msg.deltaX || 0,
         deltaY: msg.deltaY || 0,

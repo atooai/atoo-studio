@@ -124,6 +124,26 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     next();
   });
 
+  // MCP callback: notify that a GitHub issue/PR was changed
+  app.post('/api/mcp/github-changed', (req, res) => {
+    const { repository, type, number } = req.body;
+    if (!repository || typeof repository !== 'string') {
+      return res.status(400).json({ error: 'repository is required' });
+    }
+    if (type !== 'issue' && type !== 'pr') {
+      return res.status(400).json({ error: 'type must be "issue" or "pr"' });
+    }
+    if (!number || typeof number !== 'number') {
+      return res.status(400).json({ error: 'number is required' });
+    }
+    console.log(`[mcp] github-changed: ${type} #${number} in ${repository}`);
+    const msg = JSON.stringify({ type: 'github_issue_pr_changed', repository, itemType: type, number });
+    for (const ws of store.statusClients) {
+      if (ws.readyState === 1) ws.send(msg);
+    }
+    res.json({ success: true });
+  });
+
   // MCP callback: report started TCP services
   app.post('/api/mcp/report-services', (req, res) => {
     const { services, cwd } = req.body;
@@ -792,12 +812,8 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         cwd: cwd || undefined,
         skipPermissions: !!skipPermissions,
         resumeSessionUuid: resolvedResumeUuid,
+        initialMessage: message || undefined,
       });
-
-      // Send initial message if provided
-      if (message) {
-        agent.sendMessage(message);
-      }
 
       const info = agent.getInfo();
       res.json(info);

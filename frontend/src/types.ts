@@ -39,6 +39,7 @@ export interface Session {
   contextInProgress?: boolean;
   activeSessionIdx?: number;
   cliSessionId?: string;
+  linkedIssue?: LinkedIssue;
 }
 
 export interface ContextUsage {
@@ -276,6 +277,30 @@ export interface GitHubPull {
   additions: number;
   deletions: number;
   assignees: { login: string }[];
+}
+
+export interface GitHubComment {
+  author: { login: string };
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitHubIssueDetail extends GitHubIssue {
+  body: string;
+  comments_list: GitHubComment[];
+}
+
+export interface GitHubPullDetail extends GitHubPull {
+  body: string;
+  comments_list: GitHubComment[];
+}
+
+export interface LinkedIssue {
+  type: 'issue' | 'pr';
+  number: number;
+  title: string;
+  url: string;
 }
 
 export interface PreviewTab {

@@ -7,6 +7,7 @@ import { EditorArea } from '../Editor/Editor';
 import { ChatArea } from '../Chat/Chat';
 import { SessionsPanel } from '../Sessions/Sessions';
 import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
+import { IssueDetailPanel } from '../GitHub/IssueSessionView';
 import { PreviewPanel } from '../Preview/Preview';
 import { AgentTabIcon } from './AgentTabIcon';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
@@ -83,6 +84,22 @@ export function Workspace() {
             )}
             {activeTabType === 'terminal' ? (
               <TerminalArea proj={proj} />
+            ) : session?.linkedIssue && activeTabType === 'session' ? (
+              <div className="issue-split-view">
+                <IssueDetailPanel
+                  linkedIssue={session.linkedIssue}
+                  projectId={proj.id}
+                  sessionId={session.id}
+                />
+                <div className="issue-split-divider" id="issue-split-divider" onMouseDown={(e) => (window as any).startIssueSplitDrag?.(e.nativeEvent)}></div>
+                <div className="issue-split-agent">
+                  {session.viewMode === 'tui' ? (
+                    <TuiArea session={session} />
+                  ) : (
+                    <ChatArea />
+                  )}
+                </div>
+              </div>
             ) : session?.viewMode === 'tui' ? (
               <TuiArea session={session} />
             ) : (
@@ -266,6 +283,11 @@ function ViewToggle({ session, proj }: { session: any; proj: any }) {
           <button className={`svt-btn ${session.viewMode === 'chat' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('chat')}>
             <span className="svt-icon">◉</span> Chat{chatReadOnly ? ' readonly' : ''}
           </button>
+        )}
+        {session.linkedIssue && (
+          <span className="svt-issue-badge" title={`${session.linkedIssue.type === 'pr' ? 'PR' : 'Issue'} #${session.linkedIssue.number}`}>
+            #{session.linkedIssue.number} {session.linkedIssue.title.length > 30 ? session.linkedIssue.title.substring(0, 30) + '...' : session.linkedIssue.title}
+          </span>
         )}
         {session.tags && session.tags.length > 0 && (
           <div className="svt-tags">

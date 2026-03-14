@@ -10,6 +10,8 @@
 export function getInjectedScript(): string {
   return `(function() {
   'use strict';
+  if (window.__atoo_injected) return;
+  window.__atoo_injected = true;
 
   // === UTILITY: Build a unique CSS selector path for an element ===
   function getSelectorPath(el) {
@@ -78,16 +80,10 @@ export function getInjectedScript(): string {
 
   // === INPUT PICKER INTERCEPTION ===
   var PICKER_TYPES = ['date', 'time', 'datetime-local', 'month', 'week', 'color'];
+  var pickerFiredAt = 0;
 
-  document.addEventListener('mousedown', function(e) {
-    var el = e.target;
-    while (el && el.tagName !== 'INPUT') el = el.parentElement;
-    if (!el || PICKER_TYPES.indexOf(el.type) === -1) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-
+  function firePickerOpened(el) {
+    pickerFiredAt = Date.now();
     try {
       window.__atoo_pickerOpened(JSON.stringify({
         type: el.type,
@@ -99,6 +95,38 @@ export function getInjectedScript(): string {
         selectorPath: getSelectorPath(el),
       }));
     } catch (err) { /* binding not available */ }
+  }
+
+  function findPickerInput(target) {
+    var el = target;
+    while (el && el.tagName !== 'INPUT') el = el.parentElement;
+    if (!el || PICKER_TYPES.indexOf(el.type) === -1) return null;
+    return el;
+  }
+
+  document.addEventListener('mousedown', function(e) {
+    var el = findPickerInput(e.target);
+    if (!el) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    firePickerOpened(el);
+  }, true);
+
+  // Fallback: click listener in case mousedown doesn't fire reliably via CDP
+  document.addEventListener('click', function(e) {
+    var el = findPickerInput(e.target);
+    if (!el) return;
+    // Skip if mousedown already handled this (within 500ms)
+    if (Date.now() - pickerFiredAt < 500) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    firePickerOpened(el);
   }, true);
 
   // === TOOLTIP INTERCEPTION ===

@@ -203,6 +203,66 @@ export async function listPulls(
   return { items, hasMore };
 }
 
+// ─── Single issue/PR detail (body + comments) ───
+
+export interface GitHubComment {
+  author: { login: string };
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GitHubIssueDetail extends GitHubIssue {
+  body: string;
+  comments_list: GitHubComment[];
+}
+
+export interface GitHubPullDetail extends GitHubPull {
+  body: string;
+  comments_list: GitHubComment[];
+}
+
+const ISSUE_DETAIL_FIELDS = ISSUE_FIELDS + ',body';
+const PR_DETAIL_FIELDS = PR_FIELDS + ',body';
+
+export async function getIssueDetail(cwd: string, number: number): Promise<GitHubIssueDetail> {
+  const out = await gh(['issue', 'view', String(number), '--json', ISSUE_DETAIL_FIELDS], cwd);
+  const issue = JSON.parse(out);
+
+  // Fetch comments separately
+  const commentsOut = await gh(['issue', 'view', String(number), '--json', 'comments'], cwd);
+  const { comments: commentsList } = JSON.parse(commentsOut);
+
+  return {
+    ...issue,
+    comments_list: (commentsList || []).map((c: any) => ({
+      author: c.author,
+      body: c.body,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    })),
+  };
+}
+
+export async function getPullDetail(cwd: string, number: number): Promise<GitHubPullDetail> {
+  const out = await gh(['pr', 'view', String(number), '--json', PR_DETAIL_FIELDS], cwd);
+  const pull = JSON.parse(out);
+
+  // Fetch comments separately
+  const commentsOut = await gh(['pr', 'view', String(number), '--json', 'comments'], cwd);
+  const { comments: commentsList } = JSON.parse(commentsOut);
+
+  return {
+    ...pull,
+    comments_list: (commentsList || []).map((c: any) => ({
+      author: c.author,
+      body: c.body,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    })),
+  };
+}
+
 export async function updateIssueState(
   cwd: string,
   number: number,

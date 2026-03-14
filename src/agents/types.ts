@@ -70,6 +70,8 @@ export interface AgentInitOptions {
   resumeSessionUuid?: string;
   /** When true, this is a chain continuation session — append chain system prompt */
   isChainContinuation?: boolean;
+  /** Optional message to append to the initial greeting in the pre-created session */
+  initialMessage?: string;
 }
 
 // ═══════════════════════════════════════════════════════

@@ -356,7 +356,7 @@ export function PickerOverlay({ info, canvasRef, onSelect, onDismiss }: PickerOv
   useEffect(() => {
     // Auto-open the native picker in the host browser
     inputRef.current?.focus();
-    inputRef.current?.showPicker?.();
+    try { inputRef.current?.showPicker?.(); } catch { /* requires user activation */ }
   }, []);
 
   useEffect(() => {

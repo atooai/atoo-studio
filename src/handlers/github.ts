@@ -60,6 +60,19 @@ githubRouter.get('/api/projects/:id/github/issues', async (req, res) => {
   }
 });
 
+// Single issue detail (body + comments)
+githubRouter.get('/api/projects/:id/github/issues/:number', async (req, res) => {
+  const cwd = getProjectCwd(req, res);
+  if (!cwd) return;
+  try {
+    const num = parseInt(req.params.number);
+    const detail = await githubOps.getIssueDetail(cwd, num);
+    res.json(detail);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 githubRouter.post('/api/projects/:id/github/issues/:number/state', async (req, res) => {
   const cwd = getProjectCwd(req, res);
   if (!cwd) return;
@@ -87,6 +100,19 @@ githubRouter.get('/api/projects/:id/github/pulls', async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 50;
     const result = await githubOps.listPulls(cwd, { state, search, limit });
     res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Single PR detail (body + comments)
+githubRouter.get('/api/projects/:id/github/pulls/:number', async (req, res) => {
+  const cwd = getProjectCwd(req, res);
+  if (!cwd) return;
+  try {
+    const num = parseInt(req.params.number);
+    const detail = await githubOps.getPullDetail(cwd, num);
+    res.json(detail);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
