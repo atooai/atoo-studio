@@ -113,7 +113,7 @@ Then open `http://localhost:3000` in your browser.
 ### Docker
 
 ```bash
-docker run -p 3000:3000 atooai/atoo-studio
+docker run -p 3010:3010 ghcr.io/atooai/atoo-studio
 ```
 
 ## Architecture
