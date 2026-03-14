@@ -1725,7 +1725,7 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
       inst.resizeObserver.observe(container);
     }
     inst.container = container;
-    setTimeout(() => inst.fitAddon.fit(), 0);
+    setTimeout(() => (inst.fitFn || (() => inst.fitAddon.fit()))(), 0);
     return;
   }
 
@@ -1801,8 +1801,54 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
       },
     });
 
+    const isAgent = wsType === 'terminal';
+    const FIXED_COLS = 120;
+    const BASE_FONT = 13;
+    const MIN_FONT = Math.round(BASE_FONT * 0.7); // ~9px — 70% zoom floor
+
+    if (isAgent) {
+      // Agent PTYs: fixed 120 cols, scale font to fit container width
+      el.style.overflowX = 'auto';
+    }
+
     term.open(el);
-    fitAddon.fit();
+
+    // Measure character cell width at current font size (xterm renders a canvas)
+    const measureCharWidth = () => {
+      const dims = (fitAddon as any).proposeDimensions?.();
+      if (dims?.width && dims?.cols) return dims.width / dims.cols;
+      // Fallback: monospace char ≈ 0.6 * fontSize
+      return term.options.fontSize! * 0.6;
+    };
+
+    /** For agent terminals: scale font so 120 cols fit the container, clamped to [MIN_FONT, BASE_FONT].
+     *  If at MIN_FONT the content still overflows, horizontal scroll kicks in.
+     *  Rows are always recalculated via fitAddon. */
+    const fitAgent = () => {
+      const c = terminalInstances[termId]?.container || container;
+      const containerWidth = c.clientWidth - 20; // padding/scrollbar margin
+      if (containerWidth <= 0) return;
+
+      // Calculate ideal font size to fit FIXED_COLS chars
+      const charRatio = measureCharWidth() / term.options.fontSize!;
+      const idealFont = Math.floor(containerWidth / (FIXED_COLS * charRatio));
+      const newFont = Math.max(MIN_FONT, Math.min(BASE_FONT, idealFont));
+
+      if (term.options.fontSize !== newFont) {
+        term.options.fontSize = newFont;
+      }
+      // Use fitAddon to calculate rows for the container height, then override cols
+      fitAddon.fit();
+      if (term.cols !== FIXED_COLS) {
+        term.resize(FIXED_COLS, term.rows);
+      }
+    };
+
+    if (isAgent) {
+      fitAgent();
+    } else {
+      fitAddon.fit();
+    }
 
     // xterm's canvas/textarea swallow mouse events — dispatch xterm-activity
     // on mousemove so parent attention-clear handlers can detect mouse interaction
@@ -1831,12 +1877,13 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
     });
     term.onResize(({ cols, rows }: any) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
 
-    const resizeHandler = () => fitAddon.fit();
+    const fitFn = isAgent ? fitAgent : () => fitAddon.fit();
+    const resizeHandler = () => fitFn();
     window.addEventListener('resize', resizeHandler);
-    const resizeObserver = new ResizeObserver(() => fitAddon.fit());
+    const resizeObserver = new ResizeObserver(() => fitFn());
     resizeObserver.observe(container);
-    terminalInstances[termId] = { term, fitAddon, ws, el, container, resizeHandler, resizeObserver };
-    setTimeout(() => fitAddon.fit(), 100);
+    terminalInstances[termId] = { term, fitAddon, ws, el, container, resizeHandler, resizeObserver, fitFn };
+    setTimeout(() => fitFn(), 100);
   }).catch((err: any) => {
     container.innerHTML = `<div style="color:var(--text-muted);padding:12px;font-size:12px">Failed to load terminal: ${err.message}</div>`;
   });

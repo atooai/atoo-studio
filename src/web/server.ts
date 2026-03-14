@@ -1131,8 +1131,11 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
               const msg = JSON.parse(raw.toString());
               if (msg.type === 'input' && typeof msg.data === 'string') {
                 ptyProcess.write(msg.data);
-              } else if (msg.type === 'resize' && msg.cols && msg.rows) {
-                ptyProcess.resize(msg.cols, msg.rows);
+              } else if (msg.type === 'resize' && msg.rows) {
+                // Keep cols fixed at 120 for agent PTYs — only resize rows.
+                // This ensures consistent output formatting regardless of
+                // browser window size.
+                ptyProcess.resize(120, msg.rows);
               }
             } catch {}
           });
