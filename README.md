@@ -1,28 +1,27 @@
 <p align="center">
-  <img src="docs/logo.png" alt="Atoo Studio" width="64" height="64">
+  <img src="https://atoo.ai/img/logo_64x64.png" alt="Atoo Studio" width="64" height="64">
 </p>
 
 <h1 align="center">Atoo Studio</h1>
 
 <p align="center">
-  <strong>Agent Development Environment (ADE)</strong><br>
+  <strong>Agentic Development Environment</strong><br>
   A workspace where coding agents build, run and debug real systems.
 </p>
 
 <p align="center">
   <a href="https://atoo.ai">Website</a> ·
   <a href="#getting-started">Getting Started</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#screenshots">Screenshots</a>
+  <a href="#features">Features</a>
 </p>
 
 ---
 
 ## What is Atoo Studio?
 
-Atoo Studio is a lightweight, browser-based development environment designed for working with coding agents like **Claude Code**, **Codex CLI** and **Gemini CLI**.
+Atoo Studio is a browser-based development environment designed for working with coding agents like **Claude Code** and **Codex CLI**.
 
-Instead of juggling terminals, browser tabs, preview windows and disconnected agent sessions, Atoo Studio brings everything into one workspace — agents, code, preview, DevTools, Git and even hardware devices.
+Instead of juggling terminals, browser tabs, preview windows and disconnected agent sessions, Atoo Studio brings everything into one workspace — agents, code, preview, DevTools, Git, GitHub, databases and even hardware devices.
 
 It runs alongside your agents on Linux, macOS or WSL as a local web server. No cloud dependency, no vendor lock-in.
 
@@ -30,54 +29,72 @@ It runs alongside your agents on Linux, macOS or WSL as a local web server. No c
 
 Working with coding agents across multiple projects gets chaotic fast. You end up with dozens of terminals, scattered browser tabs, dev servers running on random ports, and no clear overview of what each agent is doing.
 
-Atoo Studio was built from that exact pain — managing five projects in parallel with multiple coding agents and needing a workspace that actually matches how agentic development works.
+Atoo Studio was built from that exact pain — managing multiple projects in parallel with coding agents and needing a workspace that actually matches how agentic development works.
 
 ## Features
 
 ### Multi-agent workflows
-Run multiple coding agents (Claude Code, Codex CLI, Gemini CLI) in parallel across isolated environments and projects.
+Run multiple coding agents (Claude Code, Codex CLI) in parallel across isolated projects and worktrees. Each agent runs in a real PTY session with full terminal capabilities.
 
 ### Fork sessions like Git branches
-Branch agent conversations at any point and explore different solutions without losing the original context. Fork from a specific message or select a range of messages for the new session.
+Branch agent conversations at any point and explore different solutions without losing the original context. Fork from a specific message or select a range of messages for the new session. Forked sessions are displayed as a parent-child tree in the sidebar.
 
-### Continue work across agents
-Start a session with Claude, continue it with Codex, hand it to Gemini. Compare approaches without starting over.
+### Chain sessions across agents
+Start a session with Claude Code, continue it with Codex. The session chain system preserves full conversation history across agent boundaries, so agents can pick up exactly where the previous one left off.
 
-### Operate real development environments
-Agents can start services and dev servers. Atoo Studio automatically detects them and exposes live previews with valid HTTPS certificates from a built-in CA.
+### Session history search
+Search across all agent session history for a project via MCP. Agents can recall past decisions, failed approaches, and implementation reasoning from any previous session — including sessions in other worktrees.
 
-### Preview, inspect and debug
-Built-in app preview via CDP pixel streaming (not iframes — no cross-origin issues), integrated Chrome DevTools, and live terminal logs. All in the same workspace.
+### Session metadata
+Agents can set session names, descriptions, and tags via MCP tools. Tags appear as badges in the sidebar, and session names are used as tab titles for quick identification.
+
+### App preview with CDP pixel streaming
+Built-in app preview powered by headless Chrome and the Chrome DevTools Protocol — not iframes, so there are no cross-origin issues. Agents start dev servers and Atoo Studio automatically detects them and renders live previews with full interaction support.
+
+### Integrated Chrome DevTools
+Open Chrome DevTools directly inside the workspace panel to inspect and debug previewed applications without leaving Atoo Studio.
+
+### HTTPS certificates from built-in CA
+Agents can request trusted TLS certificates for any hostname via MCP. The built-in certificate authority is trusted by the preview browser, enabling HTTPS testing without manual cert setup.
 
 ### Responsive testing
-Test across device presets (iPhone, Pixel, iPad, Desktop) with device pixel ratio and touch emulation. Custom viewports, zoom levels and rotation.
+Test across device presets (iPhone, Pixel, iPad, Desktop) with device pixel ratio and touch emulation. Custom viewports, zoom levels and rotation — all within the preview panel.
 
-### Flash and debug real hardware
-Agents can connect to devices like ESP32 boards through the browser via Web Serial. Flash firmware, monitor serial output — even when the agent runs on a remote server.
-
-### Real-time collaboration
-Multiple browsers can connect to the same workspace. Views synchronize in real-time — chat, preview, terminal, everything shared.
-
-### Session tree visualization
-Forked sessions are displayed as a parent-child tree, making it easy to see the full history of exploration and decisions.
-
-### Drag & drop with native file system
-Move files and folders between Atoo Studio and your OS file explorer. Folders export as ZIP when dragging from browser (Chromium limitation).
+### GitHub integration
+Browse issues and pull requests, view details and comments, close/reopen issues and PRs, and create new pull requests — all from the GitHub panel. Link sessions to specific issues or PRs for context. Create new issues directly through an agent session.
 
 ### Git integration
-Branch overview with commit history, worktree support (new or existing branches), and diff views.
+Branch overview with full commit history, stash management, diff views, and one-click commit/push workflow. Worktree support for working on multiple branches simultaneously as separate projects in the sidebar. A "Publish" button commits, pushes, and creates a PR in one action.
 
-### Multi-environment support
-Run projects in isolated environments. Switch between them from the workspace.
+### Database explorer
+Connect to 16 database types (PostgreSQL, MySQL, SQLite, Redis, MongoDB, DuckDB, Elasticsearch, ClickHouse, CockroachDB, Cassandra, Neo4j, InfluxDB, and more) with specialized views for each — key browsers for Redis, document viewers for MongoDB, graph visualization for Neo4j, charts for InfluxDB. Auto-discovers connections from docker-compose files, environment variables, and port scanning.
 
-### Reverse proxy & networking
-Built-in reverse proxy with subdomain and path-based routing. Host header injection for multi-domain testing.
+### Container management
+Manage Docker, Podman and LXC containers from the workspace. List, inspect, start, stop, restart and delete containers. Browse images, volumes, networks, and docker-compose projects. View container logs and stats.
 
 ### File explorer & editor
-File tree, source/diff/rendered/hex view modes. Built-in hex editor.
+File tree with drag-and-drop support (between Atoo Studio and your OS file manager). Source, diff, rendered and hex view modes. Built-in hex editor with search and replace. Tab drag-and-drop reordering with context menus.
+
+### Flash and debug real hardware
+Agents can connect to devices like ESP32 boards through the browser via Web Serial. The serial connection is bridged to a virtual PTY on the server, so agents can flash firmware and monitor serial output — even when the agent runs on a remote server.
 
 ### Integrated terminal
-Multiple terminal tabs running directly on the server.
+Multiple terminal tabs running directly on the server with full PTY support.
+
+### Reverse proxy & networking
+Built-in reverse proxy with subdomain and path-based routing. Host header injection for multi-domain testing. Forwarded connections modal shows all detected services with direct links.
+
+### Authentication
+Optional session-based authentication with password, TOTP two-factor, and WebAuthn/passkey support. MCP token validation ensures only authenticated agents can call back to the UI.
+
+### Real-time collaboration
+Multiple browsers can connect to the same workspace. Views synchronize in real-time — chat, preview, terminal output, everything shared.
+
+### Mobile layout
+Responsive mobile layout with swipe gestures, bottom navigation, and dedicated views for dashboard, files, git, agents, and terminal.
+
+### Installable as desktop app
+PWA support — install Atoo Studio as a standalone desktop application from the browser.
 
 ## Getting Started
 
@@ -101,55 +118,55 @@ docker run -p 3000:3000 atooai/atoo-studio
 
 ## Architecture
 
-Atoo Studio is a lightweight web application that runs on the same server as your coding agents. Everything is in one process — workspace, agents, preview, proxy, terminal, Git integration.
+Atoo Studio runs as a single process on the same server as your coding agents — workspace, agents, preview, proxy, terminal, and Git integration all in one.
 
 ```
 Browser (any device)
     │
-    │ WebSocket
+    │ WebSocket + HTTP
     ▼
 Atoo Studio Backend
     │
-    ├── Agent sessions (xterm)
+    ├── Agent adapters (Claude Code, Codex)
+    ├── PTY session manager
+    ├── Session chain & fork system
     ├── Project & worktree manager
-    ├── Git integration
-    ├── Reverse proxy
+    ├── Git & GitHub integration
+    ├── Database explorer
+    ├── Container manager (Docker, Podman, LXC)
+    ├── Reverse proxy with service registry
     ├── CDP preview (headless Chrome)
     ├── Certificate authority
-    ├── Service registry
     ├── Serial device bridge
-    └── MCP server
+    ├── Authentication system
+    └── MCP server (11 tools)
 ```
 
-Agents run inside real terminal sessions (xterm). Atoo Studio does not replace the agent — it provides the environment where agents operate.
+Agents run inside real terminal sessions. Atoo Studio does not replace the agent — it provides the environment where agents operate.
 
-## MCP Functions
+## MCP Tools
 
-Atoo Studio provides MCP tools that agents can call:
+Atoo Studio exposes 11 MCP tools that agents can call:
 
-- **`generate_certificate`** — Request a trusted HTTPS certificate for any hostname. The built-in CA is trusted by the preview browser.
-- **`report_tcp_services`** — Report started services (dev servers, APIs, etc.) so Atoo Studio can auto-detect and expose them in the preview panel.
-
-More MCP functions are planned, including cross-session search and project memory.
-
-## Status
-
-**Early alpha.** Built for personal use across multiple projects. Works, but has rough edges.
-
-Known limitations:
-- UI needs polish in some areas
-- Some edge cases in session forking
-- Documentation is minimal
-
-Sharing because the ideas and architecture might be useful to others building in this space.
+| Tool | Description |
+|------|-------------|
+| `generate_certificate` | Request a trusted HTTPS certificate for any hostname |
+| `report_tcp_services` | Report started services so they appear in the preview panel |
+| `request_serial_device` | Request USB serial device access via Web Serial bridge |
+| `search_session_history` | Search across all session history or within the current session chain |
+| `suggest_continue_in_other_session` | Suggest switching to an existing session that has relevant context |
+| `open_file` | Open a file in the browser editor (requires user approval) |
+| `get_session_metadata` | Read session name, description, and tags |
+| `set_session_metadata` | Set session name, description, and tags |
+| `github_issue_pr_changed` | Notify the UI when a GitHub issue or PR is created/modified |
+| `connect_database` | Open the database explorer with a specific connection |
 
 ## Roadmap
 
-- [ ] Cross-session project memory via MCP (search decisions and context across all agent sessions)
-- [ ] Pluggable agent adapters (standardized interface for any CLI agent)
-- [ ] Service topology view
+- [ ] More agent adapters (Gemini CLI, Aider, and others)
+- [ ] Service topology visualization
 - [ ] Session migration between environments
-- [ ] Trust level configuration per tool
+- [ ] Configurable trust levels per tool
 
 ## Contributing
 
@@ -165,4 +182,4 @@ Built by [Markus Furtlehner](https://github.com/markusfurtlehner) — founder of
 
 Built from real pain, not a pitch deck.
 
-→ [atoo.ai](https://atoo.ai)
+> [atoo.ai](https://atoo.ai)
