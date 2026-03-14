@@ -743,7 +743,7 @@ function registerGlobalFunctions() {
 
   // Session management
   // Internal: create agent session with a specific agent type/mode
-  const createAgentSession = async (agentType: string, agentMode: string, initialMessage?: string, linkedIssue?: { type: 'issue' | 'pr'; number: number; title: string; url: string }) => {
+  const createAgentSession = async (agentType: string, agentMode: string, initialMessage?: string, linkedIssue?: { type: 'issue' | 'pr'; number: number; title: string; url: string }): Promise<string | undefined> => {
     const store = useStore.getState();
     if (!store.activeProjectId) return;
     const proj = store.projects.find(p => p.id === store.activeProjectId);
@@ -791,11 +791,88 @@ function registerGlobalFunctions() {
       store.setActiveTabType('session');
       connectAgentWs(sessionId);
       store.addToast(proj.name, 'New session created', 'success');
+      return sessionId;
     } catch (e: any) {
       setPendingAgentCreation(false);
       store.addToast(proj.name, `Failed: ${e.message}`, 'attention');
     }
   };
+
+  // Track sessions created by "Create New Issue" that are pending issue linking
+  const pendingIssueCreateSessions = new Set<string>();
+
+  win.newIssueCreate = async () => {
+    const store = useStore.getState();
+    if (!store.activeProjectId) return;
+
+    const message = `Create a new GitHub issue using the gh CLI. Ask the user what the issue should be about, then create it.\n\nIMPORTANT: After creating the issue, you MUST call the mcp__atoo-studio__github_issue_pr_changed tool to notify the UI.\n\nDescribe what you need below:`;
+
+    store.setModal({
+      type: 'agent-picker',
+      props: {
+        onSelect: async (agent: any) => {
+          store.setModal(null);
+          const sessionId = await createAgentSession(agent.agentType, agent.mode, message);
+          if (sessionId) {
+            pendingIssueCreateSessions.add(sessionId);
+          }
+        },
+      },
+    });
+  };
+
+  // Listen for github-issue-pr-changed events and auto-link pending issue creation sessions
+  const handleIssueCreated = async (e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (detail.itemType !== 'issue' || !detail.sessionUuid || !detail.number) return;
+
+    const store = useStore.getState();
+    // Find the session whose cliSessionId matches the event's sessionUuid
+    for (const proj of store.projects) {
+      for (const s of proj.sessions) {
+        if (!pendingIssueCreateSessions.has(s.id)) continue;
+        const sid = (s as any).cliSessionId || s.id;
+        const sidHex = sid.replace(/^(agent_|sess_)/, '').replace(/-/g, '');
+        const eventHex = detail.sessionUuid.replace(/^(agent_|sess_)/, '').replace(/-/g, '');
+        if (sidHex !== eventHex) continue;
+
+        // Match found — fetch issue details and convert to issue-linked session
+        pendingIssueCreateSessions.delete(s.id);
+        try {
+          const issueDetail = await api('GET', `/api/projects/${proj.id}/github/issues/${detail.number}`);
+          const linkedIssue = {
+            type: 'issue' as const,
+            number: detail.number,
+            title: issueDetail.title || `Issue #${detail.number}`,
+            url: issueDetail.url || `https://github.com/${detail.repository}/issues/${detail.number}`,
+          };
+          store.updateProject(proj.id, p => ({
+            ...p,
+            sessions: p.sessions.map(sess =>
+              sess.id === s.id ? { ...sess, linkedIssue } : sess
+            ),
+          }));
+          store.addToast(proj.name, `Linked to issue #${detail.number}`, 'success');
+        } catch (err) {
+          // Fallback: link with minimal info
+          const linkedIssue = {
+            type: 'issue' as const,
+            number: detail.number,
+            title: `Issue #${detail.number}`,
+            url: `https://github.com/${detail.repository}/issues/${detail.number}`,
+          };
+          store.updateProject(proj.id, p => ({
+            ...p,
+            sessions: p.sessions.map(sess =>
+              sess.id === s.id ? { ...sess, linkedIssue } : sess
+            ),
+          }));
+        }
+        return;
+      }
+    }
+  };
+  window.addEventListener('github-issue-pr-changed', handleIssueCreated);
 
   win.newSession = async () => {
     const store = useStore.getState();

@@ -286,3 +286,17 @@ export async function updatePullState(
     await gh(['pr', 'reopen', String(number)], cwd);
   }
 }
+
+export async function createPullRequest(
+  cwd: string,
+  opts: { title: string; body?: string; base?: string },
+): Promise<{ number: number; url: string }> {
+  const args = ['pr', 'create', '--title', opts.title];
+  if (opts.body) args.push('--body', opts.body);
+  if (opts.base) args.push('--base', opts.base);
+  const out = await gh(args, cwd);
+  // gh pr create outputs the PR URL on the last line
+  const url = out.trim().split('\n').pop() || '';
+  const numMatch = url.match(/\/pull\/(\d+)/);
+  return { number: numMatch ? parseInt(numMatch[1]) : 0, url };
+}

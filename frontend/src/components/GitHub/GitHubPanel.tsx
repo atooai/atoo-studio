@@ -76,13 +76,14 @@ function useVirtualScroll<T>(items: T[], containerRef: React.RefObject<HTMLDivEl
 // Filters bar
 // ═══════════════════════════════════════════════════════
 
-function FiltersBar({ type, state, onStateChange, search, onSearchChange, loading }: {
+function FiltersBar({ type, state, onStateChange, search, onSearchChange, loading, onAddClick }: {
   type: 'issues' | 'pulls';
   state: string;
   onStateChange: (s: string) => void;
   search: string;
   onSearchChange: (s: string) => void;
   loading: boolean;
+  onAddClick?: () => void;
 }) {
   const states = type === 'pulls'
     ? [['open', 'Open'], ['closed', 'Closed'], ['merged', 'Merged'], ['all', 'All']]
@@ -100,6 +101,15 @@ function FiltersBar({ type, state, onStateChange, search, onSearchChange, loadin
             {label}
           </button>
         ))}
+        {onAddClick && (
+          <button
+            className="gh-state-btn gh-add-issue-btn"
+            onClick={onAddClick}
+            title="Create New Issue"
+          >
+            +
+          </button>
+        )}
       </div>
       <div className="gh-search-wrap">
         <input
@@ -313,12 +323,14 @@ function GitHubList<T extends { number: number }>({
   fetchUrl,
   renderCard,
   ghStatus,
+  onAddClick,
 }: {
   projectId: string;
   type: 'issues' | 'pulls';
   fetchUrl: string;
   renderCard: (item: T, onRefresh: () => void) => React.ReactNode;
   ghStatus: GitHubStatus;
+  onAddClick?: () => void;
 }) {
   const [items, setItems] = useState<T[]>([]);
   const [state, setState] = useState('open');
@@ -461,6 +473,7 @@ function GitHubList<T extends { number: number }>({
         search={search}
         onSearchChange={setSearch}
         loading={loading}
+        onAddClick={onAddClick}
       />
       <div className="gh-list-scroll" ref={containerRef}>
         {initialLoad && loading ? (
@@ -490,12 +503,17 @@ function GitHubList<T extends { number: number }>({
 // ═══════════════════════════════════════════════════════
 
 export function IssuesPanel({ projectId, ghStatus }: { projectId: string; ghStatus: GitHubStatus }) {
+  const handleAddIssue = () => {
+    (window as any).newIssueCreate?.();
+  };
+
   return (
     <GitHubList<GitHubIssue>
       projectId={projectId}
       type="issues"
       fetchUrl="github/issues"
       ghStatus={ghStatus}
+      onAddClick={handleAddIssue}
       renderCard={(issue, onRefresh) => (
         <IssueCard
           issue={issue}

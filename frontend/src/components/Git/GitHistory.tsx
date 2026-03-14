@@ -23,6 +23,7 @@ export function GitHistory() {
   return (
     <div className="git-history-panel" id="git-history-panel" style={{ height: 220 }}>
       <BranchBar proj={proj} />
+      <GitToolbar proj={proj} />
       <CommitList proj={proj} />
     </div>
   );
@@ -51,9 +52,7 @@ function BranchBar({ proj }: { proj: any }) {
       >
         {(proj.gitLog.branches || []).filter((b: string) => {
           if (b.startsWith('remotes/')) return true;
-          // Always show our own current branch
           if (b === proj.gitLog.currentBranch) return true;
-          // Hide branches checked out in other worktrees
           return !worktreeBranches.has(b);
         }).map((b: string) => {
           const isRemote = b.startsWith('remotes/');
@@ -67,6 +66,40 @@ function BranchBar({ proj }: { proj: any }) {
         <button className="gh-branch-btn" onClick={() => (window as any).fetchRemote()} title="Fetch">&#x2193;</button>
         {!isWorktree && <button className="gh-branch-btn" onClick={() => (window as any).openRemoteManager()} title="Manage remotes">&#x21C4;</button>}
       </div>
+    </div>
+  );
+}
+
+function GitToolbar({ proj }: { proj: any }) {
+  const [publishing, setPublishing] = useState(false);
+  const hasChanges = (proj.gitChanges?.length || 0) > 0;
+
+  const handlePublish = async () => {
+    if (publishing) return;
+    setPublishing(true);
+    try {
+      await (window as any).commitPushAndPR(proj.id);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <div className="gh-toolbar">
+      <div className="gh-toolbar-actions">
+        <button className="gh-tb-action danger" onClick={() => (window as any).gitRevertAll()} title="Revert all changes">⟲</button>
+        <button className="gh-tb-action" onClick={() => (window as any).gitStashAll()} title="Stash all">⊓</button>
+        <button className="gh-tb-action" onClick={() => (window as any).gitCommit()} title="Commit">✓</button>
+        <button className="gh-tb-action" onClick={() => (window as any).gitPush()} title="Push">↑</button>
+      </div>
+      <button
+        className={`gh-publish-btn${hasChanges ? ' has-changes' : ''}`}
+        onClick={handlePublish}
+        disabled={publishing}
+        title="Commit all changes, push, and create a Pull Request"
+      >
+        {publishing ? '...' : '⬆ PR'}
+      </button>
     </div>
   );
 }
@@ -122,14 +155,29 @@ function CommitList({ proj }: { proj: any }) {
                   {escapeHtml(c.msg)}
                   {(c.refs || []).length > 0 && (
                     <span className="gh-commit-refs">
-                      {c.refs!.map((r, i) => {
-                        let cls = 'gh-ref-badge ';
-                        if (r.type === 'head') cls += 'head-badge';
-                        else if (r.type === 'branch') cls += 'branch-badge';
-                        else if (r.type === 'tag') cls += 'tag-badge';
-                        else if (r.type === 'remote') cls += 'remote-badge';
-                        return <span key={i} className={cls}>{r.label}</span>;
-                      })}
+                      {(() => {
+                        const nonRemote = c.refs!.filter(r => r.type !== 'remote');
+                        const remotes = c.refs!.filter(r => r.type === 'remote');
+                        return (
+                          <>
+                            {nonRemote.map((r, i) => {
+                              let cls = 'gh-ref-badge ';
+                              if (r.type === 'head') cls += 'head-badge';
+                              else if (r.type === 'branch') cls += 'branch-badge';
+                              else if (r.type === 'tag') cls += 'tag-badge';
+                              return <span key={i} className={cls}>{r.label}</span>;
+                            })}
+                            {remotes.length > 0 && (
+                              <span className="gh-ref-badge remote-badge">
+                                <svg className="gh-cloud-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+                                </svg>
+                                {remotes.map(r => r.label).join(', ')}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </span>
                   )}
                 </div>

@@ -246,14 +246,6 @@ function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) 
           <button className={`lp-tb-btn ${showHidden ? 'active' : ''}`} onClick={toggleHidden} title="Show hidden directories (node_modules, .git, etc.)">⦿</button>
           <button className={`lp-tb-btn ${(!proj.stashes || proj.stashes.length === 0) ? 'disabled' : ''}`} onClick={() => setStashOpen(!stashOpen)} title="Stashes">⊟</button>
         </div>
-        {proj.isGit && (
-          <div className="lp-toolbar-actions">
-            <button className="lp-tb-action danger" onClick={() => (window as any).gitRevertAll()} title="Revert all changes">⟲</button>
-            <button className="lp-tb-action" onClick={() => (window as any).gitStashAll()} title="Stash all">⊓</button>
-            <button className="lp-tb-action" onClick={() => (window as any).gitCommit()} title="Commit">✓</button>
-            <button className="lp-tb-action" onClick={() => (window as any).gitPush()} title="Push">↑</button>
-          </div>
-        )}
       </div>
     </>
   );

@@ -446,10 +446,11 @@ server.tool(
   },
   async ({ repository, type, number }) => {
     try {
+      const sessionUuid = process.env.ATOO_CURRENT_SESSION_UUID || undefined;
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/github-changed`, {
         method: 'POST',
         headers: mcpHeaders(),
-        body: JSON.stringify({ repository, type, number }),
+        body: JSON.stringify({ repository, type, number, sessionUuid }),
       });
       if (!res.ok) {
         return { content: [{ type: 'text' as const, text: `Warning: failed to notify UI of GitHub change (HTTP ${res.status})` }] };

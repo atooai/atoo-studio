@@ -118,6 +118,19 @@ githubRouter.get('/api/projects/:id/github/pulls/:number', async (req, res) => {
   }
 });
 
+githubRouter.post('/api/projects/:id/github/pulls', async (req, res) => {
+  const cwd = getProjectCwd(req, res);
+  if (!cwd) return;
+  try {
+    const { title, body, base } = req.body;
+    if (!title) return res.status(400).json({ error: 'title is required' });
+    const result = await githubOps.createPullRequest(cwd, { title, body, base });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 githubRouter.post('/api/projects/:id/github/pulls/:number/state', async (req, res) => {
   const cwd = getProjectCwd(req, res);
   if (!cwd) return;

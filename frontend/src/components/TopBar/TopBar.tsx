@@ -87,6 +87,7 @@ export function TopBar() {
           )}
           <LayoutToggle />
           <button className="topbar-btn" onClick={() => (window as any).togglePreviewPanel()} title="Toggle app preview panel">⬒ Preview</button>
+          <button className="topbar-btn" onClick={() => setModal({ type: 'help' })} title="Help & keyboard shortcuts (F1)">? Help</button>
           {!isStandalone && (
             <button className="topbar-btn" onClick={handleInstall} title="Install as desktop application">
               ⤓ Install App

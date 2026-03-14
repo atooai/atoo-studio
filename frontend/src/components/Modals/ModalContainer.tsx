@@ -17,6 +17,7 @@ import { ContainerManager } from '../Containers/ContainerManager';
 import { DatabaseExplorer } from '../Database/DatabaseExplorer';
 import { SessionSwitchModal } from './SessionSwitchModal';
 import { OpenFileModal } from './OpenFileModal';
+import { HelpModal } from './HelpModal';
 
 export function ModalContainer() {
   const { modal, setModal } = useStore();
@@ -43,6 +44,7 @@ export function ModalContainer() {
       {modal.type === 'database-explorer' && <DatabaseExplorer onClose={close} />}
       {modal.type === 'session-switch' && <SessionSwitchModal {...modal.props} onClose={close} />}
       {modal.type === 'open-file' && <OpenFileModal requestId={modal.props?.requestId} filePath={modal.props?.filePath} onClose={close} />}
+      {modal.type === 'help' && <HelpModal onClose={close} />}
     </div>
   );
 }

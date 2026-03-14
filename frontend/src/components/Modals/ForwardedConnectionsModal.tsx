@@ -53,10 +53,20 @@ export function ForwardedConnectionsModal({ onClose }: ForwardedConnectionsModal
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                     {svc.description}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary, var(--text-secondary))', marginTop: 3, display: 'flex', gap: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary, var(--text-secondary))', marginTop: 3, display: 'flex', gap: 10, alignItems: 'center' }}>
                     <span>{svc.protocol}</span>
                     {svc.projectName && <span>{svc.projectName}</span>}
                     {svc.host && <span>Host: {svc.host}</span>}
+                    {isHttpProtocol(svc.protocol) && (
+                      <a
+                        href={`${window.location.origin}/at/port/${svc.port}/`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: 'var(--accent-blue)', textDecoration: 'none', marginLeft: 'auto' }}
+                      >
+                        Open &#x2197;
+                      </a>
+                    )}
                   </div>
                 </div>
               ))}
@@ -107,6 +117,11 @@ export function ForwardedConnectionsModal({ onClose }: ForwardedConnectionsModal
       </div>
     </div>
   );
+}
+
+function isHttpProtocol(protocol: string): boolean {
+  const p = protocol.toLowerCase();
+  return p === 'http' || p === 'https';
 }
 
 function statusColor(status: string): string {

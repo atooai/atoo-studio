@@ -126,7 +126,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // MCP callback: notify that a GitHub issue/PR was changed
   app.post('/api/mcp/github-changed', (req, res) => {
-    const { repository, type, number } = req.body;
+    const { repository, type, number, sessionUuid } = req.body;
     if (!repository || typeof repository !== 'string') {
       return res.status(400).json({ error: 'repository is required' });
     }
@@ -136,8 +136,8 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     if (!number || typeof number !== 'number') {
       return res.status(400).json({ error: 'number is required' });
     }
-    console.log(`[mcp] github-changed: ${type} #${number} in ${repository}`);
-    const msg = JSON.stringify({ type: 'github_issue_pr_changed', repository, itemType: type, number });
+    console.log(`[mcp] github-changed: ${type} #${number} in ${repository}${sessionUuid ? ` (session ${sessionUuid})` : ''}`);
+    const msg = JSON.stringify({ type: 'github_issue_pr_changed', repository, itemType: type, number, ...(sessionUuid ? { sessionUuid } : {}) });
     for (const ws of store.statusClients) {
       if (ws.readyState === 1) ws.send(msg);
     }
