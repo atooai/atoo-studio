@@ -436,5 +436,98 @@ Bad tags: "working on implementing the new authentication system" (too long)`,
   },
 );
 
+const DB_TYPES = [
+  'postgresql', 'mysql', 'mariadb', 'sqlite', 'redis', 'mongodb',
+  'duckdb', 'elasticsearch', 'opensearch', 'clickhouse', 'cockroachdb',
+  'cassandra', 'scylladb', 'neo4j', 'influxdb', 'memcached',
+] as const;
+
+server.tool(
+  'connect_database',
+  `Connect to a database and run queries, inspect schemas, or list tables. Supports PostgreSQL, MySQL/MariaDB, SQLite, Redis, MongoDB, and more. The agent figures out connection parameters from project files (docker-compose.yml, .env, config files) and passes them here. Atoo Studio manages the connection lifecycle.
+
+Actions:
+- "connect": Establish a new connection. Returns connection_id for reuse.
+- "disconnect": Close a connection.
+- "query": Run a SQL query (or Redis command, MongoDB find, etc.)
+- "tables": List all tables/collections.
+- "describe": Show structure of a specific table/collection.
+- "schema": Get full database schema (all tables + columns).`,
+  {
+    action: z.enum(['connect', 'disconnect', 'query', 'schema', 'tables', 'describe'])
+      .describe('Action to perform'),
+    db_type: z.enum(DB_TYPES).optional()
+      .describe('Database type (required for "connect")'),
+    connection: z.object({
+      host: z.string().optional(),
+      port: z.number().int().optional(),
+      username: z.string().optional(),
+      password: z.string().optional(),
+      database: z.string().optional(),
+      filename: z.string().optional().describe('For SQLite/DuckDB — path to database file'),
+      connection_string: z.string().optional().describe('Full connection URI'),
+      ssh_connection_id: z.string().optional().describe('Tunnel through an existing Atoo Studio SSH connection (pass the SSH connection ID)'),
+      ssh_remote_host: z.string().optional().describe('Remote host to connect to through SSH tunnel (default: 127.0.0.1)'),
+      ssh_remote_port: z.number().int().optional().describe('Remote port to tunnel (defaults to DB default port)'),
+    }).optional().describe('Connection parameters (for "connect" action)'),
+    query: z.string().optional().describe('SQL query, Redis command, or MongoDB query'),
+    table: z.string().optional().describe('Table/collection name (for "describe" action)'),
+    connection_id: z.string().optional().describe('Reuse an existing connection by ID'),
+    options: z.object({
+      limit: z.number().int().default(100).optional(),
+      timeout_ms: z.number().int().default(30000).optional().describe('Query timeout in milliseconds (default: 30000)'),
+      readonly: z.boolean().default(true).optional(),
+    }).optional(),
+  },
+  async ({ action, db_type, connection, query, table, connection_id, options }) => {
+    try {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/connect-database`, {
+        method: 'POST',
+        headers: mcpHeaders(),
+        body: JSON.stringify({ action, db_type, connection, query, table, connection_id, options }),
+      });
+      const data = await res.json() as any;
+      if (!res.ok) {
+        return { content: [{ type: 'text' as const, text: `Database error: ${data.error}` }] };
+      }
+
+      // Format output
+      let text = '';
+      if (data.connection_id) text += `Connection ID: ${data.connection_id}\n`;
+      if (data.message) text += `${data.message}\n`;
+      if (data.tables && Array.isArray(data.tables)) {
+        text += `\nTables (${data.tables.length}):\n`;
+        for (const t of data.tables) {
+          text += `  ${t.name}${t.row_count != null ? ` (${t.row_count} rows)` : ''}${t.type ? ` [${t.type}]` : ''}\n`;
+        }
+      }
+      if (data.columns && data.rows) {
+        text += `\nColumns: ${data.columns.join(', ')}\n`;
+        text += `Rows: ${data.row_count}${data.truncated ? ' (truncated)' : ''}\n`;
+        text += `Time: ${data.execution_time_ms}ms\n\n`;
+        // Format as table
+        const maxRows = Math.min(data.rows.length, 50);
+        for (let i = 0; i < maxRows; i++) {
+          const row = data.rows[i];
+          text += data.columns.map((c: string) => `${c}: ${JSON.stringify(row[c])}`).join(' | ') + '\n';
+        }
+        if (data.rows.length > 50) text += `... and ${data.rows.length - 50} more rows\n`;
+      }
+      if (data.schemas) {
+        for (const s of data.schemas) {
+          text += `\n## ${s.table}\n`;
+          for (const col of s.columns) {
+            text += `  ${col.name} ${col.type}${col.nullable ? ' NULL' : ' NOT NULL'}${col.primary_key ? ' PK' : ''}${col.default_value ? ` DEFAULT ${col.default_value}` : ''}\n`;
+          }
+        }
+      }
+
+      return { content: [{ type: 'text' as const, text: text.trim() || JSON.stringify(data, null, 2) }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Database error: ${err.message}` }] };
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 server.connect(transport);

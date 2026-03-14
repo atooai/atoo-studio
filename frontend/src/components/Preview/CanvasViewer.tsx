@@ -177,31 +177,6 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       imgRef.current = new Image();
     }
     const img = imgRef.current;
-    let decoding = false;
-    let pendingBlobUrl: string | null = null;
-
-    function drawNext() {
-      if (!pendingBlobUrl) { decoding = false; return; }
-      const url = pendingBlobUrl;
-      pendingBlobUrl = null;
-      decoding = true;
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const canvas = canvasRef.current;
-        if (canvas) {
-          if (canvas.width !== img.width || canvas.height !== img.height) {
-            canvas.width = img.width;
-            canvas.height = img.height;
-          }
-          const ctx = canvas.getContext('2d');
-          if (ctx) ctx.drawImage(img, 0, 0);
-        }
-        if (pendingBlobUrl) requestAnimationFrame(drawNext);
-        else decoding = false;
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); decoding = false; };
-      img.src = url;
-    }
 
     ws.binaryType = 'arraybuffer';
 
@@ -223,11 +198,22 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
       if (e.data instanceof ArrayBuffer) {
         const view = new Uint8Array(e.data);
         if (view[0] === 0x01 || view[0] === 0x02) {
-          if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl);
           const mime = view[0] === 0x02 ? 'image/png' : 'image/jpeg';
           const blob = new Blob([view.subarray(1)], { type: mime });
-          pendingBlobUrl = URL.createObjectURL(blob);
-          if (!decoding) requestAnimationFrame(drawNext);
+          const url = URL.createObjectURL(blob);
+          img.onload = () => {
+            URL.revokeObjectURL(url);
+            const canvas = canvasRef.current;
+            if (canvas) {
+              if (canvas.width !== img.width || canvas.height !== img.height) {
+                canvas.width = img.width;
+                canvas.height = img.height;
+              }
+              const ctx = canvas.getContext('2d');
+              if (ctx) ctx.drawImage(img, 0, 0);
+            }
+          };
+          img.src = url;
         }
       } else {
         // JSON message
@@ -264,7 +250,6 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
     return () => {
       ws.close();
       wsRef.current = null;
-      if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl);
     };
     // Only reconnect on identity/connection changes, not viewport changes
     // eslint-disable-next-line react-hooks/exhaustive-deps

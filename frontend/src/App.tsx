@@ -318,15 +318,17 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
   const proj = useStore.getState().projects.find(p => p.id === projectId);
   if (!proj) return;
 
-  // Load settings from DB
+  // Load settings from DB (always apply to reset per-project state like preview tabs)
   const apeId = useStore.getState().activeProjectEnvironmentId;
   if (apeId) {
     try {
       const dbSettings = await api('GET', `/api/project-links/${apeId}/settings`);
-      if (dbSettings && Object.keys(dbSettings).length > 0) {
-        applyProjectSettings(dbSettings, proj);
-      }
-    } catch {}
+      applyProjectSettings(dbSettings || {}, proj);
+    } catch {
+      applyProjectSettings({}, proj);
+    }
+  } else {
+    applyProjectSettings({}, proj);
   }
 
   if (!fromRouter && apeId) {
@@ -539,8 +541,9 @@ function applyProjectSettings(settings: any, proj: any) {
   if (settings.file_view) store.setFileView(settings.file_view);
   if (settings.stash_open !== undefined) store.setStashOpen(settings.stash_open);
   if (settings.preview_visible !== undefined) store.setPreviewVisible(settings.preview_visible);
-  if (settings.preview_tabs) store.setPreviewTabs(settings.preview_tabs);
-  if (settings.preview_active_idx !== undefined) store.setPreviewActiveIdx(settings.preview_active_idx);
+  // Always reset preview tabs to the saved value (or empty) to avoid leaking tabs from other projects
+  store.setPreviewTabs(settings.preview_tabs || []);
+  store.setPreviewActiveIdx(settings.preview_active_idx ?? 0);
   if (settings.rightPanelTab) store.setRightPanelTab(settings.rightPanelTab);
   // previewMode removed (streaming only, no iframe)
 

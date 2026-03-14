@@ -173,6 +173,7 @@ export class DockerBackend implements PreviewBackend {
       recording: false,
       recordedFrames: [],
       lastFrameTime: Date.now(),
+      lastStreamRestart: 0,
       pendingDialogs: new Map(),
       pendingAuthRequests: new Map(),
       downloadDir: dlDir,
@@ -232,6 +233,7 @@ export class DockerBackend implements PreviewBackend {
           broadcastBinary(instance, buf);
           instance.lastActivity = Date.now();
           instance.lastFrameTime = Date.now();
+          instance.lastStreamRestart = 0; // reset backoff on successful frame
 
           if (instance.recording && buf.length > 1) {
             instance.recordedFrames.push({ data: buf.subarray(1), timestamp: Date.now() });

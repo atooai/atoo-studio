@@ -122,6 +122,7 @@ class StudioDatabase {
     this.migrate();
     this.migrateUserManagement();
     this.migrateSessionMetadata();
+    this.migrateDatabaseConnections();
   }
 
   private initSchema(): void {
@@ -967,6 +968,50 @@ class StudioDatabase {
   }
 
   // ═══════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════
+  // DATABASE CONNECTIONS (saved connections for Database Explorer)
+  // ═══════════════════════════════════════════════════
+
+  private migrateDatabaseConnections(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS saved_db_connections (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        db_type TEXT NOT NULL,
+        params_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_used_at TEXT
+      )
+    `);
+  }
+
+  getSavedDbConnections(): Array<{ id: string; name: string; db_type: string; params: any }> {
+    return this.db.prepare(`
+      SELECT id, name, db_type, params_json FROM saved_db_connections ORDER BY last_used_at DESC NULLS LAST, name
+    `).all().map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      db_type: r.db_type,
+      params: JSON.parse(r.params_json),
+    }));
+  }
+
+  saveDbConnection(id: string, name: string, dbType: string, params: any): void {
+    this.db.prepare(`
+      INSERT INTO saved_db_connections (id, name, db_type, params_json)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name = excluded.name, db_type = excluded.db_type, params_json = excluded.params_json
+    `).run(id, name, dbType, JSON.stringify(params));
+  }
+
+  touchDbConnection(id: string): void {
+    this.db.prepare(`UPDATE saved_db_connections SET last_used_at = datetime('now') WHERE id = ?`).run(id);
+  }
+
+  deleteDbConnection(id: string): void {
+    this.db.prepare(`DELETE FROM saved_db_connections WHERE id = ?`).run(id);
+  }
+
   // LIFECYCLE
   // ═══════════════════════════════════════════════════
 

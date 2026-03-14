@@ -32,6 +32,8 @@ import { searchSessionHistory, fetchSessionRange } from '../services/session-sea
 import { resolveChainHead, toRawHex, walkChain } from '../agents/lib/session-id-utils.js';
 import { db } from '../state/db.js';
 import { containersRouter, getContainerRuntimes } from '../handlers/containers.js';
+import { databasesRouter, handleMcpConnectDatabase } from '../handlers/databases.js';
+import { isDatabaseWsUpgrade, handleDatabaseWsUpgrade } from '../database/query-stream.js';
 
 import { requireAuth, authenticateWsUpgrade, isAuthEnabled } from '../auth/middleware.js';
 import { validateMcpToken } from '../mcp/config.js';
@@ -450,6 +452,9 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
   });
 
+  // MCP callback: database connect/query/schema (must be before auth wall)
+  app.post('/api/mcp/connect-database', handleMcpConnectDatabase);
+
   // ═══════════════════════════════════════════════════════
   // Auth middleware — protects all routes below this point
   // Routes above (CA certs, auth, MCP callbacks) are exempt
@@ -614,6 +619,9 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // Mount container management API routes
   app.use(containersRouter);
+
+  // Mount database explorer API routes
+  app.use(databasesRouter);
 
   // Mount DevTools proxy
   app.use(devtoolsProxyMiddleware());
@@ -1262,6 +1270,12 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
               // Keep handler alive so scrollback continues accumulating even with no browsers
             });
           });
+        }
+
+        // /ws/database-query/:connectionId — stream query results
+        if (isDatabaseWsUpgrade(url)) {
+          handleDatabaseWsUpgrade(wss, req, socket, head);
+          return;
         }
 
         // /ws/container-logs/:runtime/:containerId — stream container logs

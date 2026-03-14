@@ -81,6 +81,7 @@ export function TopBar() {
           <button className="topbar-btn" onClick={() => setModal({ type: 'forwarded-connections' })} title="View forwarded TCP services and serial devices">
             ⇌ Connections{(reportedServices.length + serialRequests.length) > 0 ? ` (${reportedServices.length + serialRequests.length})` : ''}
           </button>
+          <button className="topbar-btn" onClick={() => setModal({ type: 'database-explorer' })} title="Browse databases">🗄 Databases</button>
           {containerRuntimes && Object.values(containerRuntimes).some(r => r.installed) && (
             <button className="topbar-btn" onClick={() => setModal({ type: 'container-manager' })} title="Manage Docker/Podman/LXC containers">⊞ Containers</button>
           )}

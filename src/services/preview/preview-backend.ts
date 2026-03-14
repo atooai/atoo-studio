@@ -29,6 +29,7 @@ export interface PreviewInstanceBase {
   recording: boolean;
   recordedFrames: { data: Buffer; timestamp: number }[];
   lastFrameTime: number;
+  lastStreamRestart: number;
   pendingDialogs: Map<string, PendingDialog>;
   pendingAuthRequests: Map<string, { requestId: string; timeout: ReturnType<typeof setTimeout> }>;
   downloadDir: string;

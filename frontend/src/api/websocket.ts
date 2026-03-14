@@ -347,8 +347,9 @@ function handleStatusMessage(msg: any) {
       projectName: projName,
       reportedAt: Date.now(),
     })));
-    // Auto-manage preview tabs for http/https/ws/wss services
-    if (store.previewVisible) {
+    // Auto-manage preview tabs for http/https/ws/wss services — only for the active project
+    const activeProj = store.projects.find((p) => p.id === store.activeProjectId);
+    if (store.previewVisible && activeProj && msg.cwd && msg.cwd.startsWith(activeProj.path)) {
       const httpServices = msg.services.filter((s: any) =>
         ['http', 'https', 'ws', 'wss'].includes(s.protocol)
       );

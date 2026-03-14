@@ -64,6 +64,26 @@ export function EditorArea() {
   const { openFiles, activeFileIdx, setOpenFiles, setActiveFileIdx, setCtxMenu, monacoReady } = useStore();
   const isOpen = openFiles.length > 0;
 
+  const reorderFiles = useCallback((from: number, to: number) => {
+    const s = useStore.getState();
+    const files = [...s.openFiles];
+    const [moved] = files.splice(from, 1);
+    files.splice(to, 0, moved);
+    // Adjust active index to follow the active file
+    let newIdx = s.activeFileIdx;
+    if (s.activeFileIdx === from) {
+      newIdx = to;
+    } else if (from < s.activeFileIdx && to >= s.activeFileIdx) {
+      newIdx = s.activeFileIdx - 1;
+    } else if (from > s.activeFileIdx && to <= s.activeFileIdx) {
+      newIdx = s.activeFileIdx + 1;
+    }
+    s.setOpenFiles(files);
+    s.setActiveFileIdx(newIdx);
+  }, []);
+
+  const editorDrag = useDraggableTabs(reorderFiles);
+
   if (!isOpen) return <div className="editor-area" id="editor-area" style={{ height: 0 }}></div>;
 
   const file = activeFileIdx >= 0 && activeFileIdx < openFiles.length ? openFiles[activeFileIdx] : null;
@@ -104,26 +124,6 @@ export function EditorArea() {
     setOpenFiles(kept);
     setActiveFileIdx(activeFileIdx >= fromIdx ? activeFileIdx - fromIdx : 0);
   };
-
-  const reorderFiles = useCallback((from: number, to: number) => {
-    const s = useStore.getState();
-    const files = [...s.openFiles];
-    const [moved] = files.splice(from, 1);
-    files.splice(to, 0, moved);
-    // Adjust active index to follow the active file
-    let newIdx = s.activeFileIdx;
-    if (s.activeFileIdx === from) {
-      newIdx = to;
-    } else if (from < s.activeFileIdx && to >= s.activeFileIdx) {
-      newIdx = s.activeFileIdx - 1;
-    } else if (from > s.activeFileIdx && to <= s.activeFileIdx) {
-      newIdx = s.activeFileIdx + 1;
-    }
-    s.setOpenFiles(files);
-    s.setActiveFileIdx(newIdx);
-  }, []);
-
-  const editorDrag = useDraggableTabs(reorderFiles);
 
   const showEditorCtx = (e: React.MouseEvent, idx: number) => {
     e.preventDefault();

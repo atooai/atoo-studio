@@ -215,9 +215,15 @@ class PreviewManager {
         this.destroy(projectId, tabId);
         continue;
       }
-      // Watchdog: restart stream if no frames received for 5s and there are active clients
-      if (instance.wsClients.size > 0 && now - instance.lastFrameTime > 5000) {
+      // Watchdog: restart stream only if user interacted recently but no frames arrived.
+      // CDP screencast only fires on repaints — a static page with no visual changes
+      // produces zero frames, which is normal, not a stall.
+      if (instance.wsClients.size > 0 &&
+          now - instance.lastFrameTime > 5000 &&
+          instance.lastActivity > instance.lastFrameTime &&
+          now - instance.lastStreamRestart > 30_000) {
         console.log(`[preview] Stream stalled for ${key}, restarting...`);
+        instance.lastStreamRestart = now;
         this.backend.restartStream(instance).catch(() => {});
       }
     }
