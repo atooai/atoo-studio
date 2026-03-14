@@ -577,10 +577,13 @@ function applyProjectSettings(settings: any, proj: any) {
       if (settings.editor_area_height && editorArea) editorArea.style.height = settings.editor_area_height;
     }
     if (settings.lp_width && workspace) workspace.style.setProperty('--lp-width', settings.lp_width);
-    if (settings.rp_width && workspace) workspace.style.setProperty('--rp-width', settings.rp_width);
     if (settings.rp_collapsed) {
-      rightPanel?.classList.add('collapsed');
-      if (workspace) workspace.style.setProperty('--rp-width', '36px');
+      store.setRightPanelCollapsed(true);
+      // Restore expanded width so uncollapsing works correctly
+      if (settings.rp_expanded_width && workspace) workspace.style.setProperty('--rp-width', settings.rp_expanded_width);
+    } else {
+      store.setRightPanelCollapsed(false);
+      if (settings.rp_width && workspace) workspace.style.setProperty('--rp-width', settings.rp_width);
     }
     if (settings.pp_width && workspace) workspace.style.setProperty('--pp-width', settings.pp_width);
     if (settings.git_history_height && ghp) ghp.style.height = settings.git_history_height;
@@ -600,6 +603,13 @@ function gatherProjectSettings(): Record<string, any> {
     editor_area_open: editorArea?.classList.contains('open') || false,
     lp_width: workspace ? getComputedStyle(workspace).getPropertyValue('--lp-width').trim() : '',
     rp_width: workspace ? getComputedStyle(workspace).getPropertyValue('--rp-width').trim() : '',
+    rp_expanded_width: (() => {
+      if (!workspace) return '';
+      const w = getComputedStyle(workspace).getPropertyValue('--rp-width').trim();
+      const collapsed = rightPanel?.classList.contains('collapsed') || false;
+      // If collapsed, keep the current CSS var (which should be the expanded width), otherwise use it directly
+      return collapsed ? (w && parseInt(w) > 50 ? w : '300px') : w;
+    })(),
     rp_collapsed: rightPanel?.classList.contains('collapsed') || false,
     pp_width: workspace ? getComputedStyle(workspace).getPropertyValue('--pp-width').trim() : '',
     git_history_height: document.getElementById('git-history-panel')?.style.height || '',
@@ -686,11 +696,33 @@ function registerGlobalFunctions() {
     e.preventDefault();
   });
 
-  // Global Ctrl+S: save current editor file, prevent browser save dialog
+  // Global keyboard shortcuts
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    const mod = e.ctrlKey || e.metaKey;
+    // Ctrl+S: save current editor file
+    if (mod && !e.shiftKey && e.key === 's') {
       e.preventDefault();
       win.saveCurrentFile?.();
+    }
+    // Ctrl+Shift+S: new session
+    if (mod && e.shiftKey && e.key === 'S') {
+      e.preventDefault();
+      win.newSession?.();
+    }
+    // Ctrl+Shift+T: new terminal
+    if (mod && e.shiftKey && e.key === 'T') {
+      e.preventDefault();
+      win.addTerminal?.();
+    }
+    // Ctrl+Shift+W: create worktree
+    if (mod && e.shiftKey && e.key === 'W') {
+      e.preventDefault();
+      win.createWorktree?.();
+    }
+    // F1 or Ctrl+Shift+?: help
+    if (e.key === 'F1' || (mod && e.shiftKey && e.key === '?')) {
+      e.preventDefault();
+      useStore.getState().setModal({ type: 'help' });
     }
   });
 
@@ -1092,6 +1124,96 @@ function registerGlobalFunctions() {
       await api('POST', `/api/projects/${proj.id}/git/push`);
       store.addToast(proj.name, 'Pushed to remote', 'success');
     } catch (e: any) { store.addToast(proj.name, `Failed: ${e.message}`, 'attention'); }
+  };
+
+  win.commitPushAndPR = async (projId?: string) => {
+    const store = useStore.getState();
+    const proj = projId ? store.projects.find(p => p.id === projId) : store.getActiveProject();
+    if (!proj) return;
+
+    const promptCommitPush =
+      `Review all uncommitted changes in this worktree using git diff and git status. ` +
+      `Then:\n` +
+      `1. Stage all changes and create a commit with a comprehensive, well-structured commit message that describes what changed and why.\n` +
+      `2. Push the branch to the remote.\n` +
+      `After completing all steps, confirm the push was successful.`;
+
+    const promptCommitPushPR =
+      `Review all uncommitted changes in this worktree using git diff and git status. ` +
+      `Then:\n` +
+      `1. Stage all changes and create a commit with a comprehensive, well-structured commit message that describes what changed and why.\n` +
+      `2. Push the branch to the remote.\n` +
+      `3. Create a Pull Request using "gh pr create" with a comprehensive PR title and description body that summarizes all the changes, their purpose, and any relevant context.\n` +
+      `After completing all steps, report the PR URL.`;
+
+    const openAgentWithPrompt = (prompt: string, sessionTitle: string) => {
+      store.setModal({
+        type: 'agent-picker',
+        props: {
+          onSelect: async (agent: any) => {
+            store.setModal(null);
+            try {
+              setPendingAgentCreation(true);
+              const result = await api('POST', '/api/agent-sessions', {
+                agentType: agent.agentType,
+                cwd: proj.path,
+                skipPermissions: true,
+              });
+              setPendingAgentCreation(false);
+
+              const sessionId = result.sessionId;
+              const defaultViewMode = (agent.mode === 'terminal') ? 'tui' : 'chat';
+              const existing = proj.sessions.find(s => s.id === sessionId);
+              if (existing) {
+                connectAgentWs(sessionId);
+              } else {
+                store.updateProject(proj.id, p => ({
+                  ...p,
+                  activeSessionIdx: p.sessions.filter(s => s.status !== 'ended').length,
+                  sessions: [...p.sessions, {
+                    id: sessionId, title: sessionTitle, status: 'open' as const,
+                    startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+                    messages: [], viewMode: defaultViewMode, agentType: agent.agentType, agentMode: agent.mode,
+                    permissionMode: 'bypassPermissions', showVerbose: true,
+                  }],
+                }));
+                store.setActiveTabType('session');
+                connectAgentWs(sessionId);
+              }
+
+              // Inject the prompt into the TUI after terminal connects
+              const tryInject = (attempts = 0) => {
+                if (attempts > 60) return;
+                if (win.injectTuiInput?.(sessionId, prompt)) return;
+                setTimeout(() => tryInject(attempts + 1), 500);
+              };
+              setTimeout(() => tryInject(), 800);
+
+              store.addToast(proj.name, `${sessionTitle} session created`, 'success');
+            } catch (e: any) {
+              setPendingAgentCreation(false);
+              store.addToast(proj.name, `Failed: ${e.message}`, 'attention');
+            }
+          },
+        },
+      });
+    };
+
+    // Ask whether to also create a PR
+    store.setModal({
+      type: 'confirm',
+      props: {
+        title: 'Commit and Push',
+        message: 'Create Pull Request?',
+        confirmLabel: 'Yes',
+        danger: false,
+        secondaryAction: {
+          label: 'No',
+          onClick: () => openAgentWithPrompt(promptCommitPush, 'Commit & Push'),
+        },
+        onConfirm: () => openAgentWithPrompt(promptCommitPushPR, 'Publish PR'),
+      },
+    });
   };
 
   win.gitRevertAll = () => {
@@ -1863,12 +1985,15 @@ function registerGlobalFunctions() {
   win.attachXterm = attachXterm;
 
   // Inject text into a session's TUI terminal input (does NOT press Enter)
-  win.injectTuiInput = (sessionId: string, text: string) => {
+  // Returns true if injection succeeded (terminal was connected)
+  win.injectTuiInput = (sessionId: string, text: string): boolean => {
     const tuiTermId = `tui-${sessionId}`;
     const inst = terminalInstances[tuiTermId];
     if (inst?.ws?.readyState === 1) {
       inst.ws.send(JSON.stringify({ type: 'input', data: text }));
+      return true;
     }
+    return false;
   };
 }
 
