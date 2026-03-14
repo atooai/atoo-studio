@@ -629,7 +629,10 @@ export function PreviewPanel() {
         <div className="preview-responsive-toolbar">
           <button
             className={`preview-responsive-toggle ${previewResponsive ? 'active' : ''}`}
-            onClick={() => setPreviewResponsive(!previewResponsive)}
+            onClick={() => {
+              if (!previewResponsive) setPreviewZoom(0);
+              setPreviewResponsive(!previewResponsive);
+            }}
             title="Toggle responsive mode"
           >⬒</button>
           {previewResponsive && (

@@ -87,6 +87,7 @@ export class HeadlessBackend implements PreviewBackend {
       instance.cdpSession.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
       instance.lastActivity = Date.now();
       instance.lastFrameTime = Date.now();
+      instance.lastStreamRestart = 0; // reset backoff on successful frame
 
       const imgBuf = Buffer.from(frame.data, 'base64');
       const msg = Buffer.allocUnsafe(1 + imgBuf.length);
@@ -238,6 +239,7 @@ export class HeadlessBackend implements PreviewBackend {
       '__atoo_tooltipShow',
       '__atoo_tooltipHide',
       '__atoo_contextMenu',
+      '__atoo_clipboard',
     ];
 
     for (const name of bindings) {
@@ -273,6 +275,9 @@ export class HeadlessBackend implements PreviewBackend {
           break;
         case '__atoo_contextMenu':
           broadcastJson(instance, { type: 'context_menu', ...data });
+          break;
+        case '__atoo_clipboard':
+          broadcastJson(instance, { type: 'clipboard', text: data.text });
           break;
       }
     });
@@ -394,6 +399,7 @@ export class HeadlessBackend implements PreviewBackend {
         recording: false,
         recordedFrames: [],
         lastFrameTime: Date.now(),
+        lastStreamRestart: 0,
         pendingDialogs: new Map(),
         pendingAuthRequests: new Map(),
         downloadDir: '',

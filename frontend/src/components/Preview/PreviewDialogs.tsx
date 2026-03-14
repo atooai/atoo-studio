@@ -213,9 +213,14 @@ function useOverlayPosition(
     const canvasRect = canvas.getBoundingClientRect();
     const scaleX = canvasRect.width / canvas.width;
     const scaleY = canvasRect.height / canvas.height;
+    // Account for canvas offset within the positioned container (.preview-frame-container)
+    const container = canvas.closest('.preview-frame-container');
+    const containerRect = container?.getBoundingClientRect();
+    const offsetLeft = containerRect ? canvasRect.left - containerRect.left : 0;
+    const offsetTop = containerRect ? canvasRect.top - containerRect.top : 0;
     return {
-      left: rect.x * scaleX,
-      top: rect.y * scaleY,
+      left: offsetLeft + rect.x * scaleX,
+      top: offsetTop + rect.y * scaleY,
       width: rect.width * scaleX,
       height: rect.height * scaleY,
       scale: scaleX,

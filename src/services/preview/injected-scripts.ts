@@ -140,6 +140,17 @@ export function getInjectedScript(): string {
     } catch (err) { /* binding not available */ }
   }, true);
 
+  // === CLIPBOARD COPY INTERCEPTION ===
+  document.addEventListener('copy', function() {
+    var sel = window.getSelection();
+    var text = sel ? sel.toString() : '';
+    if (text) {
+      try {
+        window.__atoo_clipboard(JSON.stringify({ text: text }));
+      } catch (err) { /* binding not available */ }
+    }
+  }, true);
+
   // === CONTEXT MENU INTERCEPTION ===
   document.addEventListener('contextmenu', function(e) {
     e.preventDefault();
