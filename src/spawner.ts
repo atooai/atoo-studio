@@ -214,12 +214,12 @@ export function markActivityViewed(envId: string): void {
   const state = activityStates.get(envId);
   if (!state) return;
   state.attentionAcknowledged = true;
-  // If there's no active burst, update status immediately
-  if (state.burstStartTime === null) {
+  // Always clear to 'open' immediately — the user has seen it.
+  // If there's an active burst, the acknowledgement flag ensures
+  // onBurstIdle won't re-trigger 'attention'.
+  if (state.currentStatus === 'attention') {
     setStatus(envId, state, 'open');
   }
-  // If there IS an active burst, the acknowledgement is stored and
-  // will be respected when the burst ends (onBurstIdle)
 }
 
 function removeActivityState(envId: string): void {

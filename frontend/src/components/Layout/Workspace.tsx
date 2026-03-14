@@ -26,20 +26,14 @@ export function Workspace() {
   const contentRef = useRef<HTMLDivElement>(null);
   const handleSessionInteraction = useCallback(() => {
     if (!session || session.status !== 'attention' || activeTabType !== 'session') return;
-    // Debounce: clear after 2s of first interaction
+    // Debounce: clear after 500ms of first interaction
     if (clearTimerRef.current) return;
     clearTimerRef.current = setTimeout(() => {
       clearTimerRef.current = null;
-      // Re-check status in case it changed
-      const s = useStore.getState();
-      const p = s.projects.find(p => p.id === activeProjectId);
-      if (!p) return;
-      const active = p.sessions.filter(ss => ss.status !== 'ended');
-      const sess = active[p.activeSessionIdx || 0];
-      if (sess && sess.status === 'attention') {
-        sendAgentCommand(sess.id, { action: 'session_viewed' });
-      }
-    }, 2000);
+      // Don't re-check status — it may have transiently changed (PTY cursor activity).
+      // The user interacted while we were in attention, so always send session_viewed.
+      sendAgentCommand(session.id, { action: 'session_viewed' });
+    }, 500);
   }, [session?.id, session?.status, activeTabType, activeProjectId]);
 
   // Listen for xterm-activity custom events (keyboard input inside xterm)
@@ -380,10 +374,6 @@ function RightPanel({ proj }: { proj: any }) {
     }
   };
 
-  const tabTitle = rightPanelTab === 'sessions' ? 'Sessions'
-    : rightPanelTab === 'issues' ? 'Issues'
-    : 'Pull Requests';
-
   return (
     <div className={`right-panel ${collapsed ? 'collapsed' : ''}`} id="right-panel">
       <div className="rp-header">
@@ -414,7 +404,7 @@ function RightPanel({ proj }: { proj: any }) {
       {rightPanelTab === 'sessions' && <SessionsPanel />}
       {rightPanelTab === 'issues' && ghStatus && <IssuesPanel projectId={proj.id} ghStatus={ghStatus} />}
       {rightPanelTab === 'prs' && ghStatus && <PullsPanel projectId={proj.id} ghStatus={ghStatus} />}
-      <div className="rp-collapsed-label" onClick={() => setCollapsed(false)}>{tabTitle}</div>
+      <div className="rp-collapsed-label" onClick={() => setCollapsed(false)}>Sessions / Issues / PRs</div>
     </div>
   );
 }

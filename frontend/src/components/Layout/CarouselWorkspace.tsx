@@ -98,7 +98,7 @@ function useAttentionClear(sessionId: string, status: string, containerRef?: Rea
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       sendAgentCommand(sessionId, { action: 'session_viewed' });
-    }, 2000);
+    }, 500);
   }, [sessionId, status]);
 
   // Listen for xterm-activity custom events (keyboard input inside xterm)
