@@ -791,6 +791,7 @@ projectsRouter.delete('/api/projects/:id/git/worktrees', async (req, res) => {
   if (!ctx) return;
   try {
     const worktreePath = req.query.path as string;
+    const deleteBranch = req.query.deleteBranch as string | undefined;
     if (!worktreePath) return res.status(400).json({ error: 'path query parameter required' });
     // Find and remove the linked child project
     const childProject = db.findProjectByPath(worktreePath);
@@ -801,6 +802,17 @@ projectsRouter.delete('/api/projects/:id/git/worktrees', async (req, res) => {
     ctx.connectionId
       ? await remoteGitOps.gitWorktreeRemove(ctx.connectionId, ctx.cwd, worktreePath)
       : await gitOps.gitWorktreeRemove(ctx.cwd, worktreePath);
+    // Optionally delete the associated branch
+    if (deleteBranch) {
+      try {
+        ctx.connectionId
+          ? await remoteGitOps.gitBranchDelete(ctx.connectionId, ctx.cwd, deleteBranch)
+          : await gitOps.gitBranchDelete(ctx.cwd, deleteBranch);
+      } catch (branchErr: any) {
+        // Non-fatal: worktree was removed but branch deletion failed
+        return res.json({ success: true, branchDeleteError: branchErr.message });
+      }
+    }
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

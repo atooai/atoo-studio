@@ -1,6 +1,6 @@
 import type WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AgentDescriptor, HistoricalSession } from './types.js';
+import type { Agent, AgentFactory, AgentSessionInfo, AgentInitOptions, AgentDescriptor, HistoricalSession, LinkedIssueInfo } from './types.js';
 import type { SessionEvent } from '../events/types.js';
 import type { WireMessage } from '../events/wire.js';
 import { store } from '../state/store.js';
@@ -8,11 +8,22 @@ import { db } from '../state/db.js';
 import { buildChainSession } from './lib/chain-builder.js';
 import { fsSessionScanner } from './lib/claude/fs-sessions.js';
 
+interface BrowserState {
+  linkedIssue?: LinkedIssueInfo;
+  viewMode?: string;
+  showVerbose?: boolean;
+  title?: string;
+  metaName?: string;
+  metaDescription?: string;
+  tags?: string[];
+}
+
 interface AgentEntry {
   agent: Agent;
   agentType: string;
   browserClients: Set<WebSocket>;
   contextInProgress: boolean;
+  browserState: BrowserState;
 }
 
 class AgentRegistry {
@@ -36,6 +47,7 @@ class AgentRegistry {
       agentType,
       browserClients: new Set(),
       contextInProgress: false,
+      browserState: {},
     };
 
     this.agents.set(sessionId, entry);
@@ -96,10 +108,21 @@ class AgentRegistry {
     console.log(`[agent-registry] Agent destroyed: ${sessionId}`);
   }
 
-  listAgents(): AgentSessionInfo[] {
-    const infos: AgentSessionInfo[] = [];
+  setBrowserState(sessionId: string, state: Partial<BrowserState>): void {
+    const entry = this.agents.get(sessionId);
+    if (entry) Object.assign(entry.browserState, state);
+  }
+
+  getBrowserState(sessionId: string): BrowserState | undefined {
+    return this.agents.get(sessionId)?.browserState;
+  }
+
+  listAgents(): (AgentSessionInfo & { browserState?: BrowserState })[] {
+    const infos: (AgentSessionInfo & { browserState?: BrowserState })[] = [];
     for (const entry of this.agents.values()) {
-      infos.push(entry.agent.getInfo());
+      const info = entry.agent.getInfo();
+      if (entry.browserState.linkedIssue) info.linkedIssue = entry.browserState.linkedIssue;
+      infos.push({ ...info, browserState: entry.browserState });
     }
     return infos;
   }

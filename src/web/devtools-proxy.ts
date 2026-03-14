@@ -153,6 +153,12 @@ export function handleDevtoolsWsUpgrade(
     const bufferedMessages: (Buffer | string)[] = [];
     let targetReady = false;
 
+    // Keepalive: ping both sides every 30s to prevent idle timeout
+    const pingInterval = setInterval(() => {
+      if (clientWs.readyState === 1) clientWs.ping();
+      if (targetWs.readyState === 1) targetWs.ping();
+    }, 30_000);
+
     clientWs.on('message', (data, isBinary) => {
       if (targetReady) {
         if (targetWs.readyState === 1) {
@@ -187,11 +193,13 @@ export function handleDevtoolsWsUpgrade(
     });
 
     targetWs.on('close', (code, reason) => {
+      clearInterval(pingInterval);
       console.log(`[devtools-proxy] Target WS closed: ${code} ${reason}`);
       if (clientWs.readyState <= 1) clientWs.close(code || 1000, reason?.toString() || '');
     });
 
     clientWs.on('close', (code, reason) => {
+      clearInterval(pingInterval);
       console.log(`[devtools-proxy] Client WS closed: ${code}`);
       if (targetWs.readyState <= 1) targetWs.close();
     });

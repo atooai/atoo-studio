@@ -227,61 +227,57 @@ export class HeadlessBackend implements PreviewBackend {
   // --- Shadow Overlay: Script injection & bindings ---
 
   private async setupInjectedScripts(instance: HeadlessInstance) {
-    const { cdpSession } = instance;
+    const { page, cdpSession } = instance;
 
-    // Enable Runtime domain for bindings
-    await cdpSession.send('Runtime.enable');
-
-    // Register bindings — each creates a window.__atoo_* function in the page
-    const bindings = [
-      '__atoo_selectOpened',
-      '__atoo_pickerOpened',
-      '__atoo_tooltipShow',
-      '__atoo_tooltipHide',
-      '__atoo_contextMenu',
-      '__atoo_clipboard',
-    ];
-
-    for (const name of bindings) {
+    // Use Puppeteer's exposeFunction for reliable binding→server communication
+    // (raw Runtime.addBinding + Runtime.bindingCalled has CDP session routing issues)
+    const expose = async (name: string, handler: (payload: string) => void) => {
       try {
-        await cdpSession.send('Runtime.addBinding', { name });
+        await page.exposeFunction(name, handler);
       } catch (err: any) {
-        console.warn(`[preview/headless] Failed to add binding ${name}: ${err.message}`);
+        console.warn(`[preview/headless] Failed to expose ${name}: ${err.message}`);
       }
-    }
+    };
 
-    // Listen for binding calls from the page
-    cdpSession.on('Runtime.bindingCalled', (params: any) => {
-      const { name, payload } = params;
-      console.log(`[preview/headless] Binding called: ${name}`);
-      let data: any;
+    await expose('__atoo_selectOpened', (payload: string) => {
       try {
-        data = JSON.parse(payload);
-      } catch {
-        return;
-      }
+        const data = JSON.parse(payload);
+        broadcastJson(instance, { type: 'select_opened', ...data });
+      } catch {}
+    });
 
-      switch (name) {
-        case '__atoo_selectOpened':
-          broadcastJson(instance, { type: 'select_opened', ...data });
-          break;
-        case '__atoo_pickerOpened':
-          console.log(`[preview/headless] Picker opened: type=${data.type}, selectorPath=${data.selectorPath}`);
-          broadcastJson(instance, { type: 'picker_opened', ...data });
-          break;
-        case '__atoo_tooltipShow':
-          broadcastJson(instance, { type: 'tooltip_show', ...data });
-          break;
-        case '__atoo_tooltipHide':
-          broadcastJson(instance, { type: 'tooltip_hide' });
-          break;
-        case '__atoo_contextMenu':
-          broadcastJson(instance, { type: 'context_menu', ...data });
-          break;
-        case '__atoo_clipboard':
-          broadcastJson(instance, { type: 'clipboard', text: data.text });
-          break;
-      }
+    await expose('__atoo_pickerOpened', (payload: string) => {
+      try {
+        const data = JSON.parse(payload);
+        // Rename data.type → inputType to avoid overwriting the message 'type' field
+        const { type: inputType, ...rest } = data;
+        broadcastJson(instance, { type: 'picker_opened', inputType, ...rest });
+      } catch {}
+    });
+
+    await expose('__atoo_tooltipShow', (payload: string) => {
+      try {
+        const data = JSON.parse(payload);
+        broadcastJson(instance, { type: 'tooltip_show', ...data });
+      } catch {}
+    });
+
+    await expose('__atoo_tooltipHide', (_payload: string) => {
+      broadcastJson(instance, { type: 'tooltip_hide' });
+    });
+
+    await expose('__atoo_contextMenu', (payload: string) => {
+      try {
+        const data = JSON.parse(payload);
+        broadcastJson(instance, { type: 'context_menu', ...data });
+      } catch {}
+    });
+
+    await expose('__atoo_clipboard', (payload: string) => {
+      try {
+        const data = JSON.parse(payload);
+        broadcastJson(instance, { type: 'clipboard', text: data.text });
+      } catch {}
     });
 
     // Inject the capture script — persists across navigations

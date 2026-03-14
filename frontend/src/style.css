@@ -4007,7 +4007,6 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   max-height: 50%;
   height: 35%;
   overflow: hidden;
-  border-bottom: 1px solid var(--border);
 }
 
 .issue-split-divider {
@@ -4066,6 +4065,7 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 .issue-action-close:hover:not(:disabled) { border-color: var(--accent-red); color: var(--accent-red); }
 .issue-action-reopen:hover:not(:disabled) { border-color: var(--accent-green); color: var(--accent-green); }
 .issue-action-github:hover:not(:disabled) { border-color: var(--text-muted); }
+.issue-action-worktree:hover:not(:disabled) { border-color: var(--accent-yellow); color: var(--accent-yellow); }
 
 /* Issue detail content */
 .issue-detail-content {
@@ -5565,6 +5565,11 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 }
 .confirm-dialog-btn.primary:hover { opacity: 0.85; }
 .confirm-dialog-btn:disabled { opacity: 0.4; cursor: default; }
+.confirm-dialog-btn.secondary {
+  background: var(--bg-surface-3);
+  color: var(--text-primary);
+}
+.confirm-dialog-btn.secondary:hover { background: var(--bg-surface-4); }
 
 /* Session switch modal */
 .session-switch-details {

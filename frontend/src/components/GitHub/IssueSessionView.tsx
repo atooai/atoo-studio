@@ -5,60 +5,30 @@ import type { LinkedIssue, GitHubIssueDetail, GitHubPullDetail } from '../../typ
 
 type IssueOrPrDetail = GitHubIssueDetail | GitHubPullDetail;
 
-function timeAgo(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = Date.now();
-  const diff = now - d.getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
-}
-
-export function IssueDetailPanel({ linkedIssue, projectId, sessionId }: {
+export function IssueActionBar({ linkedIssue, projectId, sessionId }: {
   linkedIssue: LinkedIssue;
   projectId: string;
   sessionId: string;
 }) {
   const [detail, setDetail] = useState<IssueOrPrDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   const fetchDetail = useCallback(async () => {
-    setLoading(true);
-    setError(null);
     try {
       const endpoint = linkedIssue.type === 'issue'
         ? `/api/projects/${projectId}/github/issues/${linkedIssue.number}`
         : `/api/projects/${projectId}/github/pulls/${linkedIssue.number}`;
       const result = await api('GET', endpoint);
       setDetail(result);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load details');
-    } finally {
-      setLoading(false);
-    }
+    } catch {}
   }, [projectId, linkedIssue.number, linkedIssue.type]);
 
-  useEffect(() => {
-    fetchDetail();
-  }, [fetchDetail]);
+  useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
-  // Listen for MCP github_issue_pr_changed events and refresh when this issue/PR is changed
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail.number === linkedIssue.number && detail.itemType === linkedIssue.type) {
-        fetchDetail();
-      }
+      const d = (e as CustomEvent).detail;
+      if (d.number === linkedIssue.number && d.itemType === linkedIssue.type) fetchDetail();
     };
     window.addEventListener('github-issue-pr-changed', handler);
     return () => window.removeEventListener('github-issue-pr-changed', handler);
@@ -129,48 +99,119 @@ export function IssueDetailPanel({ linkedIssue, projectId, sessionId }: {
     window.open(linkedIssue.url, '_blank');
   };
 
+  const handleCreateWorktree = () => {
+    (window as any).createIssueWorktree?.(linkedIssue);
+  };
+
   const isOpen = detail?.state === 'OPEN';
   const isPr = linkedIssue.type === 'pr';
   const isMerged = isPr && detail?.state === 'MERGED';
 
   return (
-    <div className="issue-detail-panel">
-      {/* Button bar */}
-      <div className="issue-action-bar">
-        {isPr ? (
-          <button className="issue-action-btn issue-action-review" onClick={handleReview} title="Inject review prompt into agent">
-            Review
+    <div className="issue-action-bar">
+      {isPr ? (
+        <button className="issue-action-btn issue-action-review" onClick={handleReview} title="Inject review prompt into agent">
+          Review
+        </button>
+      ) : (
+        <>
+          <button className="issue-action-btn issue-action-analyse" onClick={handleAnalyse} title="Inject analyse prompt into agent">
+            Analyse
+          </button>
+          <button className="issue-action-btn issue-action-autofix" onClick={handleAutoFix} title="Inject autofix prompt into agent">
+            AutoFix
+          </button>
+        </>
+      )}
+      {!isMerged && (
+        isOpen ? (
+          <button className="issue-action-btn issue-action-close" onClick={handleClose} disabled={busy}>
+            {busy ? '...' : 'Close'}
           </button>
         ) : (
-          <>
-            <button className="issue-action-btn issue-action-analyse" onClick={handleAnalyse} title="Inject analyse prompt into agent">
-              Analyse
-            </button>
-            <button className="issue-action-btn issue-action-autofix" onClick={handleAutoFix} title="Inject autofix prompt into agent">
-              AutoFix
-            </button>
-          </>
-        )}
-        {!isMerged && (
-          isOpen ? (
-            <button className="issue-action-btn issue-action-close" onClick={handleClose} disabled={busy}>
-              {busy ? '...' : 'Close'}
-            </button>
-          ) : (
-            <button className="issue-action-btn issue-action-reopen" onClick={handleReopen} disabled={busy}>
-              {busy ? '...' : 'Reopen'}
-            </button>
-          )
-        )}
-        <div style={{ flex: 1 }} />
-        <button className="issue-action-btn issue-action-refresh" onClick={fetchDetail} title="Refresh">
-          Refresh
+          <button className="issue-action-btn issue-action-reopen" onClick={handleReopen} disabled={busy}>
+            {busy ? '...' : 'Reopen'}
+          </button>
+        )
+      )}
+      {!isPr && (
+        <button className="issue-action-btn issue-action-worktree" onClick={handleCreateWorktree} title="Create worktree for this issue and open a new session">
+          Worktree
         </button>
-        <button className="issue-action-btn issue-action-github" onClick={handleOpenInGithub} title="Open in GitHub">
-          GitHub
-        </button>
-      </div>
+      )}
+      <div style={{ flex: 1 }} />
+      <button className="issue-action-btn issue-action-refresh" onClick={fetchDetail} title="Refresh">
+        Refresh
+      </button>
+      <button className="issue-action-btn issue-action-github" onClick={handleOpenInGithub} title="Open in GitHub">
+        GitHub
+      </button>
+    </div>
+  );
+}
 
+function timeAgo(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = Date.now();
+  const diff = now - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
+export function IssueDetailPanel({ linkedIssue, projectId, sessionId }: {
+  linkedIssue: LinkedIssue;
+  projectId: string;
+  sessionId: string;
+}) {
+  const [detail, setDetail] = useState<IssueOrPrDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const fetchDetail = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const endpoint = linkedIssue.type === 'issue'
+        ? `/api/projects/${projectId}/github/issues/${linkedIssue.number}`
+        : `/api/projects/${projectId}/github/pulls/${linkedIssue.number}`;
+      const result = await api('GET', endpoint);
+      setDetail(result);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load details');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, linkedIssue.number, linkedIssue.type]);
+
+  useEffect(() => {
+    fetchDetail();
+  }, [fetchDetail]);
+
+  // Listen for MCP github_issue_pr_changed events and refresh when this issue/PR is changed
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.number === linkedIssue.number && detail.itemType === linkedIssue.type) {
+        fetchDetail();
+      }
+    };
+    window.addEventListener('github-issue-pr-changed', handler);
+    return () => window.removeEventListener('github-issue-pr-changed', handler);
+  }, [linkedIssue.number, linkedIssue.type, fetchDetail]);
+
+  const isPr = linkedIssue.type === 'pr';
+
+  return (
+    <div className="issue-detail-panel">
       {/* Content */}
       <div className="issue-detail-content" ref={scrollRef}>
         {loading && !detail ? (

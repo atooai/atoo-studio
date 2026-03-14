@@ -5,15 +5,21 @@ interface ConfirmDialogProps {
   message: string;
   confirmLabel?: string;
   danger?: boolean;
+  secondaryAction?: { label: string; onClick: () => void };
   onConfirm: () => void;
   onClose: () => void;
 }
 
-export function ConfirmDialog({ title, message, confirmLabel = 'Delete', danger = true, onConfirm, onClose }: ConfirmDialogProps) {
+export function ConfirmDialog({ title, message, confirmLabel = 'Delete', danger = true, secondaryAction, onConfirm, onClose }: ConfirmDialogProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   const handleConfirm = () => {
     onConfirm();
+    onClose();
+  };
+
+  const handleSecondary = () => {
+    secondaryAction!.onClick();
     onClose();
   };
 
@@ -32,6 +38,9 @@ export function ConfirmDialog({ title, message, confirmLabel = 'Delete', danger 
       <div className="confirm-dialog-message">{message}</div>
       <div className="confirm-dialog-actions">
         <button className="confirm-dialog-btn cancel" onClick={onClose}>Cancel</button>
+        {secondaryAction && (
+          <button className="confirm-dialog-btn secondary" onClick={handleSecondary}>{secondaryAction.label}</button>
+        )}
         <button className={`confirm-dialog-btn ${danger ? 'danger' : 'primary'}`} onClick={handleConfirm}>{confirmLabel}</button>
       </div>
     </div>

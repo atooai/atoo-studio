@@ -349,14 +349,23 @@ interface PickerOverlayProps {
 }
 
 export function PickerOverlay({ info, canvasRef, onSelect, onDismiss }: PickerOverlayProps) {
+  const nativeOpenRef = useRef(false);
   const [value, setValue] = useState(info.value || '');
+  const [showFallback, setShowFallback] = useState(false);
   const pos = useOverlayPosition(info.rect, canvasRef);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Auto-open the native picker in the host browser
-    inputRef.current?.focus();
-    try { inputRef.current?.showPicker?.(); } catch { /* requires user activation */ }
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    try {
+      input.showPicker?.();
+      nativeOpenRef.current = true;
+    } catch {
+      // showPicker failed — show fallback UI (no re-render kills the input)
+      setShowFallback(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -366,6 +375,15 @@ export function PickerOverlay({ info, canvasRef, onSelect, onDismiss }: PickerOv
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
   }, [onDismiss]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setValue(v);
+    if (nativeOpenRef.current && v) {
+      // Native picker selection — auto-submit
+      onSelect(info.selectorPath, v, info.type);
+    }
+  };
 
   const handleConfirm = () => {
     onSelect(info.selectorPath, value, info.type);
@@ -380,6 +398,8 @@ export function PickerOverlay({ info, canvasRef, onSelect, onDismiss }: PickerOv
           position: 'absolute',
           left: pos.left,
           top: pos.top + pos.height + 4,
+          // Hide the wrapper when native picker is driving — keep input mounted
+          ...(showFallback ? {} : { background: 'none', border: 'none', padding: 0, boxShadow: 'none' }),
         }}
       >
         <input
@@ -389,13 +409,16 @@ export function PickerOverlay({ info, canvasRef, onSelect, onDismiss }: PickerOv
           min={info.min || undefined}
           max={info.max || undefined}
           step={info.step || undefined}
-          onChange={e => setValue(e.target.value)}
+          onChange={handleChange}
           onKeyDown={e => { if (e.key === 'Enter') handleConfirm(); }}
+          style={showFallback ? undefined : { opacity: 0, width: 1, height: 1, padding: 0, border: 'none' }}
         />
-        <div className="preview-picker-buttons">
-          <button className="preview-dialog-btn cancel" onClick={onDismiss}>Cancel</button>
-          <button className="preview-dialog-btn ok" onClick={handleConfirm}>OK</button>
-        </div>
+        {showFallback && (
+          <div className="preview-picker-buttons">
+            <button className="preview-dialog-btn cancel" onClick={onDismiss}>Cancel</button>
+            <button className="preview-dialog-btn ok" onClick={handleConfirm}>OK</button>
+          </div>
+        )}
       </div>
     </>
   );

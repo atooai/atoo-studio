@@ -279,7 +279,7 @@ function LayoutToggle() {
       onClick={() => setWorkspaceLayout(isCarousel ? 'classic' : 'carousel')}
       title={isCarousel ? 'Switch to classic layout' : 'Switch to carousel layout'}
     >
-      {isCarousel ? '⊞' : '⇔'} {isCarousel ? 'Classic' : 'Carousel'}
+      {isCarousel ? '⊞' : '⇔'} {isCarousel ? 'Classic' : 'Carousel (Experimental)'}
     </button>
   );
 }

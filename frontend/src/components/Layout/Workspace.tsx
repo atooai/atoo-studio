@@ -7,7 +7,7 @@ import { EditorArea } from '../Editor/Editor';
 import { ChatArea } from '../Chat/Chat';
 import { SessionsPanel } from '../Sessions/Sessions';
 import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
-import { IssueDetailPanel } from '../GitHub/IssueSessionView';
+import { IssueDetailPanel, IssueActionBar } from '../GitHub/IssueSessionView';
 import { PreviewPanel } from '../Preview/Preview';
 import { AgentTabIcon } from './AgentTabIcon';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
@@ -87,6 +87,11 @@ export function Workspace() {
             ) : session?.linkedIssue && activeTabType === 'session' ? (
               <div className="issue-split-view">
                 <IssueDetailPanel
+                  linkedIssue={session.linkedIssue}
+                  projectId={proj.id}
+                  sessionId={session.id}
+                />
+                <IssueActionBar
                   linkedIssue={session.linkedIssue}
                   projectId={proj.id}
                   sessionId={session.id}

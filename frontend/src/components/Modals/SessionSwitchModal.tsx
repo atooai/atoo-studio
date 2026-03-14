@@ -32,11 +32,8 @@ function waitAndInjectPrompt(refinedPrompt: string) {
       for (const s of proj.sessions || []) {
         const sid = s.cliSessionId || s.id;
         if (toRawHex(sid) === targetHex && s.status !== 'ended') {
-          // Try to inject into TUI
-          if (win.injectTuiInput?.(s.id, pending.refinedPrompt) !== undefined) {
-            // injectTuiInput is void — just call it and check if terminal exists
-            const tuiTermId = `tui-${s.id}`;
-            // Access terminalInstances indirectly via the inject function success
+          // Check if terminal exists before injecting
+          if (win.injectTuiInput) {
             win.injectTuiInput(s.id, pending.refinedPrompt);
             store.setPendingSessionSwitch(null);
             return;
@@ -132,15 +129,16 @@ export function SessionSwitchModal({ requestId, targetSessionUuid, refinedPrompt
 
     // Close the source session if requested
     if (closeSource && sourceSessionId) {
+      const sourceHex = toRawHex(sourceSessionId);
       for (const proj of store.projects) {
-        const session = (proj.sessions || []).find((s: any) => {
+        const activeSessions = (proj.sessions || []).filter((s: any) => s.status !== 'ended');
+        const idx = activeSessions.findIndex((s: any) => {
           const sid = s.cliSessionId || s.id;
-          return toRawHex(sid) === toRawHex(sourceSessionId);
+          return toRawHex(sid) === sourceHex;
         });
-        if (session) {
-          api('DELETE', `/api/agent-sessions/${session.id}`).catch((err: any) => {
-            console.warn('[SessionSwitchModal] Failed to close source session:', err);
-          });
+        if (idx >= 0) {
+          // Use closeSession which also marks the tab as ended and cleans up the terminal
+          (window as any).closeSession?.(proj.id, idx);
           break;
         }
       }

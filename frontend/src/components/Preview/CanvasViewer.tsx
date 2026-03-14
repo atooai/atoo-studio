@@ -68,6 +68,14 @@ function cdpButton(btn: number): string {
   }
 }
 
+// Derive the primary held button from the buttons bitmask (for mouseMoved during drag)
+function cdpButtonFromButtons(buttons: number): string {
+  if (buttons & 1) return 'left';
+  if (buttons & 2) return 'right';
+  if (buttons & 4) return 'middle';
+  return 'none';
+}
+
 // Build CDP modifiers bitmask from event
 function cdpModifiers(e: React.MouseEvent | React.KeyboardEvent | React.WheelEvent): number {
   let m = 0;
@@ -231,7 +239,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
           else if (msg.type === 'new_tab' && onNewTab) onNewTab(msg);
           // Shadow overlay messages
           else if (msg.type === 'select_opened' && onSelectOpened) onSelectOpened(msg);
-          else if (msg.type === 'picker_opened' && onPickerOpened) onPickerOpened(msg);
+          else if (msg.type === 'picker_opened' && onPickerOpened) onPickerOpened({ ...msg, type: msg.inputType });
           else if (msg.type === 'tooltip_show' && onTooltipShow) onTooltipShow(msg);
           else if (msg.type === 'tooltip_hide' && onTooltipHide) onTooltipHide();
           else if (msg.type === 'auth_required' && onAuthRequired) onAuthRequired(msg);
@@ -363,7 +371,7 @@ export const CanvasViewer = forwardRef<CanvasViewerHandle, CanvasViewerProps>(fu
     send({
       type: 'mouse', event: 'mouseMoved',
       x, y,
-      button: 'none',
+      button: cdpButtonFromButtons(e.buttons),
       buttons: e.buttons,
       modifiers: cdpModifiers(e),
     });

@@ -583,12 +583,21 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
   });
 
+  // Broadcast dismiss_modal to all connected browsers so they close stale popups
+  function broadcastDismissModal(requestId: string) {
+    const msg = JSON.stringify({ type: 'dismiss_modal', requestId });
+    for (const ws of store.statusClients) {
+      if (ws.readyState === 1) ws.send(msg);
+    }
+  }
+
   // Frontend callbacks for MCP-initiated user prompts (serial, session switch, open file)
   app.post('/api/reject-serial', (req, res) => {
     const { requestId } = req.body;
     if (!requestId) return res.status(400).json({ error: 'requestId required' });
     serialManager.rejectRequest(requestId, new Error('User rejected the serial device request'));
     serialManager.closeRequest(requestId);
+    broadcastDismissModal(requestId);
     res.json({ success: true });
   });
 
@@ -604,6 +613,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     clearTimeout(pending.timeout);
     pendingSessionSwitches.delete(requestId);
     pending.resolve({ action });
+    broadcastDismissModal(requestId);
     res.json({ success: true });
   });
 
@@ -619,6 +629,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     clearTimeout(pending.timeout);
     pendingOpenFiles.delete(requestId);
     pending.resolve({ action });
+    broadcastDismissModal(requestId);
     res.json({ success: true });
   });
 
@@ -775,7 +786,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // Create a new agent session
   app.post('/api/agent-sessions', async (req, res) => {
-    const { agentType, cwd, skipPermissions, message,
+    const { agentType, cwd, skipPermissions, message, linkedIssue,
             resumeSessionUuid, forkParentSessionId, forkAfterEventUuid, forkFromEventUuid } = req.body;
 
     const type = agentType || 'claude-code';
@@ -815,7 +826,12 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         initialMessage: message || undefined,
       });
 
+      if (linkedIssue) {
+        agentRegistry.setBrowserState(sessionId, { linkedIssue });
+      }
+
       const info = agent.getInfo();
+      if (linkedIssue) info.linkedIssue = linkedIssue;
       res.json(info);
     } catch (err: any) {
       console.error(`[web] Failed to create agent session:`, err.message);
@@ -826,6 +842,14 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   // List agent sessions
   app.get('/api/agent-sessions', (_req, res) => {
     res.json(agentRegistry.listAgents());
+  });
+
+  // Update browser-side state for a session (cached in memory, not DB)
+  app.patch('/api/agent-sessions/:id/browser-state', (req, res) => {
+    const { id } = req.params;
+    const state = req.body;
+    agentRegistry.setBrowserState(id, state);
+    res.json({ ok: true });
   });
 
   // Available agent types (for agent picker UI)

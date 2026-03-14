@@ -299,6 +299,14 @@ function handleStatusMessage(msg: any) {
         },
       },
     });
+  } else if (msg.type === 'dismiss_modal' && msg.requestId) {
+    // Another browser already handled this popup — close it locally if it matches
+    const currentModal = useStore.getState().modal;
+    if (currentModal?.props?.requestId === msg.requestId) {
+      useStore.setState({ modal: null });
+    }
+    // Also clean up serial request state if applicable
+    store.removeSerialRequest(msg.requestId);
   } else if (msg.type === 'serial_closed' && msg.requestId) {
     const req = store.serialRequests.find((r) => r.requestId === msg.requestId);
     if (req && req.status === 'connected') {
@@ -550,7 +558,10 @@ function handleAgentMessage(sessionId: string, msg: any) {
     // Update title from first user message
     if (!sess.title || sess.title === 'New session') {
       const firstUser = sess.messages.find((m) => m.role === 'user');
-      if (firstUser) sess.title = firstUser.content.substring(0, 50);
+      if (firstUser) {
+        sess.title = firstUser.content.substring(0, 50);
+        api('PATCH', `/api/agent-sessions/${sess.id}/browser-state`, { title: sess.title }).catch(() => {});
+      }
     }
 
     return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };

@@ -39,6 +39,7 @@ interface SerialPort extends EventTarget {
     ringIndicator: boolean;
     dataSetReady: boolean;
   }>;
+  getInfo(): { usbVendorId?: number; usbProductId?: number };
 }
 
 interface Serial extends EventTarget {

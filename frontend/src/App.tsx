@@ -417,6 +417,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
           // Preserve runtime state from existing session
           ...(existing ? {
             showVerbose: existing.showVerbose,
+            linkedIssue: existing.linkedIssue,
             _agentInfo: existing._agentInfo,
             _capabilities: existing._capabilities,
             _pendingControl: existing._pendingControl,
@@ -434,28 +435,38 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
         .filter((a: any) => a.cwd === effectivePath && !legacyIds.has(a.sessionId) && a.status !== 'exited')
         .map((a: any) => {
           const existing = existingSessions.get(a.sessionId);
+          const bs = a.browserState || {};
           return {
             id: a.sessionId,
-            title: existing?.title || 'Terminal session',
+            title: existing?.title || bs.title || 'Terminal session',
             status: a.status === 'active' ? 'active' as const : a.status === 'attention' ? 'attention' as const : 'open' as const,
             startedAt: existing?.startedAt || new Date(a.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
             messages: existing?.messages || [],
             lastMessage: existing?.lastMessage || '',
-            viewMode: existing?.viewMode || (a.agentMode === 'terminal' ? 'tui' as const : 'chat' as const),
+            viewMode: existing?.viewMode || bs.viewMode || (a.agentMode === 'terminal' ? 'tui' as const : 'chat' as const),
             agentType: a.agentType,
             agentMode: a.agentMode,
             model: a.model || null,
             permissionMode: a.mode || null,
             cwd: a.cwd,
             _capabilities: existing?._capabilities || a.capabilities,
+            linkedIssue: existing?.linkedIssue || a.linkedIssue,
+            ...(bs.metaName ? { metaName: bs.metaName } : {}),
+            ...(bs.metaDescription ? { metaDescription: bs.metaDescription } : {}),
+            ...(bs.tags?.length ? { tags: bs.tags } : {}),
             ...(existing ? {
               showVerbose: existing.showVerbose,
+              metaName: existing.metaName,
+              metaDescription: existing.metaDescription,
+              tags: existing.tags,
               _agentInfo: existing._agentInfo,
               _pendingControl: existing._pendingControl,
               _filteredMessages: existing._filteredMessages,
               contextUsage: existing.contextUsage,
               contextInProgress: existing.contextInProgress,
-            } : {}),
+            } : {
+              showVerbose: bs.showVerbose,
+            }),
           };
         });
 
@@ -490,15 +501,14 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
           if (data.name || data.description || data.tags?.length) {
             const chainIds = data.chainSessionIds as string[] | undefined;
             if (chainIds) chainIds.forEach(id => fetchedChains.add(id));
+            const metaPatch: Record<string, any> = {};
+            if (data.name) metaPatch.metaName = data.name;
+            if (data.description) metaPatch.metaDescription = data.description;
+            if (data.tags?.length) metaPatch.tags = data.tags;
             useStore.getState().updateProject(proj.id, p => ({
               ...p,
               sessions: p.sessions.map(sess =>
-                chainIds?.includes(sess.id) ? {
-                  ...sess,
-                  ...(data.name ? { metaName: data.name } : {}),
-                  ...(data.description ? { metaDescription: data.description } : {}),
-                  ...(data.tags?.length ? { tags: data.tags } : {}),
-                } : sess
+                chainIds?.includes(sess.id) ? { ...sess, ...metaPatch } : sess
               ),
               historicalSessions: (p.historicalSessions || []).map(h =>
                 chainIds?.includes(h.id) ? {
@@ -508,6 +518,13 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
                 } : h
               ),
             }));
+            // Push metadata to server cache for each matching agent session
+            if (Object.keys(metaPatch).length) {
+              const agentIds = (chainIds || []).filter(id => id.startsWith('agent_'));
+              for (const aid of agentIds) {
+                api('PATCH', `/api/agent-sessions/${aid}/browser-state`, metaPatch).catch(() => {});
+              }
+            }
           }
         }).catch(() => {});
       }
@@ -707,6 +724,7 @@ function registerGlobalFunctions() {
         cwd: proj.path,
         skipPermissions: true,
         ...(initialMessage ? { message: initialMessage } : {}),
+        ...(linkedIssue ? { linkedIssue } : {}),
       });
       setPendingAgentCreation(false);
 
@@ -849,6 +867,9 @@ function registerGlobalFunctions() {
 
             const sessionId = result.sessionId;
             const defaultViewMode = (agent.mode === 'terminal') ? 'tui' : 'chat';
+            // Carry forward linkedIssue from old session
+            const oldSess = proj.sessions.find(s => s.id === agentSessionId);
+            const oldLinkedIssue = oldSess?.linkedIssue;
             const session = {
               id: sessionId,
               title: 'Chain continuation',
@@ -863,7 +884,11 @@ function registerGlobalFunctions() {
               model: result.model || null,
               _capabilities: result.capabilities,
               cliSessionId: result.cliSessionId || null,
+              ...(oldLinkedIssue ? { linkedIssue: oldLinkedIssue } : {}),
             };
+            if (oldLinkedIssue) {
+              api('PATCH', `/api/agent-sessions/${sessionId}/browser-state`, { linkedIssue: oldLinkedIssue }).catch(() => {});
+            }
             store.updateProject(proj.id, p => {
               // Remove the old session (backend destroys it), add the new one
               const oldSession = p.sessions.find(s => s.id === agentSessionId);
@@ -1213,17 +1238,142 @@ function registerGlobalFunctions() {
     if (!proj?.parent_project_id) return;
     const parentProj = store.projects.find(p => p.id === proj.parent_project_id);
     if (!parentProj) return;
+    const branchName = proj.gitLog?.currentBranch;
+
+    const doRemove = async (deleteBranch: boolean) => {
+      try {
+        let url = `/api/projects/${parentProj.id}/git/worktrees?path=${encodeURIComponent(proj.path)}`;
+        if (deleteBranch && branchName) {
+          url += `&deleteBranch=${encodeURIComponent(branchName)}`;
+        }
+        await api('DELETE', url);
+        await refreshGitData(parentProj.id);
+        if (useStore.getState().activeProjectId === projectId) {
+          await selectProject(parentProj.id, parentProj.pe_id);
+        }
+        await reloadProjects();
+        store.addToast(parentProj.name, `Removed worktree${deleteBranch ? ` and branch ${branchName}` : ''}`, 'info');
+      } catch (e: any) { store.addToast(parentProj.name, `Failed: ${e.message}`, 'attention'); }
+    };
+
+    store.setModal({
+      type: 'confirm',
+      props: {
+        title: 'Remove Worktree',
+        message: branchName
+          ? `Remove worktree and delete branch "${branchName}"?`
+          : `Remove worktree at ${proj.path}?`,
+        confirmLabel: branchName ? 'Remove & Delete Branch' : 'Remove',
+        danger: true,
+        ...(branchName ? { secondaryAction: { label: 'Remove Only', onClick: () => doRemove(false) } } : {}),
+        onConfirm: () => doRemove(!!branchName),
+      },
+    });
+  };
+
+  // Create worktree from issue, close current session, open new issue session on worktree project
+  win.createIssueWorktree = async (linkedIssue: { type: 'issue' | 'pr'; number: number; title: string; url: string }) => {
+    const store = useStore.getState();
+    if (!store.activeProjectId) return;
+    const proj = store.projects.find(p => p.id === store.activeProjectId);
+    if (!proj) return;
+
+    // Find root project (if in a worktree child, go to parent)
+    const rootProj = proj.parent_project_id
+      ? store.projects.find(p => p.id === proj.parent_project_id) || proj
+      : proj;
+
+    // Build worktree name from issue number + title
+    const sanitized = `${linkedIssue.number}-${linkedIssue.title}`.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const branchName = sanitized;
+    const wtPath = rootProj.path + '/.atoo-studio/worktrees/' + sanitized;
+
+    // Find and close the current issue session
+    const activeSessions = proj.sessions.filter((s: any) => s.status !== 'ended');
+    const sessionIdx = activeSessions.findIndex((s: any) => s.linkedIssue?.number === linkedIssue.number);
+    const currentSession = sessionIdx >= 0 ? activeSessions[sessionIdx] : null;
+    const currentAgentType = currentSession?.agentType;
+    const currentAgentMode = currentSession?.agentMode;
+
     try {
-      await api('DELETE', `/api/projects/${parentProj.id}/git/worktrees?path=${encodeURIComponent(proj.path)}`);
-      await refreshGitData(parentProj.id);
-      // If we're viewing the removed worktree, switch to parent
-      if (store.activeProjectId === projectId) {
-        await selectProject(parentProj.id, parentProj.pe_id);
-      }
-      // Reload environment to remove the child project
+      // 1. Create the worktree with a new branch
+      await api('POST', `/api/projects/${rootProj.id}/git/worktrees`, { path: wtPath, branch: branchName, newBranch: true });
+      await refreshGitData(rootProj.id);
       await reloadProjects();
-      store.addToast(parentProj.name, `Removed worktree`, 'info');
-    } catch (e: any) { store.addToast(parentProj.name, `Failed: ${e.message}`, 'attention'); }
+
+      // 2. Close the current issue session
+      if (currentSession && sessionIdx >= 0) {
+        try { await api('DELETE', `/api/agent-sessions/${currentSession.id}`); } catch {}
+        store.updateProject(proj.id, p => ({
+          ...p,
+          sessions: p.sessions.map((s: any) => s.id === currentSession.id ? { ...s, status: 'ended' } : s),
+          activeSessionIdx: Math.max(0, sessionIdx - 1),
+        }));
+        destroyTerminal(`tui-${currentSession.id}`);
+      }
+
+      // 3. Find the worktree child project and switch to it
+      const updatedStore = useStore.getState();
+      const wtProject = updatedStore.projects.find(p => p.path === wtPath);
+      if (!wtProject) {
+        store.addToast(rootProj.name, 'Worktree created but project not found — try refreshing', 'attention');
+        return;
+      }
+
+      await selectProject(wtProject.id, wtProject.pe_id);
+
+      // 4. Create a new chained issue session on the worktree project
+      const agentType = currentAgentType || 'claude-code';
+      const agentMode = currentAgentMode || 'terminal+chat';
+      const message = `This session is dedicated to GitHub issue #${linkedIssue.number} ("${linkedIssue.title}"). ` +
+        `Use the gh CLI to retrieve issue details and work with this issue as needed. ` +
+        `You are working in a dedicated worktree branch "${branchName}".`;
+
+      try {
+        setPendingAgentCreation(true);
+        const result = await api('POST', '/api/agent-sessions', {
+          agentType,
+          cwd: wtPath,
+          skipPermissions: true,
+          message,
+          linkedIssue,
+        });
+        setPendingAgentCreation(false);
+
+        const sessionId = result.sessionId;
+        const defaultViewMode = (agentMode === 'terminal') ? 'tui' : 'chat';
+        const newSession = {
+          id: sessionId,
+          title: 'New session',
+          status: 'open' as const,
+          startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          messages: [],
+          lastMessage: '',
+          viewMode: defaultViewMode as 'chat' | 'tui',
+          agentType,
+          agentMode: agentMode as any,
+          permissionMode: result.mode || 'bypassPermissions',
+          model: result.model || null,
+          _capabilities: result.capabilities,
+          cliSessionId: result.cliSessionId || null,
+          linkedIssue,
+        };
+        useStore.getState().updateProject(wtProject.id, p => ({
+          ...p,
+          sessions: [...p.sessions, newSession],
+          activeSessionIdx: p.sessions.filter(s => s.status !== 'ended').length,
+        }));
+        useStore.getState().setActiveTabType('session');
+        connectAgentWs(sessionId);
+        fetchAndApplyMetadata(wtProject.id, sessionId, wtPath);
+        store.addToast(wtProject.name, `Issue #${linkedIssue.number} worktree session created`, 'success');
+      } catch (e: any) {
+        setPendingAgentCreation(false);
+        store.addToast(wtProject.name, `Session failed: ${e.message}`, 'attention');
+      }
+    } catch (e: any) {
+      store.addToast(rootProj.name, `Worktree failed: ${e.message}`, 'attention');
+    }
   };
 
   // File editor
@@ -1437,6 +1587,7 @@ function registerGlobalFunctions() {
       ...p,
       sessions: p.sessions.map(s => s.id === session.id ? { ...s, viewMode: mode as any } : s),
     }));
+    api('PATCH', `/api/agent-sessions/${session.id}/browser-state`, { viewMode: mode }).catch(() => {});
   };
 
   win.toggleVerbose = () => {
@@ -1446,10 +1597,12 @@ function registerGlobalFunctions() {
     const active = proj.sessions.filter(s => s.status !== 'ended');
     const session = active[proj.activeSessionIdx || 0];
     if (!session) return;
+    const newVerbose = !(session.showVerbose !== false);
     store.updateProject(proj.id, p => ({
       ...p,
-      sessions: p.sessions.map(s => s.id === session.id ? { ...s, showVerbose: !(s.showVerbose !== false) } : s),
+      sessions: p.sessions.map(s => s.id === session.id ? { ...s, showVerbose: newVerbose } : s),
     }));
+    api('PATCH', `/api/agent-sessions/${session.id}/browser-state`, { showVerbose: newVerbose }).catch(() => {});
   };
 
   win.togglePreviewPanel = () => {
@@ -1466,17 +1619,24 @@ function registerGlobalFunctions() {
     api('POST', '/api/mcp/get-metadata', { session_uuid: sessionId, cwd: projPath }).then((data: any) => {
       if (data.name || data.description || data.tags?.length) {
         const chainIds = data.chainSessionIds as string[] | undefined;
+        const metaPatch: Record<string, any> = {};
+        if (data.name) metaPatch.metaName = data.name;
+        if (data.description) metaPatch.metaDescription = data.description;
+        if (data.tags?.length) metaPatch.tags = data.tags;
         useStore.getState().updateProject(projId, p => ({
           ...p,
           sessions: p.sessions.map(sess =>
             (sess.id === sessionId || chainIds?.includes(sess.id)) ? {
               ...sess,
-              ...(data.name ? { metaName: data.name } : {}),
-              ...(data.description ? { metaDescription: data.description } : {}),
-              ...(data.tags?.length ? { tags: data.tags } : {}),
+              ...metaPatch,
             } : sess
           ),
         }));
+        // Push to server cache
+        const agentIds = [sessionId, ...(chainIds || [])].filter(id => id.startsWith('agent_'));
+        for (const aid of agentIds) {
+          api('PATCH', `/api/agent-sessions/${aid}/browser-state`, metaPatch).catch(() => {});
+        }
       }
     }).catch(() => {});
   };

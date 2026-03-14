@@ -49,6 +49,12 @@ export function getInjectedScript(): string {
     while (el && el.tagName !== 'SELECT') el = el.parentElement;
     if (!el) return;
 
+    // Don't intercept <select multiple> — it renders as a native list box, not a dropdown
+    if (el.multiple) return;
+
+    // Only intercept if the binding is available — otherwise let native behavior work
+    if (typeof window.__atoo_selectOpened !== 'function') return;
+
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
@@ -83,9 +89,15 @@ export function getInjectedScript(): string {
   var pickerFiredAt = 0;
 
   function firePickerOpened(el) {
+    // Only intercept if the binding is actually available — otherwise let the input work normally
+    console.log('[atoo] firePickerOpened called, type=' + el.type + ', binding=' + typeof window.__atoo_pickerOpened);
+    if (typeof window.__atoo_pickerOpened !== 'function') {
+      console.log('[atoo] pickerOpened binding NOT available');
+      return false;
+    }
     pickerFiredAt = Date.now();
     try {
-      window.__atoo_pickerOpened(JSON.stringify({
+      var payload = JSON.stringify({
         type: el.type,
         value: el.value,
         min: el.min || null,
@@ -93,8 +105,15 @@ export function getInjectedScript(): string {
         step: el.step || null,
         rect: getRect(el),
         selectorPath: getSelectorPath(el),
-      }));
-    } catch (err) { /* binding not available */ }
+      });
+      console.log('[atoo] calling pickerOpened with:', payload);
+      window.__atoo_pickerOpened(payload);
+      console.log('[atoo] pickerOpened call returned');
+      return true;
+    } catch (err) {
+      console.log('[atoo] pickerOpened call FAILED:', err);
+      return false;
+    }
   }
 
   function findPickerInput(target) {
@@ -105,14 +124,17 @@ export function getInjectedScript(): string {
   }
 
   document.addEventListener('mousedown', function(e) {
+    console.log('[atoo] mousedown target:', e.target.tagName, e.target.type || '');
     var el = findPickerInput(e.target);
     if (!el) return;
+
+    console.log('[atoo] picker input found:', el.type);
+    // Try to fire the binding — only block default behavior if successful
+    if (!firePickerOpened(el)) return;
 
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-
-    firePickerOpened(el);
   }, true);
 
   // Fallback: click listener in case mousedown doesn't fire reliably via CDP
@@ -122,11 +144,11 @@ export function getInjectedScript(): string {
     // Skip if mousedown already handled this (within 500ms)
     if (Date.now() - pickerFiredAt < 500) return;
 
+    if (!firePickerOpened(el)) return;
+
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-
-    firePickerOpened(el);
   }, true);
 
   // === TOOLTIP INTERCEPTION ===

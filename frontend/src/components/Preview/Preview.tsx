@@ -18,7 +18,7 @@ import {
 const MIN_VP = 200;
 
 /** Input with non-passive wheel listener for scroll-to-adjust. */
-function ScrollInput({ onScroll, ...props }: React.InputHTMLAttributes<HTMLInputElement> & {
+function ScrollInput({ onScroll, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onScroll'> & {
   onScroll: (delta: number, shift: boolean) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);

@@ -46,6 +46,13 @@ export interface AgentCapabilities {
 // Agent Session Info (returned by getInfo)
 // ═══════════════════════════════════════════════════════
 
+export interface LinkedIssueInfo {
+  type: 'issue' | 'pr';
+  number: number;
+  title: string;
+  url: string;
+}
+
 export interface AgentSessionInfo {
   sessionId: string;
   agentType: string;
@@ -58,6 +65,8 @@ export interface AgentSessionInfo {
   createdAt: number;
   /** The CLI's own session UUID (for chain link detection in the sidebar) */
   cliSessionId?: string;
+  /** Linked GitHub issue or PR */
+  linkedIssue?: LinkedIssueInfo;
 }
 
 // ═══════════════════════════════════════════════════════

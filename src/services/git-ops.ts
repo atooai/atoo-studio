@@ -297,3 +297,7 @@ export async function gitWorktreeAdd(cwd: string, path: string, branch?: string,
 export async function gitWorktreeRemove(cwd: string, worktreePath: string) {
   await git(['worktree', 'remove', worktreePath], cwd);
 }
+
+export async function gitBranchDelete(cwd: string, branch: string) {
+  await git(['branch', '-D', branch], cwd);
+}

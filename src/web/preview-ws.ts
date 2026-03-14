@@ -92,7 +92,10 @@ export function handlePreviewWsUpgrade(
       ws.on('message', async (raw) => {
         try {
           const msg = JSON.parse(raw.toString());
-          instance!.lastActivity = Date.now();
+          // Only count user interactions as activity (not periodic viewport/quality syncs)
+          if (msg.type !== 'viewport' && msg.type !== 'quality') {
+            instance!.lastActivity = Date.now();
+          }
           await handleClientMessage(projectId, tabId, msg, ws);
         } catch (err: any) {
           ws.send(JSON.stringify({ type: 'error', message: err.message }));
