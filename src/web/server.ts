@@ -32,9 +32,9 @@ import { searchSessionHistory, fetchSessionRange } from '../services/session-sea
 import { resolveChainHead, toRawHex, walkChain } from '../agents/lib/session-id-utils.js';
 import { db } from '../state/db.js';
 import { containersRouter, getContainerRuntimes } from '../handlers/containers.js';
-import { handleHookCallback } from '../agents/lib/claude/hooks.js';
-import { handleCodexNotifyCallback } from '../agents/lib/codex/notify.js';
+
 import { requireAuth, authenticateWsUpgrade, isAuthEnabled } from '../auth/middleware.js';
+import { validateMcpToken } from '../mcp/config.js';
 
 // Standalone shell terminals (not tied to Claude sessions)
 const shellTerminals = new Map<string, { pty: pty.IPty; cwd: string; projectPath: string }>();
@@ -102,109 +102,24 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
   });
 
-  // API routes for the React frontend
-
-  // List CLI environments (runtime)
-  app.get('/api/cli-environments', (_req, res) => {
-    const envs = Array.from(store.environments.values()).map((e) => ({
-      id: e.id,
-      machine_name: e.machineName,
-      directory: e.directory,
-      branch: e.branch,
-      registered_at: e.registeredAt.toISOString(),
-    }));
-    res.json(envs);
-  });
-
-
-  // Browse directories for folder picker
-  app.get('/api/browse', (req, res) => {
-    const dir = (req.query.path as string) || os.homedir();
-    try {
-      const resolved = path.resolve(dir);
-      const entries = fs.readdirSync(resolved, { withFileTypes: true });
-      const dirs = entries
-        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-        .map((e) => ({
-          name: e.name,
-          path: path.join(resolved, e.name),
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-      res.json({ current: resolved, parent: path.dirname(resolved), dirs });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
+  // ═══════════════════════════════════════════════════════
+  // MCP middleware — localhost check + per-session token
+  // ═══════════════════════════════════════════════════════
+  app.use('/api/mcp', (req, res, next) => {
+    // Localhost check
+    const addr = req.socket.remoteAddress;
+    if (addr !== '127.0.0.1' && addr !== '::1' && addr !== '::ffff:127.0.0.1') {
+      res.status(403).json({ error: 'MCP callbacks are localhost-only' });
+      return;
     }
-  });
-
-  app.post('/api/browse/mkdir', (req, res) => {
-    const { path: dirPath } = req.body;
-    if (!dirPath) return res.status(400).json({ error: 'path is required' });
-    try {
-      const resolved = path.resolve(dirPath);
-      fs.mkdirSync(resolved, { recursive: true });
-      res.json({ success: true, path: resolved });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
+    // Token check
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!token || !validateMcpToken(token)) {
+      res.status(401).json({ error: 'Invalid or missing MCP token' });
+      return;
     }
-  });
-
-  // Extract text from office documents (docx, xlsx, pptx)
-  app.post('/api/extract-text', async (req, res) => {
-    const { data, name } = req.body;
-    if (!data || !name) return res.status(400).json({ error: 'data and name are required' });
-
-    const ext = name.split('.').pop()?.toLowerCase();
-    const buf = Buffer.from(data, 'base64');
-
-    try {
-      let text = '';
-      if (ext === 'docx') {
-        const mammoth = await import('mammoth');
-        const result = await mammoth.default.extractRawText({ buffer: buf });
-        text = result.value;
-      } else if (ext === 'xlsx' || ext === 'xls') {
-        const XLSX = await import('xlsx');
-        const workbook = XLSX.read(buf, { type: 'buffer' });
-        const sheets: string[] = [];
-        for (const sheetName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sheetName];
-          const csv = XLSX.utils.sheet_to_csv(sheet);
-          sheets.push(`--- Sheet: ${sheetName} ---\n${csv}`);
-        }
-        text = sheets.join('\n\n');
-      } else if (ext === 'pptx') {
-        // pptx is a zip of XML slides — extract text from slide XML files
-        const { Readable } = await import('stream');
-        const unzipper = await import('unzipper');
-        const slides: { num: number; text: string }[] = [];
-        const stream = Readable.from(buf);
-        const directory = await (stream.pipe(unzipper.default.Parse()) as any);
-        for await (const entry of directory) {
-          const entryPath: string = entry.path;
-          if (entryPath.match(/^ppt\/slides\/slide\d+\.xml$/)) {
-            const xml: string = (await entry.buffer()).toString('utf-8');
-            // Extract text from <a:t> tags
-            const texts: string[] = [];
-            const re = /<a:t[^>]*>([\s\S]*?)<\/a:t>/g;
-            let m;
-            while ((m = re.exec(xml)) !== null) texts.push(m[1]);
-            const slideNum = parseInt(entryPath.match(/slide(\d+)/)?.[1] || '0');
-            if (texts.length) slides.push({ num: slideNum, text: texts.join(' ') });
-          } else {
-            entry.autodrain();
-          }
-        }
-        slides.sort((a, b) => a.num - b.num);
-        text = slides.map(s => `--- Slide ${s.num} ---\n${s.text}`).join('\n\n');
-      } else {
-        return res.status(400).json({ error: `Unsupported file type: .${ext}` });
-      }
-
-      res.json({ text });
-    } catch (err: any) {
-      console.error(`[web] extract-text error for ${name}:`, err.message);
-      res.status(500).json({ error: err.message });
-    }
+    next();
   });
 
   // MCP callback: report started TCP services
@@ -302,14 +217,6 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   });
 
   // Reject a serial request (user closed modal without connecting)
-  app.post('/api/mcp/reject-serial', (req, res) => {
-    const { requestId } = req.body;
-    if (!requestId) return res.status(400).json({ error: 'requestId required' });
-    serialManager.rejectRequest(requestId, new Error('User rejected the serial device request'));
-    serialManager.closeRequest(requestId);
-    res.json({ success: true });
-  });
-
   // MCP callback: suggest switching to another session
   app.post('/api/mcp/suggest-session-switch', async (req, res) => {
     const { session_uuid, refined_prompt, cwd, source_session_id } = req.body;
@@ -361,22 +268,6 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
   });
 
-  // Respond to a session-switch suggestion (called by frontend)
-  app.post('/api/mcp/respond-session-switch', (req, res) => {
-    const { requestId, action } = req.body;
-    if (!requestId || !action) {
-      return res.status(400).json({ error: 'requestId and action are required' });
-    }
-    const pending = pendingSessionSwitches.get(requestId);
-    if (!pending) {
-      return res.status(404).json({ error: 'No pending request with this ID' });
-    }
-    clearTimeout(pending.timeout);
-    pendingSessionSwitches.delete(requestId);
-    pending.resolve({ action });
-    res.json({ success: true });
-  });
-
   // MCP callback: open a file in the user's browser (with confirmation)
   app.post('/api/mcp/open-file', async (req, res) => {
     const { file_path } = req.body;
@@ -405,22 +296,6 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
-  });
-
-  // Respond to an open-file request (called by frontend)
-  app.post('/api/mcp/respond-open-file', (req, res) => {
-    const { requestId, action } = req.body;
-    if (!requestId || !action) {
-      return res.status(400).json({ error: 'requestId and action are required' });
-    }
-    const pending = pendingOpenFiles.get(requestId);
-    if (!pending) {
-      return res.status(404).json({ error: 'No pending request with this ID' });
-    }
-    clearTimeout(pending.timeout);
-    pendingOpenFiles.delete(requestId);
-    pending.resolve({ action });
-    res.json({ success: true });
   });
 
   // Helper: resolve chain UUIDs from a session UUID and project cwd
@@ -577,9 +452,150 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // ═══════════════════════════════════════════════════════
   // Auth middleware — protects all routes below this point
-  // Routes above (CA certs, MCP callbacks, hooks, codex) are exempt
+  // Routes above (CA certs, auth, MCP callbacks) are exempt
   // ═══════════════════════════════════════════════════════
   app.use('/api', requireAuth);
+
+  // List CLI environments (runtime)
+  app.get('/api/cli-environments', (_req, res) => {
+    const envs = Array.from(store.environments.values()).map((e) => ({
+      id: e.id,
+      machine_name: e.machineName,
+      directory: e.directory,
+      branch: e.branch,
+      registered_at: e.registeredAt.toISOString(),
+    }));
+    res.json(envs);
+  });
+
+  // Browse directories for folder picker
+  app.get('/api/browse', (req, res) => {
+    const dir = (req.query.path as string) || os.homedir();
+    try {
+      const resolved = path.resolve(dir);
+      const entries = fs.readdirSync(resolved, { withFileTypes: true });
+      const dirs = entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+        .map((e) => ({
+          name: e.name,
+          path: path.join(resolved, e.name),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.json({ current: resolved, parent: path.dirname(resolved), dirs });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/browse/mkdir', (req, res) => {
+    const { path: dirPath } = req.body;
+    if (!dirPath) return res.status(400).json({ error: 'path is required' });
+    try {
+      const resolved = path.resolve(dirPath);
+      fs.mkdirSync(resolved, { recursive: true });
+      res.json({ success: true, path: resolved });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Extract text from office documents (docx, xlsx, pptx)
+  app.post('/api/extract-text', async (req, res) => {
+    const { data, name } = req.body;
+    if (!data || !name) return res.status(400).json({ error: 'data and name are required' });
+
+    const ext = name.split('.').pop()?.toLowerCase();
+    const buf = Buffer.from(data, 'base64');
+
+    try {
+      let text = '';
+      if (ext === 'docx') {
+        const mammoth = await import('mammoth');
+        const result = await mammoth.default.extractRawText({ buffer: buf });
+        text = result.value;
+      } else if (ext === 'xlsx' || ext === 'xls') {
+        const XLSX = await import('xlsx');
+        const workbook = XLSX.read(buf, { type: 'buffer' });
+        const sheets: string[] = [];
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          sheets.push(`--- Sheet: ${sheetName} ---\n${csv}`);
+        }
+        text = sheets.join('\n\n');
+      } else if (ext === 'pptx') {
+        // pptx is a zip of XML slides — extract text from slide XML files
+        const { Readable } = await import('stream');
+        const unzipper = await import('unzipper');
+        const slides: { num: number; text: string }[] = [];
+        const stream = Readable.from(buf);
+        const directory = await (stream.pipe(unzipper.default.Parse()) as any);
+        for await (const entry of directory) {
+          const entryPath: string = entry.path;
+          if (entryPath.match(/^ppt\/slides\/slide\d+\.xml$/)) {
+            const xml: string = (await entry.buffer()).toString('utf-8');
+            // Extract text from <a:t> tags
+            const texts: string[] = [];
+            const re = /<a:t[^>]*>([\s\S]*?)<\/a:t>/g;
+            let m;
+            while ((m = re.exec(xml)) !== null) texts.push(m[1]);
+            const slideNum = parseInt(entryPath.match(/slide(\d+)/)?.[1] || '0');
+            if (texts.length) slides.push({ num: slideNum, text: texts.join(' ') });
+          } else {
+            entry.autodrain();
+          }
+        }
+        slides.sort((a, b) => a.num - b.num);
+        text = slides.map(s => `--- Slide ${s.num} ---\n${s.text}`).join('\n\n');
+      } else {
+        return res.status(400).json({ error: `Unsupported file type: .${ext}` });
+      }
+
+      res.json({ text });
+    } catch (err: any) {
+      console.error(`[web] extract-text error for ${name}:`, err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Frontend callbacks for MCP-initiated user prompts (serial, session switch, open file)
+  app.post('/api/reject-serial', (req, res) => {
+    const { requestId } = req.body;
+    if (!requestId) return res.status(400).json({ error: 'requestId required' });
+    serialManager.rejectRequest(requestId, new Error('User rejected the serial device request'));
+    serialManager.closeRequest(requestId);
+    res.json({ success: true });
+  });
+
+  app.post('/api/respond-session-switch', (req, res) => {
+    const { requestId, action } = req.body;
+    if (!requestId || !action) {
+      return res.status(400).json({ error: 'requestId and action are required' });
+    }
+    const pending = pendingSessionSwitches.get(requestId);
+    if (!pending) {
+      return res.status(404).json({ error: 'No pending request with this ID' });
+    }
+    clearTimeout(pending.timeout);
+    pendingSessionSwitches.delete(requestId);
+    pending.resolve({ action });
+    res.json({ success: true });
+  });
+
+  app.post('/api/respond-open-file', (req, res) => {
+    const { requestId, action } = req.body;
+    if (!requestId || !action) {
+      return res.status(400).json({ error: 'requestId and action are required' });
+    }
+    const pending = pendingOpenFiles.get(requestId);
+    if (!pending) {
+      return res.status(404).json({ error: 'No pending request with this ID' });
+    }
+    clearTimeout(pending.timeout);
+    pendingOpenFiles.delete(requestId);
+    pending.resolve({ action });
+    res.json({ success: true });
+  });
 
   // Mount changes API routes
   app.use(changesRouter);
@@ -724,39 +740,6 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     });
   });
 
-  // ═══════════════════════════════════════════════════════
-  // Claude Code Hooks Callback
-  // ═══════════════════════════════════════════════════════
-
-  app.post('/api/hooks/callback', (req, res) => {
-    const { token, payload } = req.body;
-    if (!token || !payload) {
-      return res.status(400).json({ error: 'Missing token or payload' });
-    }
-    try {
-      handleHookCallback(token, payload);
-    } catch (err: any) {
-      console.error(`[hooks] Callback error:`, err.message);
-    }
-    res.json({ ok: true });
-  });
-
-  // ═══════════════════════════════════════════════════════
-  // Codex Notify Callback
-  // ═══════════════════════════════════════════════════════
-
-  app.post('/api/codex/notify-callback', (req, res) => {
-    const { token, payload } = req.body;
-    if (!token || !payload) {
-      return res.status(400).json({ error: 'Missing token or payload' });
-    }
-    try {
-      handleCodexNotifyCallback(token, payload);
-    } catch (err: any) {
-      console.error(`[codex-notify] Callback error:`, err.message);
-    }
-    res.json({ ok: true });
-  });
 
   // ═══════════════════════════════════════════════════════
   // Agent Session Endpoints (abstract layer)
@@ -1108,19 +1091,35 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
             ws.send(JSON.stringify({ type: 'output', data: entry.scrollback }));
           }
 
-          // Register single shared onData handler if first client
+          // Register single shared onData handler if first client.
+          // PTY output is coalesced into ~16ms frames to avoid flicker:
+          // TUI apps (ink, etc.) redraw by emitting clear + new content as
+          // separate write() calls.  Without buffering, each chunk becomes
+          // its own WebSocket message and xterm may render an intermediate
+          // "cleared" frame, causing visible scroll-up-then-down flicker.
           if (!entry.handler) {
+            let pendingData = '';
+            let flushTimer: ReturnType<typeof setTimeout> | null = null;
+            const flushToClients = () => {
+              flushTimer = null;
+              if (!pendingData) return;
+              const msg = JSON.stringify({ type: 'output', data: pendingData });
+              pendingData = '';
+              for (const client of entry.clients) {
+                if (client.readyState === 1) {
+                  client.send(msg);
+                }
+              }
+            };
             entry.handler = ptyProcess.onData((data: string) => {
               // Append to scrollback buffer (ring-trim if too large)
               entry.scrollback += data;
               if (entry.scrollback.length > MAX_SCROLLBACK) {
                 entry.scrollback = entry.scrollback.slice(-MAX_SCROLLBACK);
               }
-              const msg = JSON.stringify({ type: 'output', data });
-              for (const client of entry.clients) {
-                if (client.readyState === 1) {
-                  client.send(msg);
-                }
+              pendingData += data;
+              if (!flushTimer) {
+                flushTimer = setTimeout(flushToClients, 16);
               }
             });
           }
@@ -1218,17 +1217,29 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
             }
 
             // Register single shared onData handler if first client
+            // (coalesced into ~16ms frames — same anti-flicker logic as terminal handler)
             if (!entry.handler) {
+              let pendingData = '';
+              let flushTimer: ReturnType<typeof setTimeout> | null = null;
+              const flushToClients = () => {
+                flushTimer = null;
+                if (!pendingData) return;
+                const msg = JSON.stringify({ type: 'output', data: pendingData });
+                pendingData = '';
+                for (const client of entry.clients) {
+                  if (client.readyState === 1) {
+                    client.send(msg);
+                  }
+                }
+              };
               entry.handler = ptyProcess.onData((data: string) => {
                 entry.scrollback += data;
                 if (entry.scrollback.length > MAX_SCROLLBACK) {
                   entry.scrollback = entry.scrollback.slice(-MAX_SCROLLBACK);
                 }
-                const msg = JSON.stringify({ type: 'output', data });
-                for (const client of entry.clients) {
-                  if (client.readyState === 1) {
-                    client.send(msg);
-                  }
+                pendingData += data;
+                if (!flushTimer) {
+                  flushTimer = setTimeout(flushToClients, 16);
                 }
               });
             }

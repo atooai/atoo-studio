@@ -8,7 +8,9 @@ import { ChatArea } from '../Chat/Chat';
 import { SessionsPanel } from '../Sessions/Sessions';
 import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
 import { PreviewPanel } from '../Preview/Preview';
+import { AgentTabIcon } from './AgentTabIcon';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
+import { useDraggableTabs } from '../../hooks/useDraggableTabs';
 
 export function Workspace() {
   const { activeProjectId, projects, activeTabType, previewVisible, rightPanelCollapsed } = useStore();
@@ -106,10 +108,56 @@ export function Workspace() {
 }
 
 function CenterTabs({ proj }: { proj: any }) {
-  const { activeTabType, setActiveTabType } = useStore();
+  const { activeTabType, setCtxMenu } = useStore();
   const activeSessions = proj.sessions.filter((s: any) => s.status !== 'ended');
   const terminals = proj.terminals || [];
   const isWorktreeProject = !!proj.parent_project_id;
+
+  // Drag-and-drop reordering for sessions
+  const sessionDrag = useDraggableTabs(useCallback((from: number, to: number) => {
+    (window as any).reorderSessions?.(proj.id, from, to);
+  }, [proj.id]));
+
+  // Drag-and-drop reordering for terminals
+  const termDrag = useDraggableTabs(useCallback((from: number, to: number) => {
+    (window as any).reorderTerminals?.(proj.id, from, to);
+  }, [proj.id]));
+
+  const showSessionCtx = (e: React.MouseEvent, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const count = activeSessions.length;
+    setCtxMenu({
+      x: e.clientX, y: e.clientY,
+      items: [
+        { label: 'Close', icon: '×', action: () => (window as any).closeSession(proj.id, idx) },
+        { label: 'Close All', icon: '⊗', danger: true, action: () => closeAllSessions(proj.id, activeSessions) },
+        ...(count > 1 ? [
+          { label: 'Close Others', icon: '⊖', action: () => closeOtherSessions(proj.id, activeSessions, idx) },
+          ...(idx < count - 1 ? [{ label: 'Close to the Right', icon: '⊳', action: () => closeSessionsRight(proj.id, activeSessions, idx) }] : []),
+          ...(idx > 0 ? [{ label: 'Close to the Left', icon: '⊲', action: () => closeSessionsLeft(proj.id, activeSessions, idx) }] : []),
+        ] : []),
+      ],
+    });
+  };
+
+  const showTermCtx = (e: React.MouseEvent, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const count = terminals.length;
+    setCtxMenu({
+      x: e.clientX, y: e.clientY,
+      items: [
+        { label: 'Close', icon: '×', action: () => (window as any).closeTerminal(proj.id, idx) },
+        { label: 'Close All', icon: '⊗', danger: true, action: () => closeAllTerminals(proj.id, terminals) },
+        ...(count > 1 ? [
+          { label: 'Close Others', icon: '⊖', action: () => closeOtherTerminals(proj.id, terminals, idx) },
+          ...(idx < count - 1 ? [{ label: 'Close to the Right', icon: '⊳', action: () => closeTerminalsRight(proj.id, terminals, idx) }] : []),
+          ...(idx > 0 ? [{ label: 'Close to the Left', icon: '⊲', action: () => closeTerminalsLeft(proj.id, terminals, idx) }] : []),
+        ] : []),
+      ],
+    });
+  };
 
   return (
     <div className={`center-tabs ${isWorktreeProject ? 'worktree-active' : ''}`}>
@@ -119,8 +167,15 @@ function CenterTabs({ proj }: { proj: any }) {
         const displayName = s.metaName || s.title || 'New session';
         const truncated = displayName.length > 16 ? displayName.substring(0, 16) + '…' : displayName;
         return (
-          <div key={s.id} className={`center-tab ${isActive ? 'active' : ''}`} onClick={() => (window as any).switchToSession(proj.id, i)} title={displayName}>
-            <span className={`tab-dot ${s.status}`}></span>
+          <div
+            key={s.id}
+            className={`center-tab ${isActive ? 'active' : ''}`}
+            onClick={() => (window as any).switchToSession(proj.id, i)}
+            onContextMenu={(e) => showSessionCtx(e, i)}
+            title={displayName}
+            {...sessionDrag.getTabDragProps(i)}
+          >
+            <AgentTabIcon agentType={s.agentType} status={s.status} />
             <span>{truncated}</span>{warn}
             <span className="tab-close" onClick={(e) => { e.stopPropagation(); (window as any).closeSession(proj.id, i); }}>×</span>
           </div>
@@ -131,7 +186,13 @@ function CenterTabs({ proj }: { proj: any }) {
       {terminals.map((t: any, i: number) => {
         const isActive = activeTabType === 'terminal' && i === (proj.activeTerminalIdx || 0);
         return (
-          <div key={t.id} className={`center-tab terminal-type ${isActive ? 'active' : ''}`} onClick={() => (window as any).switchToTerminal(proj.id, i)}>
+          <div
+            key={t.id}
+            className={`center-tab terminal-type ${isActive ? 'active' : ''}`}
+            onClick={() => (window as any).switchToTerminal(proj.id, i)}
+            onContextMenu={(e) => showTermCtx(e, i)}
+            {...termDrag.getTabDragProps(i)}
+          >
             <span className="tab-term-icon">›_</span>
             <span>{t.name || 'bash'}</span>
             <span className="tab-close" onClick={(e) => { e.stopPropagation(); (window as any).closeTerminal(proj.id, i); }}>×</span>
@@ -141,6 +202,50 @@ function CenterTabs({ proj }: { proj: any }) {
       <button className="center-tab-add" onClick={() => (window as any).addTerminal()} title="New terminal">+ <span className="add-label">Term</span></button>
     </div>
   );
+}
+
+// ── Bulk close helpers ──
+
+async function closeAllSessions(projId: string, sessions: any[]) {
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    await (window as any).closeSession(projId, i);
+  }
+}
+async function closeOtherSessions(projId: string, sessions: any[], keepIdx: number) {
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    if (i !== keepIdx) await (window as any).closeSession(projId, i > keepIdx ? i : i);
+  }
+}
+async function closeSessionsRight(projId: string, sessions: any[], fromIdx: number) {
+  for (let i = sessions.length - 1; i > fromIdx; i--) {
+    await (window as any).closeSession(projId, i);
+  }
+}
+async function closeSessionsLeft(projId: string, sessions: any[], fromIdx: number) {
+  for (let i = fromIdx - 1; i >= 0; i--) {
+    await (window as any).closeSession(projId, i);
+  }
+}
+
+async function closeAllTerminals(projId: string, terminals: any[]) {
+  for (let i = terminals.length - 1; i >= 0; i--) {
+    await (window as any).closeTerminal(projId, i);
+  }
+}
+async function closeOtherTerminals(projId: string, terminals: any[], keepIdx: number) {
+  for (let i = terminals.length - 1; i >= 0; i--) {
+    if (i !== keepIdx) await (window as any).closeTerminal(projId, i > keepIdx ? i : i);
+  }
+}
+async function closeTerminalsRight(projId: string, terminals: any[], fromIdx: number) {
+  for (let i = terminals.length - 1; i > fromIdx; i--) {
+    await (window as any).closeTerminal(projId, i);
+  }
+}
+async function closeTerminalsLeft(projId: string, terminals: any[], fromIdx: number) {
+  for (let i = fromIdx - 1; i >= 0; i--) {
+    await (window as any).closeTerminal(projId, i);
+  }
 }
 
 function ViewToggle({ session, proj }: { session: any; proj: any }) {

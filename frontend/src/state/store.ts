@@ -75,6 +75,9 @@ export interface AppState {
   // Session loading overlay
   sessionLoading: string | null; // label or null
 
+  // File upload progress
+  uploadProgress: { total: number; done: number; currentFile: string } | null;
+
   // Mobile layout
   isMobileLayout: boolean;
   mobileView: 'dashboard' | 'files' | 'git' | 'agents' | 'terminal';
@@ -133,6 +136,7 @@ export interface AppState {
   setCtxMenu: (menu: AppState['ctxMenu']) => void;
   setPendingSessionSwitch: (v: AppState['pendingSessionSwitch']) => void;
   setSessionLoading: (label: string | null) => void;
+  setUploadProgress: (v: AppState['uploadProgress']) => void;
   setIsMobileLayout: (v: boolean) => void;
   setMobileView: (v: 'dashboard' | 'files' | 'git' | 'agents' | 'terminal') => void;
   setMobileDrawerOpen: (v: boolean) => void;
@@ -186,6 +190,7 @@ export const useStore = create<AppState>((set, get) => ({
   ctxMenu: null,
   pendingSessionSwitch: null,
   sessionLoading: null,
+  uploadProgress: null,
   isMobileLayout: false,
   mobileView: 'dashboard',
   mobileDrawerOpen: false,
@@ -289,6 +294,7 @@ export const useStore = create<AppState>((set, get) => ({
   setCtxMenu: (menu) => set({ ctxMenu: menu }),
   setPendingSessionSwitch: (v) => set({ pendingSessionSwitch: v }),
   setSessionLoading: (label) => set({ sessionLoading: label }),
+  setUploadProgress: (v) => set({ uploadProgress: v }),
   setIsMobileLayout: (v) => set({ isMobileLayout: v }),
   setMobileView: (v) => set({ mobileView: v }),
   setMobileDrawerOpen: (v) => set({ mobileDrawerOpen: v }),

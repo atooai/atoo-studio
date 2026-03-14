@@ -12,7 +12,7 @@ import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
 import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
-import { generateHookToken, registerHookToken, removeHookToken } from '../lib/claude/hooks.js';
+
 import { precreateClaudeSession } from '../lib/session-precreate.js';
 
 /**
@@ -29,7 +29,6 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
   private cwd: string | null = null;
   private createdAt = Date.now();
   private destroyed = false;
-  private hookToken: string | null = null;
   private cliSessionId: string | null = null;
 
   constructor(sessionId: string) {
@@ -49,15 +48,10 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
     this.cliSessionId = resumeUuid;
 
     try {
-      // Hook token is still needed for hook callbacks (SessionStart, Stop, etc.)
-      this.hookToken = generateHookToken();
-      registerHookToken(this.hookToken, this.sessionId, this.cwd);
-
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
         resumeSessionUuid: resumeUuid,
-        hookToken: this.hookToken,
         isChainContinuation: options.isChainContinuation,
       });
 
@@ -76,11 +70,6 @@ export class ClaudeCodeTerminalAgent extends EventEmitter implements Agent {
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
-
-    if (this.hookToken) {
-      removeHookToken(this.hookToken);
-      this.hookToken = null;
-    }
 
     if (this.envId) {
       killCliProcess(this.envId);

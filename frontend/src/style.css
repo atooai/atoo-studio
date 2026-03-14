@@ -880,6 +880,63 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
   flex: 1;
   overflow-y: auto;
   padding: 0;
+  position: relative;
+}
+
+/* ── Upload overlay (within explorer panel) ── */
+.upload-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(10, 11, 15, 0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  backdrop-filter: blur(4px);
+}
+.upload-overlay-icon {
+  font-size: 32px;
+  color: var(--accent-blue);
+  animation: upload-bounce 1.2s ease-in-out infinite;
+}
+@keyframes upload-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.upload-overlay-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.upload-overlay-progress-bar {
+  width: 70%;
+  max-width: 180px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-surface-2);
+  overflow: hidden;
+}
+.upload-overlay-progress-fill {
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+.upload-overlay-stats {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.upload-overlay-file {
+  font-size: 10px;
+  color: var(--text-muted);
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
 }
 
 /* File Explorer Tree */
@@ -1664,12 +1721,58 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
 .center-tab .tab-dot.active { background: var(--accent-green); }
 .center-tab .tab-dot.open { background: var(--text-muted); }
 
+/* Agent icon in tabs (replaces dot for agent sessions) */
+.center-tab .tab-agent-icon {
+  width: 12px; height: 12px;
+  flex: 0 0 auto;
+}
+.center-tab .tab-agent-icon.attention { fill: var(--accent-amber); animation: pulse-dot 1.5s infinite; }
+.center-tab .tab-agent-icon.active { fill: var(--accent-green); }
+.center-tab .tab-agent-icon.open { fill: var(--text-muted); }
+
 /* Terminal tab icon */
 .center-tab .tab-term-icon {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--accent-green);
   font-weight: 700;
+}
+
+/* ── Tab drag-and-drop indicators ── */
+.tab-dragging {
+  opacity: 0.4 !important;
+}
+.tab-drop-before::before {
+  content: '';
+  position: absolute;
+  left: -1px; top: 2px; bottom: 2px;
+  width: 2px;
+  background: var(--accent-blue);
+  border-radius: 1px;
+  z-index: 2;
+}
+.tab-drop-after::after {
+  content: '';
+  position: absolute;
+  right: -1px; top: 2px; bottom: 2px;
+  width: 2px;
+  background: var(--accent-blue);
+  border-radius: 1px;
+  z-index: 2;
+}
+/* Override the active tab bottom border when showing drop indicator */
+.center-tab.active.tab-drop-after::after {
+  top: 2px; bottom: 2px;
+}
+.editor-tab.tab-drop-before::before,
+.editor-tab.tab-drop-after::after {
+  top: 2px; bottom: 2px;
+}
+
+/* File tree reveal highlight */
+.file-tree-highlight {
+  background: var(--accent-blue-dim, rgba(91, 138, 245, 0.15)) !important;
+  transition: background 0.3s;
 }
 
 .tab-close {
@@ -7553,6 +7656,32 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 .vcarousel-layout .tab-dot.open,
 .carousel-single-agent .tab-dot.open {
   background: var(--text-muted);
+}
+
+/* ── Agent icons in vertical carousel ── */
+.vcarousel-layout .tab-agent-icon,
+.carousel-single-agent .tab-agent-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.vcarousel-layout .tab-agent-icon.active,
+.carousel-single-agent .tab-agent-icon.active {
+  fill: var(--accent-green);
+  filter: drop-shadow(0 0 4px var(--accent-green));
+}
+
+.vcarousel-layout .tab-agent-icon.attention,
+.carousel-single-agent .tab-agent-icon.attention {
+  fill: var(--accent-amber);
+  filter: drop-shadow(0 0 4px var(--accent-amber));
+  animation: pulse-dot 1.5s infinite;
+}
+
+.vcarousel-layout .tab-agent-icon.open,
+.carousel-single-agent .tab-agent-icon.open {
+  fill: var(--text-muted);
 }
 
 /* Highlight entire tab row when attention */

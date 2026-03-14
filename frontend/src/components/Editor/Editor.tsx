@@ -1,8 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../../state/store';
 import { api } from '../../api';
 import { getFileIcon, isRenderable, isImageFile, escapeHtml, getMonacoLang, renderMd } from '../../utils';
 import { HexViewer } from './HexViewer';
+import { useDraggableTabs } from '../../hooks/useDraggableTabs';
 import type { EditorFile } from '../../types';
 
 let monacoEditor: any = null;
@@ -60,7 +61,7 @@ async function saveCurrentFile() {
 }
 
 export function EditorArea() {
-  const { openFiles, activeFileIdx, setOpenFiles, setActiveFileIdx, monacoReady } = useStore();
+  const { openFiles, activeFileIdx, setOpenFiles, setActiveFileIdx, setCtxMenu, monacoReady } = useStore();
   const isOpen = openFiles.length > 0;
 
   if (!isOpen) return <div className="editor-area" id="editor-area" style={{ height: 0 }}></div>;
@@ -78,6 +79,72 @@ export function EditorArea() {
     }
     setOpenFiles(newFiles);
     setActiveFileIdx(newIdx);
+  };
+
+  const closeAllTabs = () => {
+    disposeEditors();
+    setOpenFiles([]);
+    setActiveFileIdx(-1);
+  };
+
+  const closeOtherTabs = (keepIdx: number) => {
+    const kept = [openFiles[keepIdx]];
+    setOpenFiles(kept);
+    setActiveFileIdx(0);
+  };
+
+  const closeTabsRight = (fromIdx: number) => {
+    const kept = openFiles.slice(0, fromIdx + 1);
+    setOpenFiles(kept);
+    if (activeFileIdx > fromIdx) setActiveFileIdx(fromIdx);
+  };
+
+  const closeTabsLeft = (fromIdx: number) => {
+    const kept = openFiles.slice(fromIdx);
+    setOpenFiles(kept);
+    setActiveFileIdx(activeFileIdx >= fromIdx ? activeFileIdx - fromIdx : 0);
+  };
+
+  const reorderFiles = useCallback((from: number, to: number) => {
+    const s = useStore.getState();
+    const files = [...s.openFiles];
+    const [moved] = files.splice(from, 1);
+    files.splice(to, 0, moved);
+    // Adjust active index to follow the active file
+    let newIdx = s.activeFileIdx;
+    if (s.activeFileIdx === from) {
+      newIdx = to;
+    } else if (from < s.activeFileIdx && to >= s.activeFileIdx) {
+      newIdx = s.activeFileIdx - 1;
+    } else if (from > s.activeFileIdx && to <= s.activeFileIdx) {
+      newIdx = s.activeFileIdx + 1;
+    }
+    s.setOpenFiles(files);
+    s.setActiveFileIdx(newIdx);
+  }, []);
+
+  const editorDrag = useDraggableTabs(reorderFiles);
+
+  const showEditorCtx = (e: React.MouseEvent, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const f = openFiles[idx];
+    const count = openFiles.length;
+    setCtxMenu({
+      x: e.clientX, y: e.clientY,
+      items: [
+        { label: 'Close', icon: '×', action: () => closeTab(idx) },
+        { label: 'Close All', icon: '⊗', danger: true, action: closeAllTabs },
+        ...(count > 1 ? [
+          { label: 'Close Others', icon: '⊖', action: () => closeOtherTabs(idx) },
+          ...(idx < count - 1 ? [{ label: 'Close to the Right', icon: '⊳', action: () => closeTabsRight(idx) }] : []),
+          ...(idx > 0 ? [{ label: 'Close to the Left', icon: '⊲', action: () => closeTabsLeft(idx) }] : []),
+        ] : []),
+        { label: '', icon: '', separator: true, action: () => {} },
+        { label: 'Copy Path', icon: '⧉', action: () => navigator.clipboard.writeText(f.path).catch(() => {}) },
+        { label: 'Reveal in Explorer', icon: '◈', action: () => (window as any).revealInExplorer?.(f.fullPath) },
+      ],
+    });
   };
 
   const setViewMode = (mode: 'source' | 'diff' | 'rendered' | 'hex') => {
@@ -98,7 +165,13 @@ export function EditorArea() {
           const icon = getFileIcon(name);
           const isActive = i === activeFileIdx;
           return (
-            <div key={f.path} className={`editor-tab ${isActive ? 'active' : ''}`} onClick={() => setActiveFileIdx(i)}>
+            <div
+              key={f.path}
+              className={`editor-tab ${isActive ? 'active' : ''}`}
+              onClick={() => setActiveFileIdx(i)}
+              onContextMenu={(e) => showEditorCtx(e, i)}
+              {...editorDrag.getTabDragProps(i)}
+            >
               <span className="editor-tab-icon">{icon}</span>
               <span className="editor-tab-name">{name}</span>
               {f.isModified && <span className="editor-tab-modified"></span>}

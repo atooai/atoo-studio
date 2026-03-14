@@ -26,7 +26,7 @@ export function SerialModal({ requestId, onClose }: SerialModalProps) {
     return () => {
       // Cleanup on unmount if not connected (user closed modal without connecting)
       if (statusRef.current !== 'connected') {
-        api('POST', '/api/mcp/reject-serial', { requestId }).catch(() => {});
+        api('POST', '/api/reject-serial', { requestId }).catch(() => {});
         useStore.getState().removeSerialRequest(requestId);
       }
     };
@@ -77,7 +77,7 @@ export function SerialModal({ requestId, onClose }: SerialModalProps) {
   const handleCancel = () => {
     if (status === 'connected') return; // Don't close while connected
     // Notify server that the user rejected the request
-    api('POST', '/api/mcp/reject-serial', { requestId }).catch(() => {});
+    api('POST', '/api/reject-serial', { requestId }).catch(() => {});
     removeSerialRequest(requestId);
     onClose();
   };

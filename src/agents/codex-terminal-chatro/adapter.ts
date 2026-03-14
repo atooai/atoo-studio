@@ -18,7 +18,7 @@ import { forkEventsToResumable } from '../lib/claude/jsonl-writer.js';
 import { getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
 import { spawnCodexCliProcess } from './spawner.js';
 import { CodexJsonlWatcher } from './jsonl-watcher.js';
-import { generateNotifyToken, registerNotifyToken, removeNotifyToken } from '../lib/codex/notify.js';
+
 import { precreateCodexSession } from '../lib/session-precreate.js';
 
 /**
@@ -40,7 +40,6 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
   private pendingToolUses = new Map<string, { name: string; input: any }>();
   private cliSessionId: string | null = null;
   private resumeSessionUuid: string | null = null;
-  private notifyToken: string | null = null;
 
   constructor(sessionId: string) {
     super();
@@ -55,10 +54,6 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
     this.cliSessionId = resumeUuid;
 
     try {
-      // Notify token is still needed for callbacks (agent-turn-complete, etc.)
-      this.notifyToken = generateNotifyToken();
-      registerNotifyToken(this.notifyToken, this.sessionId, this.cwd);
-
       if (options.resumeSessionUuid) {
         this.resumeSessionUuid = options.resumeSessionUuid;
 
@@ -71,7 +66,6 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
         resumeSessionUuid: resumeUuid,
-        notifyToken: this.notifyToken,
         isChainContinuation: options.isChainContinuation,
       });
 
@@ -97,11 +91,6 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
     if (this.jsonlWatcher) {
       this.jsonlWatcher.stop();
       this.jsonlWatcher = null;
-    }
-
-    if (this.notifyToken) {
-      removeNotifyToken(this.notifyToken);
-      this.notifyToken = null;
     }
 
     if (this.envId) {

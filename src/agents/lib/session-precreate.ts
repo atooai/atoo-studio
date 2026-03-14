@@ -100,10 +100,22 @@ export function precreateCodexSession(cwd: string): string {
     const lines = content.split('\n').filter(l => l.trim());
     const headerLines = lines.slice(0, 2);
 
-    // Replace the donor's UUID with our new one in both lines
+    // Replace the donor's UUID and cwd with our new values in both lines
     const donorUuid = extractCodexUuid(headerLines[0]);
+    const resolvedCwd = path.resolve(cwd);
     const newHeader = headerLines
-      .map(line => donorUuid ? line.replace(new RegExp(donorUuid, 'g'), uuid) : line)
+      .map(line => {
+        if (donorUuid) line = line.replace(new RegExp(donorUuid, 'g'), uuid);
+        // Update cwd in session_meta payload
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed?.type === 'session_meta' && parsed?.payload?.cwd) {
+            parsed.payload.cwd = resolvedCwd;
+            return JSON.stringify(parsed);
+          }
+        } catch {}
+        return line;
+      })
       .join('\n') + '\n';
 
     fs.writeFileSync(targetPath, newHeader, { mode: 0o600 });

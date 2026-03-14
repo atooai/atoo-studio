@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -12,6 +13,27 @@ const __mcp_config_dir = path.dirname(fileURLToPath(import.meta.url));
 const IS_DEV = !__mcp_config_dir.includes('/dist/src');
 
 let cachedPath: string | null = null;
+
+// ═══════════════════════════════════════════════════════
+// Per-session MCP token registry
+// ═══════════════════════════════════════════════════════
+
+const mcpTokens = new Set<string>();
+
+/** Register an MCP token as valid. */
+export function registerMcpToken(token: string): void {
+  mcpTokens.add(token);
+}
+
+/** Remove an MCP token (called on session cleanup). */
+export function removeMcpToken(token: string): void {
+  mcpTokens.delete(token);
+}
+
+/** Check if an MCP token is valid. */
+export function validateMcpToken(token: string): boolean {
+  return mcpTokens.has(token);
+}
 
 /** Returns the command, args, and env needed to launch the MCP server process. */
 export function getMcpServerDef(): { command: string; args: string[]; env: Record<string, string> } {
@@ -114,13 +136,16 @@ export function getMcpConfigPath(sessionUuid?: string): string {
   if (!sessionUuid) {
     if (cachedPath) return cachedPath;
 
+    const token = crypto.randomUUID();
+    registerMcpToken(token);
+
     const def = getMcpServerDef();
     const config = {
       mcpServers: {
         'atoo-studio': {
           command: def.command,
           args: def.args,
-          env: def.env,
+          env: { ...def.env, ATOO_MCP_TOKEN: token },
         },
       },
     };
@@ -133,8 +158,11 @@ export function getMcpConfigPath(sessionUuid?: string): string {
     return CONFIG_PATH;
   }
 
-  // Per-session config with session UUID in env
+  // Per-session config with session UUID and unique MCP token
   const sessionConfigPath = path.join(CONFIG_DIR, `mcp-config-${sessionUuid}.json`);
+  const token = crypto.randomUUID();
+  registerMcpToken(token);
+
   const def = getMcpServerDef();
   const config = {
     mcpServers: {
@@ -144,6 +172,7 @@ export function getMcpConfigPath(sessionUuid?: string): string {
         env: {
           ...def.env,
           ATOO_CURRENT_SESSION_UUID: sessionUuid,
+          ATOO_MCP_TOKEN: token,
         },
       },
     },
@@ -162,10 +191,17 @@ export function getMcpConfigPath(sessionUuid?: string): string {
 export function cleanupMcpConfig(sessionUuid: string): void {
   const sessionConfigPath = path.join(CONFIG_DIR, `mcp-config-${sessionUuid}.json`);
   try {
-    fs.unlinkSync(sessionConfigPath);
+    // Remove the MCP token from the registry before deleting the config file
+    const content = fs.readFileSync(sessionConfigPath, 'utf-8');
+    const config = JSON.parse(content);
+    const token = config?.mcpServers?.['atoo-studio']?.env?.ATOO_MCP_TOKEN;
+    if (token) removeMcpToken(token);
   } catch {
-    // File may not exist
+    // File may not exist or be unparseable
   }
+  try {
+    fs.unlinkSync(sessionConfigPath);
+  } catch {}
 }
 
 /**

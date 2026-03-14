@@ -4,6 +4,25 @@ import { api } from '../../api';
 import { getFileIconSvg, FOLDER_ARROW_CLOSED, FOLDER_ARROW_OPEN } from '../../icons';
 import type { FileNode, GitChange } from '../../types';
 
+function UploadOverlay() {
+  const { uploadProgress } = useStore();
+  if (!uploadProgress) return null;
+  const { total, done, currentFile } = uploadProgress;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const fileName = currentFile.split('/').pop() || currentFile;
+  return (
+    <div className="upload-overlay">
+      <div className="upload-overlay-icon">&#x21E7;</div>
+      <div className="upload-overlay-title">Uploading files...</div>
+      <div className="upload-overlay-progress-bar">
+        <div className="upload-overlay-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="upload-overlay-stats">{done} / {total} files</div>
+      <div className="upload-overlay-file" title={currentFile}>{fileName}</div>
+    </div>
+  );
+}
+
 const GIT_STATUS_MAP: Record<string, { cls: string; label: string }> = {
   'M': { cls: 'M', label: 'M' },
   'A': { cls: 'A', label: 'A' },
@@ -148,6 +167,21 @@ export function FileTree() {
     <>
       <FileToolbar proj={proj} changeCount={changeCount} />
       <div className="panel-content" id="files-panel" tabIndex={0} onKeyDown={handleKeyDown}
+        onContextMenu={(e) => {
+          // Only trigger on empty area (not on file/folder items which have their own handler)
+          if ((e.target as HTMLElement).closest('.file-tree-item, .file-flat-item')) return;
+          e.preventDefault();
+          const { setCtxMenu } = useStore.getState();
+          setCtxMenu({
+            x: e.clientX, y: e.clientY,
+            items: [
+              { label: 'New File', icon: '+', action: () => (window as any).newFileInDir?.('.') },
+              { label: 'New Folder', icon: '+', action: () => (window as any).newFolderInDir?.('.') },
+              { label: '', icon: '', separator: true, action: () => {} },
+              { label: 'Copy Path', icon: '⧉', action: () => navigator.clipboard.writeText(proj.path).catch(() => {}) },
+            ],
+          });
+        }}
         onDragOver={(e) => {
           e.preventDefault();
           if (e.dataTransfer) {
@@ -159,6 +193,7 @@ export function FileTree() {
         onDragLeave={(e) => { e.currentTarget.classList.remove('drop-root'); }}
         onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('drop-root'); (window as any).dropRoot(e.dataTransfer); }}
       >
+        <UploadOverlay />
         {fileFilter === 'changed'
           ? <ChangedFiles gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} />
           : fileView === 'flat'

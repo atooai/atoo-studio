@@ -8,6 +8,7 @@ import { SessionsPanel } from '../Sessions/Sessions';
 import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
 import { PreviewPanel } from '../Preview/Preview';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
+import { AgentTabIcon } from './AgentTabIcon';
 
 const HOVER_DELAY = 400; // ms before hover triggers scroll
 
@@ -162,11 +163,13 @@ function VerticalCarousel({
   renderHeader,
   renderContent,
   onClose,
+  onContextMenu,
 }: {
   items: any[];
   renderHeader: (item: any, idx: number) => React.ReactNode;
   renderContent: (item: any, idx: number) => React.ReactNode;
   onClose?: (idx: number) => void;
+  onContextMenu?: (idx: number, e: React.MouseEvent) => void;
 }) {
   const [focusedIdx, setFocusedIdx] = React.useState(0);
   const [animDir, setAnimDir] = React.useState<'up' | 'down' | null>(null);
@@ -199,7 +202,7 @@ function VerticalCarousel({
       {above.length > (peekAbove ? 1 : 0) && (
         <div className="vcarousel-stack vcarousel-stack-top">
           {above.slice(0, peekAbove ? -1 : undefined).map((item: any, i: number) => (
-            <div key={item.id} className="vcarousel-tab" onMouseEnter={() => switchTo(i)} onClick={() => switchTo(i)}>
+            <div key={item.id} className="vcarousel-tab" onMouseEnter={() => switchTo(i)} onClick={() => switchTo(i)} onContextMenu={onContextMenu ? (e) => onContextMenu(i, e) : undefined}>
               {renderHeader(item, i)}
               {onClose && <span className="vcarousel-close" onClick={(e) => { e.stopPropagation(); onClose(i); }}>&times;</span>}
             </div>
@@ -225,7 +228,7 @@ function VerticalCarousel({
       {/* Focused item */}
       {focused && (
         <div className={`vcarousel-active ${animDir === 'up' ? 'vcarousel-enter-up' : animDir === 'down' ? 'vcarousel-enter-down' : ''}`} key={focused.id}>
-          <div className="vcarousel-active-header">
+          <div className="vcarousel-active-header" onContextMenu={onContextMenu ? (e) => onContextMenu(idx, e) : undefined}>
             {renderHeader(focused, idx)}
             {onClose && <span className="vcarousel-close" onClick={(e) => { e.stopPropagation(); onClose(idx); }}>&times;</span>}
           </div>
@@ -270,11 +273,27 @@ function VerticalCarousel({
    Sessions slide: agents (vertical carousel) | panels (fixed right)
    ══════════════════════════════════════════════════════ */
 function SessionsSlide({ proj }: { proj: any }) {
-  const { rightPanelTab, setRightPanelTab } = useStore();
+  const { rightPanelTab, setRightPanelTab, setCtxMenu } = useStore();
   const { status: ghStatus } = useGitHubStatus(proj.id);
   const ghAvailable = ghStatus?.available ?? false;
 
   const activeSessions = proj.sessions.filter((s: any) => s.status !== 'ended');
+
+  const showSessionCtx = (e: React.MouseEvent, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const count = activeSessions.length;
+    setCtxMenu({
+      x: e.clientX, y: e.clientY,
+      items: [
+        { label: 'Close', icon: '×', action: () => (window as any).closeSession(proj.id, idx) },
+        { label: 'Close All', icon: '⊗', danger: true, action: () => { for (let i = count - 1; i >= 0; i--) (window as any).closeSession(proj.id, i); } },
+        ...(count > 1 ? [
+          { label: 'Close Others', icon: '⊖', action: () => { for (let i = count - 1; i >= 0; i--) { if (i !== idx) (window as any).closeSession(proj.id, i); } } },
+        ] : []),
+      ],
+    });
+  };
 
   return (
     <div className="carousel-sessions-layout">
@@ -293,8 +312,8 @@ function SessionsSlide({ proj }: { proj: any }) {
           </div>
         ) : activeSessions.length === 1 ? (
           <div className="carousel-single-agent">
-            <div className="vcarousel-active-header">
-              <span className={`tab-dot ${activeSessions[0].status}`}></span>
+            <div className="vcarousel-active-header" onContextMenu={(e) => showSessionCtx(e, 0)}>
+              <AgentTabIcon agentType={activeSessions[0].agentType} status={activeSessions[0].status} />
               <span>{activeSessions[0].title || 'Claude Session'}</span>
               <span className="vcarousel-close" onClick={() => (window as any).closeSession(proj.id, 0)}>&times;</span>
             </div>
@@ -304,9 +323,10 @@ function SessionsSlide({ proj }: { proj: any }) {
           <VerticalCarousel
             items={activeSessions}
             onClose={(i) => (window as any).closeSession(proj.id, i)}
+            onContextMenu={(i, e) => showSessionCtx(e, i)}
             renderHeader={(s, i) => (
               <>
-                <span className={`tab-dot ${s.status}`}></span>
+                <AgentTabIcon agentType={s.agentType} status={s.status} />
                 <span className="vcarousel-tab-title">{s.title || `Session ${i + 1}`}</span>
               </>
             )}
@@ -336,7 +356,24 @@ function SessionsSlide({ proj }: { proj: any }) {
    Terminals slide (vertical carousel, same pattern)
    ══════════════════════════════════════════════════════ */
 function TerminalsSlide({ proj }: { proj: any }) {
+  const { setCtxMenu } = useStore();
   const terminals = proj.terminals || [];
+
+  const showTermCtx = (e: React.MouseEvent, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const count = terminals.length;
+    setCtxMenu({
+      x: e.clientX, y: e.clientY,
+      items: [
+        { label: 'Close', icon: '×', action: () => (window as any).closeTerminal(proj.id, idx) },
+        { label: 'Close All', icon: '⊗', danger: true, action: () => { for (let i = count - 1; i >= 0; i--) (window as any).closeTerminal(proj.id, i); } },
+        ...(count > 1 ? [
+          { label: 'Close Others', icon: '⊖', action: () => { for (let i = count - 1; i >= 0; i--) { if (i !== idx) (window as any).closeTerminal(proj.id, i); } } },
+        ] : []),
+      ],
+    });
+  };
 
   if (terminals.length === 0) {
     return (
@@ -351,7 +388,7 @@ function TerminalsSlide({ proj }: { proj: any }) {
   if (terminals.length === 1) {
     return (
       <div className="carousel-single-terminal">
-        <div className="vcarousel-active-header">
+        <div className="vcarousel-active-header" onContextMenu={(e) => showTermCtx(e, 0)}>
           <span className="tab-term-icon">›_</span>
           <span>{terminals[0].name || 'bash'}</span>
           <span className="vcarousel-close" onClick={() => (window as any).closeTerminal(proj.id, 0)}>&times;</span>
@@ -365,6 +402,7 @@ function TerminalsSlide({ proj }: { proj: any }) {
     <VerticalCarousel
       items={terminals}
       onClose={(i) => (window as any).closeTerminal(proj.id, i)}
+      onContextMenu={(i, e) => showTermCtx(e, i)}
       renderHeader={(t, i) => (
         <>
           <span className="tab-term-icon">›_</span>

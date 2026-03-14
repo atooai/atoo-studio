@@ -16,11 +16,7 @@ import { getPty, killCliProcess, registerActivitySession } from '../../spawner.j
 import { spawnTerminalCliProcess } from './spawner.js';
 import { JsonlWatcher, type SubagentMetadata } from './jsonl-watcher.js';
 import { fsSessionScanner } from '../lib/claude/fs-sessions.js';
-import {
-  generateHookToken,
-  registerHookToken,
-  removeHookToken,
-} from '../lib/claude/hooks.js';
+
 import { precreateClaudeSession } from '../lib/session-precreate.js';
 
 /**
@@ -42,7 +38,6 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
   private events: SessionEvent[] = []; // canonical event store
   private pendingToolUses = new Map<string, { name: string; input: any }>();
   private sidechainSessions = new Map<string, string>(); // sessionId → parentToolUseId
-  private hookToken: string | null = null;
   private cliSessionId: string | null = null; // CLI's own session UUID (JSONL filename)
   private resumeSessionUuid: string | null = null; // Original session UUID for parent linking
   private preloadedUuids = new Set<string>(); // UUIDs from pre-loaded historical events
@@ -84,16 +79,11 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
         console.error(`[terminal-chatro] JSONL watcher error:`, err.message);
       });
 
-      // Hook token is still needed for hook callbacks (SessionStart, Stop, etc.)
-      this.hookToken = generateHookToken();
-      registerHookToken(this.hookToken, this.sessionId, this.cwd);
-
       // Spawn the terminal PTY — always with --resume since we pre-created the file
       this.envId = spawnTerminalCliProcess({
         skipPermissions: options.skipPermissions,
         cwd: this.cwd,
         resumeSessionUuid: resumeUuid,
-        hookToken: this.hookToken,
         isChainContinuation: options.isChainContinuation,
       });
 
@@ -115,11 +105,6 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
-
-    if (this.hookToken) {
-      removeHookToken(this.hookToken);
-      this.hookToken = null;
-    }
 
     if (this.jsonlWatcher) {
       this.jsonlWatcher.stop();

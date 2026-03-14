@@ -2,17 +2,15 @@
  * Codex Terminal+ChatRO spawn logic.
  * Spawns a plain `codex` PTY or `codex resume <uuid>`.
  */
+import crypto from 'crypto';
 import os from 'os';
 import { spawnProcess } from '../../spawner.js';
-import { WEB_PORT } from '../../config.js';
-import { setupCodexNotify } from '../lib/codex/notify.js';
-import { getMcpServerDef, MCP_SYSTEM_PROMPT, CHAIN_SYSTEM_PROMPT } from '../../mcp/config.js';
+import { getMcpServerDef, MCP_SYSTEM_PROMPT, CHAIN_SYSTEM_PROMPT, registerMcpToken } from '../../mcp/config.js';
 
 export function spawnCodexCliProcess(options: {
   skipPermissions?: boolean;
   cwd?: string;
   resumeSessionUuid?: string;
-  notifyToken?: string;
   isChainContinuation?: boolean;
 }): string {
   const cwd = options.cwd || process.env.HOME || os.homedir();
@@ -24,10 +22,13 @@ export function spawnCodexCliProcess(options: {
   if (options.skipPermissions) baseArgs.push('--full-auto');
 
   // Inject MCP server config via -c flags (per-process, doesn't affect other codex instances)
+  const mcpToken = crypto.randomUUID();
+  registerMcpToken(mcpToken);
   const mcp = getMcpServerDef();
+  const mcpEnv = { ...mcp.env, ATOO_MCP_TOKEN: mcpToken };
   baseArgs.push('-c', `mcp_servers.atoo-studio.command="${mcp.command}"`);
   baseArgs.push('-c', `mcp_servers.atoo-studio.args=${JSON.stringify(mcp.args)}`);
-  for (const [key, value] of Object.entries(mcp.env)) {
+  for (const [key, value] of Object.entries(mcpEnv)) {
     baseArgs.push('-c', `mcp_servers.atoo-studio.env.${key}="${value}"`);
   }
 
@@ -46,16 +47,7 @@ export function spawnCodexCliProcess(options: {
     args = [...baseArgs];
   }
 
-  // Ensure notify script + config are ready
-  setupCodexNotify();
-
   const env = { ...process.env };
-
-  // Inject notify callback env vars (like Claude's hook token)
-  if (options.notifyToken) {
-    env.ATOO_HOOK_TOKEN = options.notifyToken;
-    env.ATOO_WEB_PORT = String(WEB_PORT);
-  }
 
   const { envId } = spawnProcess({
     command,

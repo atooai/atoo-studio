@@ -651,6 +651,11 @@ function restoreProjectViewState(projectId: string) {
 function registerGlobalFunctions() {
   const win = window as any;
 
+  // Disable browser default context menu page-wide
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+  });
+
   // Global Ctrl+S: save current editor file, prevent browser save dialog
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -918,6 +923,57 @@ function registerGlobalFunctions() {
       waitForTerminal();
     } catch (e: any) {
       store.addToast(proj.name, `Failed to create terminal: ${e.message}`, 'attention');
+    }
+  };
+
+  // ── Tab reordering ──
+
+  win.reorderSessions = (projId: string, fromIdx: number, toIdx: number) => {
+    const store = useStore.getState();
+    store.updateProject(projId, p => {
+      const active = p.sessions.filter((s: any) => s.status !== 'ended');
+      const ended = p.sessions.filter((s: any) => s.status === 'ended');
+      const [moved] = active.splice(fromIdx, 1);
+      active.splice(toIdx, 0, moved);
+      // Adjust active index to follow the currently selected session
+      let newIdx = p.activeSessionIdx ?? 0;
+      if (newIdx === fromIdx) {
+        newIdx = toIdx;
+      } else if (fromIdx < newIdx && toIdx >= newIdx) {
+        newIdx--;
+      } else if (fromIdx > newIdx && toIdx <= newIdx) {
+        newIdx++;
+      }
+      return { ...p, sessions: [...active, ...ended], activeSessionIdx: newIdx };
+    });
+  };
+
+  win.reorderTerminals = (projId: string, fromIdx: number, toIdx: number) => {
+    const store = useStore.getState();
+    store.updateProject(projId, p => {
+      const terms = [...p.terminals];
+      const [moved] = terms.splice(fromIdx, 1);
+      terms.splice(toIdx, 0, moved);
+      let newIdx = p.activeTerminalIdx ?? 0;
+      if (newIdx === fromIdx) {
+        newIdx = toIdx;
+      } else if (fromIdx < newIdx && toIdx >= newIdx) {
+        newIdx--;
+      } else if (fromIdx > newIdx && toIdx <= newIdx) {
+        newIdx++;
+      }
+      return { ...p, terminals: terms, activeTerminalIdx: newIdx };
+    });
+  };
+
+  win.revealInExplorer = (fullPath: string) => {
+    // Expand file tree to the given path by clicking through the tree
+    // For now, scroll the file-tree item into view if it exists
+    const el = document.querySelector(`[data-filepath="${CSS.escape(fullPath)}"]`);
+    if (el) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('file-tree-highlight');
+      setTimeout(() => el.classList.remove('file-tree-highlight'), 2000);
     }
   };
 
@@ -1536,6 +1592,14 @@ function registerGlobalFunctions() {
   win.createEnvironmentFromStart = createEnvironmentFromStart;
   win.createEnvironmentFromDropdown = createEnvironmentFromDropdown;
   win.showCtxMenu = buildFileCtxMenu;
+  win.newFileInDir = (dirPath: string) => {
+    const proj = useStore.getState().getActiveProject();
+    if (proj) ctxNewFile(dirPath, proj);
+  };
+  win.newFolderInDir = (dirPath: string) => {
+    const proj = useStore.getState().getActiveProject();
+    if (proj) ctxNewFolder(dirPath, proj);
+  };
   win.deleteFileOrFolder = (filePath: string, isDir: boolean) => {
     const proj = useStore.getState().getActiveProject();
     if (proj) ctxDelete(filePath, proj, isDir);
@@ -2253,6 +2317,9 @@ async function handleNativeFileDrop(destRelDir: string, dataTransfer: DataTransf
 
   if (filesToUpload.length === 0) return;
 
+  const total = filesToUpload.length;
+  store.setUploadProgress({ total, done: 0, currentFile: 'Creating directories...' });
+
   // Collect unique directories to create
   const dirsToCreate = new Set<string>();
   for (const { relPath } of filesToUpload) {
@@ -2270,6 +2337,7 @@ async function handleNativeFileDrop(destRelDir: string, dataTransfer: DataTransf
   // Upload files
   let uploaded = 0;
   for (const { relPath, file } of filesToUpload) {
+    store.setUploadProgress({ total, done: uploaded, currentFile: relPath });
     try {
       const fullPath = basePath + '/' + relPath;
       const buffer = await file.arrayBuffer();
@@ -2281,8 +2349,11 @@ async function handleNativeFileDrop(destRelDir: string, dataTransfer: DataTransf
       uploaded++;
     } catch (e: any) {
       store.addToast(proj.name, `Failed to upload ${relPath}: ${e.message}`, 'attention');
+      uploaded++; // still count toward progress
     }
   }
+
+  store.setUploadProgress(null);
 
   if (uploaded > 0) {
     store.addToast(proj.name, `Uploaded ${uploaded} file${uploaded !== 1 ? 's' : ''}`, 'info');

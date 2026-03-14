@@ -4,6 +4,14 @@ import { z } from 'zod';
 
 const WEB_PORT = process.env.ATOO_WEB_PORT || '3010';
 const WEB_PROTO = process.env.ATOO_WEB_PROTO || 'https';
+const MCP_TOKEN = process.env.ATOO_MCP_TOKEN || '';
+
+/** Build headers for MCP API requests, including the auth token. */
+function mcpHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (MCP_TOKEN) headers['Authorization'] = `Bearer ${MCP_TOKEN}`;
+  return headers;
+}
 
 const PROTOCOLS = [
   'http', 'https', 'ws', 'wss', 'tcp', 'grpc', 'smtp', 'imap', 'ftp', 'other',
@@ -30,7 +38,7 @@ server.tool(
     try {
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/report-services`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mcpHeaders(),
         body: JSON.stringify({ services, cwd: process.cwd() }),
       });
       if (!res.ok) {
@@ -54,7 +62,7 @@ server.tool(
     try {
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/generate-cert`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mcpHeaders(),
         body: JSON.stringify({ hostnames, output_dir }),
       });
       if (!res.ok) {
@@ -87,7 +95,7 @@ server.tool(
     try {
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/request-serial`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mcpHeaders(),
         body: JSON.stringify({ baudRate, dataBits, stopBits, parity, description }),
       });
       const data = await res.json() as any;
@@ -173,7 +181,7 @@ IMPORTANT: Prefer to delegate to a subagent if your client supports it, so the m
         // Range mode: fetch full messages
         const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/fetch-history-range`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: mcpHeaders(),
           body: JSON.stringify({
             type,
             session_uuid: sessionUuid,
@@ -211,7 +219,7 @@ IMPORTANT: Prefer to delegate to a subagent if your client supports it, so the m
         // Search mode
         const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/search-history`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: mcpHeaders(),
           body: JSON.stringify({
             query,
             max_results_per_query,
@@ -284,7 +292,7 @@ IMPORTANT: Always search session history first to find the relevant session UUID
       const sourceSessionId = process.env.ATOO_CURRENT_SESSION_UUID || undefined;
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/suggest-session-switch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mcpHeaders(),
         body: JSON.stringify({
           session_uuid,
           refined_prompt,
@@ -322,7 +330,7 @@ server.tool(
     try {
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/open-file`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mcpHeaders(),
         body: JSON.stringify({ file_path }),
       });
       const data = await res.json() as any;
@@ -351,7 +359,7 @@ server.tool(
       }
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/get-metadata`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mcpHeaders(),
         body: JSON.stringify({ session_uuid: sessionUuid, cwd: process.cwd() }),
       });
       if (!res.ok) {
@@ -409,7 +417,7 @@ Bad tags: "working on implementing the new authentication system" (too long)`,
       if (tags !== undefined) body.tags = tags;
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/set-metadata`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: mcpHeaders(),
         body: JSON.stringify(body),
       });
       if (!res.ok) {

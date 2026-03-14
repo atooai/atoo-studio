@@ -10,7 +10,7 @@ interface OpenFileModalProps {
 export function OpenFileModal({ requestId, filePath, onClose }: OpenFileModalProps) {
   const respond = async (action: 'approved' | 'rejected') => {
     try {
-      await api('POST', '/api/mcp/respond-open-file', { requestId, action });
+      await api('POST', '/api/respond-open-file', { requestId, action });
     } catch (err) {
       console.warn('[OpenFileModal] Failed to respond:', err);
     }

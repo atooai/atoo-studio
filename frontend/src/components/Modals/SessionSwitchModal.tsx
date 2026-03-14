@@ -60,7 +60,7 @@ export function SessionSwitchModal({ requestId, targetSessionUuid, refinedPrompt
   const respond = async (action: 'rejected' | 'open' | 'open_and_close') => {
     // Respond to backend first (unblocks MCP tool)
     try {
-      await api('POST', '/api/mcp/respond-session-switch', { requestId, action });
+      await api('POST', '/api/respond-session-switch', { requestId, action });
     } catch (err) {
       console.warn('[SessionSwitchModal] Failed to respond:', err);
     }
