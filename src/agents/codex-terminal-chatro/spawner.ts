@@ -25,7 +25,10 @@ export function spawnCodexCliProcess(options: {
   const mcpToken = crypto.randomUUID();
   registerMcpToken(mcpToken);
   const mcp = getMcpServerDef();
-  const mcpEnv = { ...mcp.env, ATOO_MCP_TOKEN: mcpToken };
+  const mcpEnv: Record<string, string> = { ...mcp.env, ATOO_MCP_TOKEN: mcpToken };
+  if (options.resumeSessionUuid) {
+    mcpEnv.ATOO_CURRENT_SESSION_UUID = options.resumeSessionUuid;
+  }
   baseArgs.push('-c', `mcp_servers.atoo-studio.command="${mcp.command}"`);
   baseArgs.push('-c', `mcp_servers.atoo-studio.args=${JSON.stringify(mcp.args)}`);
   for (const [key, value] of Object.entries(mcpEnv)) {

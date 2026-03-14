@@ -116,6 +116,11 @@ function parseJsonlMessage(jsonLine: string): ParsedMessage | null {
     const event = JSON.parse(jsonLine);
     if (event.type === 'file-history-snapshot') return null;
 
+    // Detect Codex JSONL format: {type: "event_msg"|"response_item", payload: {...}}
+    if (event.payload && (event.type === 'event_msg' || event.type === 'response_item')) {
+      return parseCodexJsonlMessage(event);
+    }
+
     const role = event.message?.role || event.type || 'unknown';
     let text = '';
 
@@ -150,6 +155,38 @@ function parseJsonlMessage(jsonLine: string): ParsedMessage | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Parse a Codex JSONL message (event_msg or response_item wrapper format).
+ */
+function parseCodexJsonlMessage(event: { type: string; payload: any }): ParsedMessage | null {
+  const p = event.payload;
+  if (event.type === 'event_msg') {
+    switch (p.type) {
+      case 'user_message':
+        return p.message ? { role: 'user', text: p.message } : null;
+      case 'agent_message':
+        return p.message ? { role: 'assistant', text: p.message } : null;
+      case 'task_complete':
+        return p.last_agent_message ? { role: 'assistant', text: p.last_agent_message } : null;
+      default:
+        return null;
+    }
+  } else if (event.type === 'response_item') {
+    switch (p.type) {
+      case 'function_call': {
+        const name = p.name || 'unknown';
+        const args = p.arguments || '';
+        return { role: 'assistant', text: `[tool:${name}] ${args}` };
+      }
+      case 'function_call_output':
+        return p.output ? { role: 'user', text: p.output } : null;
+      default:
+        return null;
+    }
+  }
+  return null;
 }
 
 /**
