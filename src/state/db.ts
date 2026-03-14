@@ -95,6 +95,13 @@ export interface ProjectSettings {
   [key: string]: any;
 }
 
+export interface SessionMetadata {
+  sessionUuid: string;
+  name?: string;
+  description?: string;
+  tags: string[];
+}
+
 class StudioDatabase {
   private db: Database.Database;
 
@@ -114,6 +121,7 @@ class StudioDatabase {
     this.migrateWorktreeHistory();
     this.migrate();
     this.migrateUserManagement();
+    this.migrateSessionMetadata();
   }
 
   private initSchema(): void {
@@ -873,6 +881,89 @@ class StudioDatabase {
       WHERE es.environment_id = ?
       ORDER BY es.created_at
     `).all(envId) as (EnvironmentShare & { username: string; display_name: string })[];
+  }
+
+  // ═══════════════════════════════════════════════════
+  // SESSION METADATA
+  // ═══════════════════════════════════════════════════
+
+  private migrateSessionMetadata(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS session_metadata (
+        session_uuid TEXT PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    // Migrate data from old session_tags table if it exists
+    try {
+      const oldTags = this.db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='session_tags'"
+      ).get();
+      if (oldTags) {
+        const rows = this.db.prepare(
+          'SELECT session_uuid, GROUP_CONCAT(tag) as tags FROM session_tags GROUP BY session_uuid'
+        ).all() as { session_uuid: string; tags: string }[];
+        for (const row of rows) {
+          const tags = row.tags.split(',');
+          this.db.prepare(`
+            INSERT OR IGNORE INTO session_metadata (session_uuid, tags_json)
+            VALUES (?, ?)
+          `).run(row.session_uuid, JSON.stringify(tags));
+        }
+        this.db.exec('DROP TABLE session_tags');
+      }
+    } catch {}
+  }
+
+  getSessionMetadata(sessionUuid: string): SessionMetadata | null {
+    const row = this.db.prepare(
+      'SELECT session_uuid, name, description, tags_json FROM session_metadata WHERE session_uuid = ?'
+    ).get(sessionUuid) as { session_uuid: string; name: string | null; description: string | null; tags_json: string } | undefined;
+    if (!row) return null;
+    return {
+      sessionUuid: row.session_uuid,
+      name: row.name || undefined,
+      description: row.description || undefined,
+      tags: JSON.parse(row.tags_json || '[]'),
+    };
+  }
+
+  getMetadataForSessions(sessionUuids: string[]): Record<string, SessionMetadata> {
+    if (!sessionUuids.length) return {};
+    const placeholders = sessionUuids.map(() => '?').join(',');
+    const rows = this.db.prepare(
+      `SELECT session_uuid, name, description, tags_json FROM session_metadata WHERE session_uuid IN (${placeholders})`
+    ).all(...sessionUuids) as { session_uuid: string; name: string | null; description: string | null; tags_json: string }[];
+    const result: Record<string, SessionMetadata> = {};
+    for (const row of rows) {
+      result[row.session_uuid] = {
+        sessionUuid: row.session_uuid,
+        name: row.name || undefined,
+        description: row.description || undefined,
+        tags: JSON.parse(row.tags_json || '[]'),
+      };
+    }
+    return result;
+  }
+
+  setSessionMetadata(sessionUuid: string, updates: { name?: string; description?: string; tags?: string[] }): void {
+    const existing = this.getSessionMetadata(sessionUuid);
+    const name = updates.name !== undefined ? updates.name : (existing?.name || null);
+    const description = updates.description !== undefined ? updates.description : (existing?.description || null);
+    const tags = updates.tags !== undefined ? updates.tags : (existing?.tags || []);
+
+    this.db.prepare(`
+      INSERT INTO session_metadata (session_uuid, name, description, tags_json, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(session_uuid) DO UPDATE SET
+        name = excluded.name,
+        description = excluded.description,
+        tags_json = excluded.tags_json,
+        updated_at = excluded.updated_at
+    `).run(sessionUuid, name, description, JSON.stringify(tags));
   }
 
   // ═══════════════════════════════════════════════════

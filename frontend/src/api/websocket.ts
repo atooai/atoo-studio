@@ -305,6 +305,32 @@ function handleStatusMessage(msg: any) {
       store.addToast('Serial', `Serial device disconnected`, 'warning');
     }
     store.removeSerialRequest(msg.requestId);
+  } else if (msg.type === 'session_metadata_updated' && msg.sessionUuids) {
+    const uuids = new Set<string>(msg.sessionUuids);
+    const projects = store.projects.map((proj) => {
+      const hasSessionMatch = proj.sessions.some((s) => uuids.has(s.id));
+      const hasHistMatch = (proj.historicalSessions || []).some((h) => uuids.has(h.id));
+      if (!hasSessionMatch && !hasHistMatch) return proj;
+      return {
+        ...proj,
+        sessions: proj.sessions.map((s) =>
+          uuids.has(s.id) ? {
+            ...s,
+            ...(msg.name !== undefined ? { metaName: msg.name } : {}),
+            ...(msg.description !== undefined ? { metaDescription: msg.description } : {}),
+            ...(msg.tags ? { tags: msg.tags } : {}),
+          } : s
+        ),
+        historicalSessions: (proj.historicalSessions || []).map((h) =>
+          uuids.has(h.id) ? {
+            ...h,
+            ...(msg.name !== undefined ? { metaName: msg.name } : {}),
+            ...(msg.tags ? { tags: msg.tags } : {}),
+          } : h
+        ),
+      };
+    });
+    useStore.setState({ projects });
   } else if (msg.type === 'service_started' && msg.services) {
     const proj = store.projects.find((p) => msg.cwd && msg.cwd.startsWith(p.path));
     const projName = proj?.name || msg.cwd || 'Unknown';

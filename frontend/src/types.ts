@@ -32,6 +32,9 @@ export interface Session {
   _capabilities?: any;
   _pendingControl?: any;
   _filteredMessages?: FilteredMessage[];
+  metaName?: string;
+  metaDescription?: string;
+  tags?: string[];
   contextUsage?: ContextUsage;
   contextInProgress?: boolean;
   activeSessionIdx?: number;
@@ -162,6 +165,8 @@ export interface HistoricalSession {
   title: string;
   lastModified: string;
   eventCount: number;
+  metaName?: string;
+  tags?: string[];
 }
 
 export interface Project {

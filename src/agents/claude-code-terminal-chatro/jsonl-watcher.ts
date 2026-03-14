@@ -7,6 +7,7 @@ import { EventEmitter } from 'events';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 const DISCOVERY_TIMEOUT = 5_000;
@@ -14,10 +15,14 @@ const DEBOUNCE_MS = 50;
 
 /**
  * Convert a cwd path to Claude CLI's dir-hash format.
+ * Replaces all non-alphanumeric chars with '-'.
  * "/home/furti/myproject" → "-home-furti-myproject"
  */
 function cwdToDirHash(cwd: string): string {
-  return cwd.replace(/\//g, '-');
+  const hashed = cwd.replace(/[^a-zA-Z0-9]/g, '-');
+  if (hashed.length <= 200) return hashed;
+  const suffix = crypto.createHash('sha256').update(cwd).digest('hex').slice(0, 12);
+  return `${hashed.slice(0, 200)}-${suffix}`;
 }
 
 export interface SubagentMetadata {

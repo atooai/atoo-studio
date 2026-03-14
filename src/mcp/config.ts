@@ -55,6 +55,14 @@ export const MCP_SYSTEM_PROMPT = [
   'IMPORTANT: Prefer delegating search_session_history calls to a subagent when possible, so the',
   'main conversation context is not polluted with potentially large search results.',
 
+  '\n## MANDATORY: Set session metadata\n',
+  'IMPORTANT: Whenever you start working on a feature, bug fix, or any distinct task, you MUST',
+  'set session metadata using mcp__atoo-studio__set_session_metadata. First call',
+  'mcp__atoo-studio__get_session_metadata to see what is already set, then update as needed.',
+  'Set a short session name (used as tab title), tags (displayed as badges), and optionally a',
+  'markdown description. Keep tags short (max 5 words). Examples: "auth refactor", "fix login bug".',
+  'Update metadata whenever the focus shifts to a new task.',
+
   '\n## MANDATORY: Search before any feature or bug fix\n',
   'IMPORTANT: Before starting ANY feature implementation or bug fix, you MUST search session history',
   'using mcp__atoo-studio__search_session_history with type "FullProjectSearch" to check if another',

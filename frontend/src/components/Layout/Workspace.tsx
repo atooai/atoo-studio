@@ -116,10 +116,12 @@ function CenterTabs({ proj }: { proj: any }) {
       {activeSessions.map((s: any, i: number) => {
         const isActive = activeTabType === 'session' && i === (proj.activeSessionIdx || 0);
         const warn = s.permissionMode === 'bypassPermissions' ? <span className="tab-warn" title="--dangerously-skip-permissions">⚠</span> : null;
+        const displayName = s.metaName || s.title || 'New session';
+        const truncated = displayName.length > 16 ? displayName.substring(0, 16) + '…' : displayName;
         return (
-          <div key={s.id} className={`center-tab ${isActive ? 'active' : ''}`} onClick={() => (window as any).switchToSession(proj.id, i)}>
+          <div key={s.id} className={`center-tab ${isActive ? 'active' : ''}`} onClick={() => (window as any).switchToSession(proj.id, i)} title={displayName}>
             <span className={`tab-dot ${s.status}`}></span>
-            <span>{s.title && s.title.length > 10 ? s.title.substring(0, 10) + '…' : (s.title || 'New session')}</span>{warn}
+            <span>{truncated}</span>{warn}
             <span className="tab-close" onClick={(e) => { e.stopPropagation(); (window as any).closeSession(proj.id, i); }}>×</span>
           </div>
         );
@@ -147,31 +149,55 @@ function ViewToggle({ session, proj }: { session: any; proj: any }) {
   const hasTerminal = mode === 'terminal' || mode === 'terminal+chat' || mode === 'terminal+chatRO';
   const chatReadOnly = mode === 'terminal+chatRO';
   const hasVerbose = mode === 'terminal+chat' || mode === 'terminal+chatRO';
+  const [showDesc, setShowDesc] = React.useState(false);
 
   return (
-    <div className="session-view-toggle">
-      {hasTerminal && (
-        <button className={`svt-btn ${session.viewMode === 'tui' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('tui')}><span className="svt-icon">›_</span> Terminal</button>
-      )}
-      {hasChat && (
-        <button className={`svt-btn ${session.viewMode === 'chat' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('chat')}>
-          <span className="svt-icon">◉</span> Chat{chatReadOnly ? ' readonly' : ''}
+    <>
+      <div className="session-view-toggle">
+        {hasTerminal && (
+          <button className={`svt-btn ${session.viewMode === 'tui' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('tui')}><span className="svt-icon">›_</span> Terminal</button>
+        )}
+        {hasChat && (
+          <button className={`svt-btn ${session.viewMode === 'chat' ? 'active' : ''}`} onClick={() => (window as any).setSessionView('chat')}>
+            <span className="svt-icon">◉</span> Chat{chatReadOnly ? ' readonly' : ''}
+          </button>
+        )}
+        {session.tags && session.tags.length > 0 && (
+          <div className="svt-tags">
+            {session.tags.map((tag: string) => (
+              <span key={tag} className="svt-tag-badge">{tag}</span>
+            ))}
+          </div>
+        )}
+        <div style={{ flex: 1 }}></div>
+        {hasVerbose && (
+          <button className={`svt-filter-btn ${session.showVerbose !== false ? 'active' : ''}`} onClick={() => (window as any).toggleVerbose()} title="Show/hide tool calls and intermediate messages">
+            <span className="svt-filter-icon">⚡</span> Verbose
+          </button>
+        )}
+        {session.metaDescription && (
+          <button
+            className={`svt-filter-btn ${showDesc ? 'active' : ''}`}
+            onClick={() => setShowDesc(!showDesc)}
+            title="Show/hide session description"
+          >
+            <span className="svt-filter-icon">📋</span> Description
+          </button>
+        )}
+        <button
+          className="svt-filter-btn"
+          onClick={() => (window as any).chainSession(session.id)}
+          title="Continue in a new chain link (preserves full context via search)"
+        >
+          <span className="svt-filter-icon">⛓</span> Chain
         </button>
+      </div>
+      {showDesc && session.metaDescription && (
+        <div className="svt-description-panel">
+          <div className="svt-description-content">{session.metaDescription}</div>
+        </div>
       )}
-      <div style={{ flex: 1 }}></div>
-      {hasVerbose && (
-        <button className={`svt-filter-btn ${session.showVerbose !== false ? 'active' : ''}`} onClick={() => (window as any).toggleVerbose()} title="Show/hide tool calls and intermediate messages">
-          <span className="svt-filter-icon">⚡</span> Verbose
-        </button>
-      )}
-      <button
-        className="svt-filter-btn"
-        onClick={() => (window as any).chainSession(session.id)}
-        title="Continue in a new chain link (preserves full context via search)"
-      >
-        <span className="svt-filter-icon">⛓</span> Chain
-      </button>
-    </div>
+    </>
   );
 }
 

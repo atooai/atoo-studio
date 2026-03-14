@@ -14,6 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { buildLinkedUuid } from '../session-id-utils.js';
 import type {
@@ -28,10 +29,14 @@ import type {
 
 /**
  * Convert an absolute directory path to the Claude project dir hash format.
- * Replaces '/' with '-', e.g. /home/furti/myproject -> -home-furti-myproject
+ * Replaces all non-alphanumeric chars with '-'.
+ * e.g. /home/furti/myproject -> -home-furti-myproject
  */
 function projectDirHash(directory: string): string {
-  return directory.replace(/\//g, '-');
+  const hashed = directory.replace(/[^a-zA-Z0-9]/g, '-');
+  if (hashed.length <= 200) return hashed;
+  const suffix = crypto.createHash('sha256').update(directory).digest('hex').slice(0, 12);
+  return `${hashed.slice(0, 200)}-${suffix}`;
 }
 
 // ═══════════════════════════════════════════════════════

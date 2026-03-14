@@ -271,7 +271,7 @@ function ChainCarousel({ group, agentIcons, projectId, openSessionIds }: {
               <SessionStatusDot node={node} />
               <div className="session-info">
                 <div className="session-title">
-                  {node.kind === 'historical' ? escapeHtml(s.title) : s.title}
+                  {s.metaName || (node.kind === 'historical' ? escapeHtml(s.title) : s.title)}
                 </div>
                 <SessionMeta node={node} />
                 {(s.cliSessionId || (node.kind === 'historical' && s.id)) && (
@@ -353,7 +353,7 @@ function SingleSessionCard({ item, agentIcons, projectId, openSessionIds }: {
       <SessionStatusDot node={node} />
       <div className="session-info">
         <div className="session-title">
-          {node.kind === 'historical' ? escapeHtml(s.title) : s.title}
+          {s.metaName || (node.kind === 'historical' ? escapeHtml(s.title) : s.title)}
         </div>
         <SessionMeta node={node} />
         {s.cliSessionId && (

@@ -339,5 +339,94 @@ server.tool(
   },
 );
 
+server.tool(
+  'get_session_metadata',
+  `Get metadata for the current session chain. Returns the merged metadata across all sessions in the chain: name (most recent), description (most recent), and tags (deduplicated from all chain sessions). Call this before set_session_metadata to see what's already set.`,
+  {},
+  async () => {
+    try {
+      const sessionUuid = process.env.ATOO_CURRENT_SESSION_UUID || undefined;
+      if (!sessionUuid) {
+        return { content: [{ type: 'text' as const, text: 'No session UUID available.' }] };
+      }
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/get-metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_uuid: sessionUuid, cwd: process.cwd() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        return { content: [{ type: 'text' as const, text: `Failed: ${(err as any).error}` }] };
+      }
+      const data = await res.json() as { name?: string; description?: string; tags: string[] };
+      const parts: string[] = [];
+      if (data.name) parts.push(`Name: ${data.name}`);
+      if (data.description) parts.push(`Description: ${data.description}`);
+      if (data.tags.length) parts.push(`Tags: ${data.tags.join(', ')}`);
+      if (!parts.length) return { content: [{ type: 'text' as const, text: 'No metadata set on this session chain.' }] };
+      return { content: [{ type: 'text' as const, text: parts.join('\n') }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Failed: ${err.message}` }] };
+    }
+  },
+);
+
+server.tool(
+  'set_session_metadata',
+  `Set metadata on the current session. Any provided property overwrites the existing value in the database. Omitted properties are left unchanged.
+
+Properties:
+- name: Short session name (displayed as tab title and session card title). Keep it concise.
+- description: Markdown description of what this session is working on. Viewable via a button in the toolbar.
+- tags: Array of short tags (max 5 words each, shorter is better). Displayed as badges in the toolbar.
+
+IMPORTANT: Always call get_session_metadata first to check existing metadata before setting, to avoid overwriting or duplicating.
+
+Good tags: "auth refactor", "fix login bug", "API endpoints"
+Bad tags: "working on implementing the new authentication system" (too long)`,
+  {
+    name: z.string().optional().describe('Session name — displayed as tab title and session card title'),
+    description: z.string().optional().describe('Session description in markdown — viewable via toolbar button'),
+    tags: z.preprocess(
+      (val) => {
+        if (typeof val === 'string') {
+          try { return JSON.parse(val); } catch { return [val]; }
+        }
+        return val;
+      },
+      z.array(z.string()),
+    ).optional().describe('Array of tags (max 5 words each) — displayed as badges in toolbar'),
+  },
+  async ({ name, description, tags }) => {
+    try {
+      const sessionUuid = process.env.ATOO_CURRENT_SESSION_UUID || undefined;
+      if (!sessionUuid) {
+        return { content: [{ type: 'text' as const, text: 'No session UUID available.' }] };
+      }
+      const body: any = { session_uuid: sessionUuid, cwd: process.cwd() };
+      if (name !== undefined) body.name = name;
+      if (description !== undefined) body.description = description;
+      if (tags !== undefined) body.tags = tags;
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/set-metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        return { content: [{ type: 'text' as const, text: `Failed: ${(err as any).error}` }] };
+      }
+      const data = await res.json() as { name?: string; description?: string; tags: string[] };
+      const parts: string[] = ['Metadata updated.'];
+      if (data.name) parts.push(`Name: ${data.name}`);
+      if (data.description) parts.push(`Description set (${data.description.length} chars)`);
+      if (data.tags.length) parts.push(`Tags: ${data.tags.join(', ')}`);
+      return { content: [{ type: 'text' as const, text: parts.join('\n') }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Failed: ${err.message}` }] };
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 server.connect(transport);

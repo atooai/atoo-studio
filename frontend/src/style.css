@@ -3256,6 +3256,47 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 }
 .svt-filter-icon { font-size: 10px; }
 
+/* Session tag badges */
+.svt-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  overflow: hidden;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.svt-tag-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--accent-purple);
+  background: var(--accent-purple-dim);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 10px;
+  white-space: nowrap;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+}
+
+/* Session description panel */
+.svt-description-panel {
+  padding: 8px 12px;
+  background: var(--bg-surface-2);
+  border-bottom: 1px solid var(--border-subtle);
+  max-height: 200px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.svt-description-content {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Collapsed intermediate messages indicator */
 .chat-collapsed-indicator {
   display: flex;
@@ -3767,7 +3808,7 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 }
 .gh-card-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 3px;
   flex-shrink: 0;
   align-self: center;

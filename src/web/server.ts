@@ -29,7 +29,8 @@ import forge from 'node-forge';
 import { CA_CERT_PATH, CA_KEY_PATH, PROJECT_ROOT } from '../config.js';
 import { serialManager } from '../serial/manager.js';
 import { searchSessionHistory, fetchSessionRange } from '../services/session-search.js';
-import { resolveChainHead, toRawHex } from '../agents/lib/session-id-utils.js';
+import { resolveChainHead, toRawHex, walkChain } from '../agents/lib/session-id-utils.js';
+import { db } from '../state/db.js';
 import { containersRouter, getContainerRuntimes } from '../handlers/containers.js';
 import { handleHookCallback } from '../agents/lib/claude/hooks.js';
 import { handleCodexNotifyCallback } from '../agents/lib/codex/notify.js';
@@ -420,6 +421,107 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     pendingOpenFiles.delete(requestId);
     pending.resolve({ action });
     res.json({ success: true });
+  });
+
+  // Helper: resolve chain UUIDs from a session UUID and project cwd
+  async function resolveChainUuids(sessionUuid: string, cwd: string): Promise<string[]> {
+    const allFiles = await agentRegistry.getSessionFilesForProject(cwd);
+    const allUuids = allFiles.map(f => {
+      const basename = path.basename(f, '.jsonl');
+      const m = basename.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+      return m ? m[1] : '';
+    }).filter(Boolean);
+    return walkChain(sessionUuid, allUuids);
+  }
+
+  // Helper: resolve a session_uuid that might be an agent_xxx ID to its CLI UUID
+  function resolveToCliUuid(sessionUuid: string): string {
+    // If it's an agent session ID, look up its CLI UUID
+    const agent = agentRegistry.getAgent(sessionUuid);
+    if (agent) {
+      const cliId = agent.getCliSessionId?.();
+      if (cliId) return cliId;
+    }
+    return sessionUuid;
+  }
+
+  // Helper: find active agent session IDs whose CLI UUID is in the given set
+  function findAgentSessionIds(chainUuids: string[]): string[] {
+    const uuidSet = new Set(chainUuids);
+    const agentIds: string[] = [];
+    for (const info of agentRegistry.listAgents()) {
+      const agent = agentRegistry.getAgent(info.sessionId);
+      if (agent) {
+        const cliId = agent.getCliSessionId?.();
+        if (cliId && uuidSet.has(cliId)) {
+          agentIds.push(info.sessionId);
+        }
+      }
+    }
+    return agentIds;
+  }
+
+  // Helper: merge metadata across a chain (name/description from latest, tags deduplicated)
+  function mergeChainMetadata(chainUuids: string[]): { name?: string; description?: string; tags: string[] } {
+    const allMeta = db.getMetadataForSessions(chainUuids);
+    const allTags = new Set<string>();
+    let name: string | undefined;
+    let description: string | undefined;
+    // Walk from newest to oldest for name/description (first found wins)
+    for (let i = chainUuids.length - 1; i >= 0; i--) {
+      const meta = allMeta[chainUuids[i]];
+      if (!meta) continue;
+      if (!name && meta.name) name = meta.name;
+      if (!description && meta.description) description = meta.description;
+      for (const t of meta.tags) allTags.add(t);
+    }
+    return { name, description, tags: Array.from(allTags) };
+  }
+
+  // MCP callback: get metadata for a session chain
+  app.post('/api/mcp/get-metadata', async (req, res) => {
+    const { session_uuid, cwd } = req.body;
+    if (!session_uuid) {
+      return res.status(400).json({ error: 'session_uuid is required' });
+    }
+    try {
+      const cliUuid = resolveToCliUuid(session_uuid);
+      const chainUuids = await resolveChainUuids(cliUuid, cwd || process.cwd());
+      const agentIds = findAgentSessionIds(chainUuids);
+      const merged = mergeChainMetadata(chainUuids);
+      res.json({ ...merged, chainSessionIds: [...chainUuids, ...agentIds] });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // MCP callback: set metadata on a session
+  app.post('/api/mcp/set-metadata', async (req, res) => {
+    const { session_uuid, name, description, tags, cwd } = req.body;
+    if (!session_uuid) {
+      return res.status(400).json({ error: 'session_uuid is required' });
+    }
+    if (name === undefined && description === undefined && tags === undefined) {
+      return res.status(400).json({ error: 'At least one of name, description, or tags is required' });
+    }
+    try {
+      db.setSessionMetadata(session_uuid, { name, description, tags });
+      const chainUuids = await resolveChainUuids(session_uuid, cwd || process.cwd());
+      const agentIds = findAgentSessionIds(chainUuids);
+      const merged = mergeChainMetadata(chainUuids);
+      // Broadcast to all browsers — include both CLI UUIDs and agent_xxx IDs
+      const msg = JSON.stringify({
+        type: 'session_metadata_updated',
+        sessionUuids: [...chainUuids, ...agentIds],
+        ...merged,
+      });
+      for (const ws of store.statusClients) {
+        if (ws.readyState === 1) ws.send(msg);
+      }
+      res.json({ success: true, ...merged });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // MCP callback: search session history files for the current project

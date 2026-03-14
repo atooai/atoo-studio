@@ -3,6 +3,7 @@
  * The CLI is then started with --resume <uuid>, adopting our pre-created UUID.
  * This eliminates hook-based or filesystem-based session UUID discovery.
  */
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -20,7 +21,11 @@ const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
 export function precreateClaudeSession(cwd: string): string {
   const uuid = uuidv4();
   const resolvedCwd = path.resolve(cwd);
-  const dirHash = resolvedCwd.replace(/\//g, '-');
+  let dirHash = resolvedCwd.replace(/[^a-zA-Z0-9]/g, '-');
+  if (dirHash.length > 200) {
+    const suffix = crypto.createHash('sha256').update(resolvedCwd).digest('hex').slice(0, 12);
+    dirHash = `${dirHash.slice(0, 200)}-${suffix}`;
+  }
   const projectDir = path.join(CLAUDE_PROJECTS_DIR, dirHash);
   const now = new Date().toISOString();
   const userUuid = uuidv4();

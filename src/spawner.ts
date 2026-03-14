@@ -134,8 +134,13 @@ function setStatus(envId: string, state: ActivityState, status: ActivityStatus):
  * 2. Start/extend a burst window; reset the 1s idle timer on each data chunk
  * 3. If output sustains for >= 3s, "promote" the burst — it's real work
  * 4. When PTY goes idle for 1s (burst ends):
- *    - If promoted: normal flow → 'attention' (agent finished real work)
- *    - If NOT promoted: revert to pre-burst status (was just a re-render)
+ *    - If promoted AND not acknowledged: → 'attention' (real work, user hasn't seen)
+ *    - If promoted AND acknowledged: → 'open' (user already viewed)
+ *    - If NOT promoted: revert to pre-burst status, or 'open' if user acknowledged
+ *
+ * NOTE: attentionAcknowledged is NOT reset here. User keystrokes echo through
+ * the PTY and would constantly fight the frontend's session_viewed command.
+ * It's only reset when a promoted burst ends and generates real 'attention'.
  */
 function markActivityData(envId: string): void {
   let state = activityStates.get(envId);
@@ -165,8 +170,7 @@ function markActivityData(envId: string): void {
     state.burstPromoted = true;
   }
 
-  // Set active instantly and clear attention acknowledgement
-  state.attentionAcknowledged = false;
+  // Set active instantly (don't touch attentionAcknowledged — see NOTE above)
   setStatus(envId, state, 'active');
 
   // Reset the idle timer — burst continues as long as data keeps flowing
@@ -182,7 +186,6 @@ function onBurstIdle(envId: string): void {
   if (!state) return;
 
   const wasPromoted = state.burstPromoted;
-  const preBurstStatus = state.preBurstStatus;
 
   // Clear burst tracking
   state.burstStartTime = null;
@@ -190,11 +193,20 @@ function onBurstIdle(envId: string): void {
   state.burstIdleTimer = null;
 
   if (wasPromoted) {
-    // Real work finished — transition to 'attention' (unless already viewed)
-    setStatus(envId, state, state.attentionAcknowledged ? 'open' : 'attention');
+    if (state.attentionAcknowledged) {
+      // User already viewed during this burst — go to 'open'
+      setStatus(envId, state, 'open');
+    } else {
+      // Real work finished, user hasn't seen it — 'attention'
+      setStatus(envId, state, 'attention');
+    }
   } else {
-    // Short burst (re-render) — revert silently to pre-burst status
-    setStatus(envId, state, preBurstStatus);
+    // Short burst (re-render, keystroke echo) — revert, but respect acknowledgement
+    if (state.attentionAcknowledged) {
+      setStatus(envId, state, 'open');
+    } else {
+      setStatus(envId, state, state.preBurstStatus);
+    }
   }
 }
 
@@ -206,6 +218,8 @@ export function markActivityViewed(envId: string): void {
   if (state.burstStartTime === null) {
     setStatus(envId, state, 'open');
   }
+  // If there IS an active burst, the acknowledgement is stored and
+  // will be respected when the burst ends (onBurstIdle)
 }
 
 function removeActivityState(envId: string): void {

@@ -471,12 +471,43 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
         connectAgentWs(s.id);
       }
 
+      const allSessions = [...mappedSessions, ...matchingAgentSessions];
       useStore.getState().updateProject(proj.id, p => ({
         ...p,
-        sessions: [...mappedSessions, ...matchingAgentSessions],
+        sessions: allSessions,
         historicalSessions,
         _sessionsLoaded: true,
       }));
+
+      // Fetch metadata for all active sessions (also updates matching historical sessions)
+      const fetchedChains = new Set<string>();
+      for (const s of allSessions) {
+        if (fetchedChains.has(s.id)) continue;
+        api('POST', '/api/mcp/get-metadata', { session_uuid: s.id, cwd: proj.path }).then((data: any) => {
+          if (data.name || data.description || data.tags?.length) {
+            const chainIds = data.chainSessionIds as string[] | undefined;
+            if (chainIds) chainIds.forEach(id => fetchedChains.add(id));
+            useStore.getState().updateProject(proj.id, p => ({
+              ...p,
+              sessions: p.sessions.map(sess =>
+                chainIds?.includes(sess.id) ? {
+                  ...sess,
+                  ...(data.name ? { metaName: data.name } : {}),
+                  ...(data.description ? { metaDescription: data.description } : {}),
+                  ...(data.tags?.length ? { tags: data.tags } : {}),
+                } : sess
+              ),
+              historicalSessions: (p.historicalSessions || []).map(h =>
+                chainIds?.includes(h.id) ? {
+                  ...h,
+                  ...(data.name ? { metaName: data.name } : {}),
+                  ...(data.tags?.length ? { tags: data.tags } : {}),
+                } : h
+              ),
+            }));
+          }
+        }).catch(() => {});
+      }
     } catch {}
   }
 
@@ -797,6 +828,7 @@ function registerGlobalFunctions() {
             });
             store.setActiveTabType('session');
             connectAgentWs(sessionId);
+            fetchAndApplyMetadata(proj.id, sessionId, proj.path);
             store.addToast(proj.name, 'Chain continuation created', 'success');
           } catch (e: any) {
             setPendingAgentCreation(false);
@@ -1314,6 +1346,26 @@ function registerGlobalFunctions() {
     }
   };
 
+  // Helper: fetch session metadata and apply to a session in the store
+  const fetchAndApplyMetadata = (projId: string, sessionId: string, projPath: string) => {
+    api('POST', '/api/mcp/get-metadata', { session_uuid: sessionId, cwd: projPath }).then((data: any) => {
+      if (data.name || data.description || data.tags?.length) {
+        const chainIds = data.chainSessionIds as string[] | undefined;
+        useStore.getState().updateProject(projId, p => ({
+          ...p,
+          sessions: p.sessions.map(sess =>
+            (sess.id === sessionId || chainIds?.includes(sess.id)) ? {
+              ...sess,
+              ...(data.name ? { metaName: data.name } : {}),
+              ...(data.description ? { metaDescription: data.description } : {}),
+              ...(data.tags?.length ? { tags: data.tags } : {}),
+            } : sess
+          ),
+        }));
+      }
+    }).catch(() => {});
+  };
+
   win.resumeSession = async (projId: string, sessionId: string) => {
     const store = useStore.getState();
     const proj = store.projects.find(p => p.id === projId);
@@ -1350,6 +1402,7 @@ function registerGlobalFunctions() {
         }));
         store.setActiveTabType('session');
         connectAgentWs(newSessionId);
+        fetchAndApplyMetadata(projId, newSessionId, proj.path);
         store.addToast(proj.name, 'Session resumed', 'success');
       } catch (e: any) {
         setPendingAgentCreation(false);
@@ -1400,6 +1453,7 @@ function registerGlobalFunctions() {
         }));
         store.setActiveTabType('session');
         connectAgentWs(sessionId);
+        fetchAndApplyMetadata(projId, sessionId, proj.path);
         store.addToast(proj.name, 'Session resumed', 'success');
       } catch (e: any) {
         setPendingAgentCreation(false);
@@ -1750,6 +1804,15 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
     term.open(el);
     fitAddon.fit();
 
+    // xterm's canvas/textarea swallow mouse events — dispatch xterm-activity
+    // on mousemove so parent attention-clear handlers can detect mouse interaction
+    el.addEventListener('mousemove', () => {
+      const inst = terminalInstances[termId];
+      if (inst?.container) {
+        inst.container.dispatchEvent(new CustomEvent('xterm-activity', { bubbles: true }));
+      }
+    }, { passive: true });
+
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsPath = wsType === 'shell' ? 'shell' : 'terminal';
     const ws = new WebSocket(`${proto}//${location.host}/ws/${wsPath}/${targetId}`);
@@ -1760,7 +1823,11 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
     term.onData((data: string) => {
       if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data }));
       // Bubble user activity up so attention-clear handlers can detect it
-      container.dispatchEvent(new CustomEvent('xterm-activity', { bubbles: true }));
+      // Use inst.container (updated on reattach) rather than closure variable
+      const inst = terminalInstances[termId];
+      if (inst?.container) {
+        inst.container.dispatchEvent(new CustomEvent('xterm-activity', { bubbles: true }));
+      }
     });
     term.onResize(({ cols, rows }: any) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
 
