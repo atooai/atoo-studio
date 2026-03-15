@@ -126,6 +126,8 @@ function isDirectory(nodes: FileNode[], path: string): boolean {
   return false;
 }
 
+const GIT_CHANGE_LIMIT = 1000;
+
 export function FileTree() {
   const { activeProjectId, projects, fileFilter, fileView, stashOpen, explorerRoot } = useStore();
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -135,15 +137,21 @@ export function FileTree() {
 
   const isSystem = explorerRoot === 'system';
 
+  const rawChangeCount = (proj.gitChanges || []).length;
+  const tooManyChanges = rawChangeCount > GIT_CHANGE_LIMIT;
+
+  // When there are too many changes, skip expensive git overlay to prevent browser slowdown
   const gitMap: Record<string, string> = {};
   const gitStaged: Record<string, boolean> = {};
   const gitOldPaths: Record<string, string> = {};
-  (proj.gitChanges || []).forEach(c => { gitMap[c.file] = c.status; if (c.staged) gitStaged[c.file] = true; if (c.oldPath) gitOldPaths[c.file] = c.oldPath; });
-  const changeCount = Object.keys(gitMap).length;
-  const dirtyDirs = getDirtyDirs(gitMap);
+  if (!tooManyChanges) {
+    (proj.gitChanges || []).forEach(c => { gitMap[c.file] = c.status; if (c.staged) gitStaged[c.file] = true; if (c.oldPath) gitOldPaths[c.file] = c.oldPath; });
+  }
+  const changeCount = rawChangeCount;
+  const dirtyDirs = tooManyChanges ? new Set<string>() : getDirtyDirs(gitMap);
 
-  // Merge deleted files into the tree
-  const filesWithDeleted = mergeDeletedFiles(proj.files || [], gitMap, '');
+  // Merge deleted files into the tree (skip when too many changes)
+  const filesWithDeleted = tooManyChanges ? (proj.files || []) : mergeDeletedFiles(proj.files || [], gitMap, '');
   const displayFiles = isSystem ? systemFiles : filesWithDeleted;
 
   // Fetch system root files when in system mode
@@ -195,7 +203,13 @@ export function FileTree() {
       >
         <UploadOverlay />
         {fileFilter === 'changed'
-          ? <ChangedFiles gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} />
+          ? tooManyChanges
+            ? <div className="empty-state" style={{ padding: 20 }}>
+                <div className="empty-state-icon">!</div>
+                <div className="empty-state-title">Too many changes ({rawChangeCount.toLocaleString()})</div>
+                <div className="empty-state-desc">Change display disabled for performance. Consider adding a .gitignore.</div>
+              </div>
+            : <ChangedFiles gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} />
           : fileView === 'flat'
             ? <FlatList nodes={displayFiles} parentPath="" gitMap={isSystem ? {} : gitMap} gitStaged={isSystem ? {} : gitStaged} gitOldPaths={isSystem ? {} : gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} pathPrefix={isSystem ? '/' : undefined} />
             : <TreeNodes nodes={displayFiles} parentPath="" gitMap={isSystem ? {} : gitMap} gitStaged={isSystem ? {} : gitStaged} gitOldPaths={isSystem ? {} : gitOldPaths} dirtyDirs={isSystem ? new Set() : dirtyDirs} depth={0} selectedPath={selectedPath} onSelect={setSelectedPath} pathPrefix={isSystem ? '/' : undefined} />
@@ -228,7 +242,7 @@ function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) 
       <div className="lp-header">
         <span className="lp-title">Explorer</span>
         {explorerRoot === 'system' && <span className="lp-root-label">/</span>}
-        {changeCount > 0 && <span className="lp-change-count">{changeCount}</span>}
+        {changeCount > 0 && <span className="lp-change-count">{changeCount > GIT_CHANGE_LIMIT ? `${GIT_CHANGE_LIMIT}+` : changeCount}</span>}
       </div>
       <div className="lp-toolbar">
         <div className="lp-toolbar-group">

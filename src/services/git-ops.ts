@@ -51,9 +51,10 @@ export async function gitStatus(cwd: string) {
   });
 
   // Detect unstaged renames: pair D (deleted) + ?? (untracked) by comparing file content hashes
+  // Skip when there are too many entries — the O(n*m) hash comparisons would be very slow
   const deleted = entries.filter(e => e.status === 'D' || e.status === ' D');
   const untracked = entries.filter(e => e.status === '??');
-  if (deleted.length > 0 && untracked.length > 0) {
+  if (deleted.length > 0 && untracked.length > 0 && deleted.length + untracked.length <= 200) {
     try {
       // Get hashes for deleted files (from HEAD) and untracked files (from working tree)
       const deletedHashes = new Map<string, string>();

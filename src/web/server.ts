@@ -987,6 +987,15 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     try {
       const cwd = req.query.cwd as string | undefined;
       const sessions = await agentRegistry.getHistoricalSessions(cwd);
+      // Enrich with metadata from DB
+      if (sessions.length) {
+        const allMeta = db.getMetadataForSessions(sessions.map(s => s.id));
+        for (const s of sessions) {
+          const meta = allMeta[s.id];
+          if (meta?.name) s.metaName = meta.name;
+          if (meta?.tags?.length) s.tags = meta.tags;
+        }
+      }
       res.json(sessions);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

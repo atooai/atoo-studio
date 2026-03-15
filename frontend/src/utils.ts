@@ -1,5 +1,8 @@
 import { marked } from 'marked';
 import hljs from 'highlight.js';
+import mermaid from 'mermaid';
+
+mermaid.initialize({ startOnLoad: false, theme: 'dark', darkMode: true });
 
 export function escapeHtml(str: string): string {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -148,7 +151,12 @@ export const svgCheck = `<svg width="14" height="14" viewBox="0 0 24 24" fill="n
 // Markdown rendering setup
 const mdRenderer = new marked.Renderer();
 mdRenderer.html = function({ text }: { text: string }) { return escapeHtml(text); };
+let mermaidCounter = 0;
 mdRenderer.code = function({ text, lang }: { text: string; lang?: string }) {
+  if (lang === 'mermaid') {
+    const id = `mermaid-${mermaidCounter++}`;
+    return `<div class="mermaid-block" data-mermaid-id="${id}">${escapeHtml(text)}</div>`;
+  }
   let highlighted: string;
   if (lang && hljs.getLanguage(lang)) {
     highlighted = hljs.highlight(text, { language: lang }).value;
@@ -162,7 +170,23 @@ mdRenderer.code = function({ text, lang }: { text: string; lang?: string }) {
 marked.setOptions({ breaks: true, gfm: true, renderer: mdRenderer });
 
 export function renderMd(text: string): string {
+  mermaidCounter = 0;
   return marked.parse(text) as string;
+}
+
+export async function renderMermaidBlocks(container: HTMLElement) {
+  const blocks = container.querySelectorAll('.mermaid-block');
+  for (const block of blocks) {
+    const id = block.getAttribute('data-mermaid-id') || `mermaid-${Date.now()}`;
+    const code = block.textContent || '';
+    try {
+      const { svg } = await mermaid.render(id, code);
+      block.innerHTML = svg;
+      block.classList.add('mermaid-rendered');
+    } catch {
+      block.classList.add('mermaid-error');
+    }
+  }
 }
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {

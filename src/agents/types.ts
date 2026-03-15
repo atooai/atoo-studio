@@ -133,6 +133,8 @@ export interface HistoricalSession {
   directory: string;     // Working directory the session ran in
   lastModified: string;  // ISO timestamp
   eventCount: number;    // Approximate number of events
+  metaName?: string;     // Session metadata name (from DB)
+  tags?: string[];       // Session metadata tags (from DB)
 }
 
 // ═══════════════════════════════════════════════════════
@@ -179,4 +181,6 @@ export type AgentCommand =
   | { action: 'set_model'; model: string }
   | { action: 'refresh_context' }
   | { action: 'send_key'; key: string }
-  | { action: 'session_viewed' };
+  | { action: 'session_viewed' }
+  | { action: 'session_focus' }
+  | { action: 'session_blur' };

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../../state/store';
 import { api } from '../../api';
-import { getFileIcon, isRenderable, isImageFile, escapeHtml, getMonacoLang, renderMd } from '../../utils';
+import { getFileIcon, isRenderable, isImageFile, escapeHtml, getMonacoLang, renderMd, renderMermaidBlocks } from '../../utils';
 import { HexViewer } from './HexViewer';
 import { useDraggableTabs } from '../../hooks/useDraggableTabs';
 import type { EditorFile } from '../../types';
@@ -261,6 +261,11 @@ function SourceEditorView({ file }: { file: EditorFile }) {
       run: () => saveCurrentFile(),
     });
 
+    // Force layout after mount to fix black area glitch
+    requestAnimationFrame(() => {
+      if (monacoEditor) monacoEditor.layout();
+    });
+
     return () => {
       disposable.dispose();
     };
@@ -333,7 +338,8 @@ function BinaryPlaceholder({ file, onSwitchView }: { file: EditorFile; onSwitchV
 function RenderedView({ file }: { file: EditorFile }) {
   const ext = file.path.split('.').pop()?.toLowerCase() || '';
   if (ext === 'md') {
-    return <div className="editor-rendered" style={{ display: 'block' }}><div className="md-preview" dangerouslySetInnerHTML={{ __html: renderMd(file.content) }} /></div>;
+    const html = renderMd(file.content);
+    return <div className="editor-rendered" style={{ display: 'block' }}><div className="md-preview" ref={el => { if (el) { el.innerHTML = html; renderMermaidBlocks(el); } }} /></div>;
   }
   if (ext === 'html' || ext === 'astro') {
     return <div className="editor-rendered" style={{ display: 'block' }}><iframe className="html-frame" srcDoc={file.content} sandbox="" style={{ width: '100%', height: '100%', border: 'none' }} /></div>;

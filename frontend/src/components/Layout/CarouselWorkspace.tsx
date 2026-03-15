@@ -88,39 +88,20 @@ function CarouselSlide({
   );
 }
 
-/* ── Clear attention on user interaction (mouse, keyboard, xterm input) ── */
-function useAttentionClear(sessionId: string, status: string, containerRef?: React.RefObject<HTMLElement | null>) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const onInteraction = useCallback(() => {
-    if (status !== 'attention') return;
-    if (timerRef.current) return;
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      sendAgentCommand(sessionId, { action: 'session_viewed' });
-    }, 500);
-  }, [sessionId, status]);
-
-  // Listen for xterm-activity custom events (keyboard input inside xterm)
+/* ── Track session focus/blur for attention state management ── */
+function useSessionFocusTracking(sessionId: string) {
   useEffect(() => {
-    const el = containerRef?.current;
-    if (!el) return;
-    const handler = () => onInteraction();
-    el.addEventListener('xterm-activity', handler);
-    return () => el.removeEventListener('xterm-activity', handler);
-  }, [onInteraction, containerRef]);
-
-  useEffect(() => {
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, []);
-
-  return onInteraction;
+    sendAgentCommand(sessionId, { action: 'session_focus' });
+    return () => {
+      sendAgentCommand(sessionId, { action: 'session_blur' });
+    };
+  }, [sessionId]);
 }
 
 /* ── Per-session TUI view ── */
 function SessionTui({ session }: { session: any }) {
   const tuiRef = useRef<HTMLDivElement>(null);
-  const onInteraction = useAttentionClear(session.id, session.status, tuiRef);
+  useSessionFocusTracking(session.id);
 
   useEffect(() => {
     if (tuiRef.current) {
@@ -128,7 +109,7 @@ function SessionTui({ session }: { session: any }) {
     }
   }, [session.id]);
 
-  return <div className="carousel-tui-view" ref={tuiRef} onPointerMoveCapture={onInteraction} onClickCapture={onInteraction} onKeyDownCapture={onInteraction}></div>;
+  return <div className="carousel-tui-view" ref={tuiRef}></div>;
 }
 
 /* ── Per-terminal view ── */

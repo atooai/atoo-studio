@@ -21,35 +21,31 @@ export function Workspace() {
   const activeSessions = proj.sessions.filter(s => s.status !== 'ended');
   const session = activeSessions[proj.activeSessionIdx || 0];
 
-  // Clear attention on user interaction when already viewing the session tab
-  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track session focus/blur — send continuous viewing state to backend
   const contentRef = useRef<HTMLDivElement>(null);
-  const handleSessionInteraction = useCallback(() => {
-    if (!session || session.status !== 'attention' || activeTabType !== 'session') return;
-    // Debounce: clear after 500ms of first interaction
-    if (clearTimerRef.current) return;
-    clearTimerRef.current = setTimeout(() => {
-      clearTimerRef.current = null;
-      // Don't re-check status — it may have transiently changed (PTY cursor activity).
-      // The user interacted while we were in attention, so always send session_viewed.
-      sendAgentCommand(session.id, { action: 'session_viewed' });
-    }, 500);
-  }, [session?.id, session?.status, activeTabType, activeProjectId]);
-
-  // Listen for xterm-activity custom events (keyboard input inside xterm)
+  const prevFocusedRef = useRef<string | null>(null);
   useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    const handler = () => handleSessionInteraction();
-    el.addEventListener('xterm-activity', handler);
-    return () => el.removeEventListener('xterm-activity', handler);
-  }, [handleSessionInteraction]);
+    const currentSessionId = (activeTabType === 'session' && session) ? session.id : null;
+    const prevSessionId = prevFocusedRef.current;
 
-  useEffect(() => {
+    // Blur previous session if we switched away
+    if (prevSessionId && prevSessionId !== currentSessionId) {
+      sendAgentCommand(prevSessionId, { action: 'session_blur' });
+    }
+    // Focus new session
+    if (currentSessionId && currentSessionId !== prevSessionId) {
+      sendAgentCommand(currentSessionId, { action: 'session_focus' });
+    }
+    prevFocusedRef.current = currentSessionId;
+
+    // On unmount, blur the current session
     return () => {
-      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+      if (prevFocusedRef.current) {
+        sendAgentCommand(prevFocusedRef.current, { action: 'session_blur' });
+        prevFocusedRef.current = null;
+      }
     };
-  }, []);
+  }, [session?.id, activeTabType, activeProjectId]);
 
   const layoutClass = previewVisible ? 'layout-wide' : 'layout-default';
   const rpClass = rightPanelCollapsed ? 'rp-collapsed' : '';
@@ -71,7 +67,7 @@ export function Workspace() {
         <div className="editor-splitter" id="editor-splitter" onMouseDown={(e) => (window as any).startEditorSplitterDrag(e.nativeEvent)}></div>
         <div className="sessions-area">
           <CenterTabs proj={proj} />
-          <div className="center-content" id="center-content" ref={contentRef} onMouseMoveCapture={handleSessionInteraction} onClickCapture={handleSessionInteraction} onKeyDownCapture={handleSessionInteraction}>
+          <div className="center-content" id="center-content" ref={contentRef}>
             <SessionLoadingOverlay />
             {session && activeTabType === 'session' && (
               <ViewToggle session={session} proj={proj} />

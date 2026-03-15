@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { agentRegistry } from '../agents/registry.js';
 import type { AgentCommand } from '../agents/types.js';
-import { getEnvIdForSession, markActivityViewed } from '../spawner.js';
+import { getEnvIdForSession, markSessionFocused, markSessionBlurred } from '../spawner.js';
 
 const AGENT_WS_PATH_RE = /^\/ws\/agent\/([^/?]+)/;
 
@@ -98,9 +98,21 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
       agent.sendKey(cmd.key);
       break;
     case 'session_viewed': {
+      // Legacy: treat as focus (backwards compat if old frontend connects)
       agent.markViewed();
       const envId = getEnvIdForSession(sessionId);
-      if (envId) markActivityViewed(envId);
+      if (envId) markSessionFocused(envId);
+      break;
+    }
+    case 'session_focus': {
+      agent.markViewed();
+      const envId2 = getEnvIdForSession(sessionId);
+      if (envId2) markSessionFocused(envId2);
+      break;
+    }
+    case 'session_blur': {
+      const envId3 = getEnvIdForSession(sessionId);
+      if (envId3) markSessionBlurred(envId3);
       break;
     }
     default:

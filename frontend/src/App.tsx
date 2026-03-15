@@ -487,6 +487,8 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
           title: h.title || 'Untitled',
           lastModified: h.lastModified,
           eventCount: h.eventCount,
+          ...(h.metaName ? { metaName: h.metaName } : {}),
+          ...(h.tags?.length ? { tags: h.tags } : {}),
         }));
 
       for (const s of matchingAgentSessions) {
@@ -1168,14 +1170,60 @@ function registerGlobalFunctions() {
   };
 
   win.revealInExplorer = (fullPath: string) => {
-    // Expand file tree to the given path by clicking through the tree
-    // For now, scroll the file-tree item into view if it exists
-    const el = document.querySelector(`[data-filepath="${CSS.escape(fullPath)}"]`);
-    if (el) {
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      el.classList.add('file-tree-highlight');
-      setTimeout(() => el.classList.remove('file-tree-highlight'), 2000);
+    const store = useStore.getState();
+    const proj = store.getActiveProject();
+    if (!proj) return;
+
+    // Ensure we're in tree view + all files filter for reveal
+    if (store.fileFilter !== 'all') store.setFileFilter('all');
+    if (store.fileView !== 'tree') store.setFileView('tree');
+
+    // Convert absolute path to relative path within project
+    const relativePath = fullPath.startsWith(proj.path + '/') ? fullPath.slice(proj.path.length + 1) : fullPath;
+
+    // Expand parent directories by clicking them open from root to leaf
+    const parts = relativePath.split('/');
+    let expandIdx = 0;
+
+    function expandNext() {
+      if (expandIdx >= parts.length - 1) {
+        // Final file — select and scroll into view
+        requestAnimationFrame(() => {
+          const fileEl = document.querySelector(`[data-path="${CSS.escape(relativePath)}"][data-type="file"]`) as HTMLElement;
+          if (fileEl) {
+            fileEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            fileEl.classList.add('file-tree-highlight');
+            fileEl.click();
+            setTimeout(() => fileEl.classList.remove('file-tree-highlight'), 2000);
+          }
+        });
+        return;
+      }
+
+      const dirPath = parts.slice(0, expandIdx + 1).join('/');
+      const dirEl = document.querySelector(`[data-path="${CSS.escape(dirPath)}"][data-type="dir"]`) as HTMLElement;
+      expandIdx++;
+
+      if (dirEl) {
+        // Check if dir is already expanded (has visible children)
+        const isExpanded = dirEl.nextElementSibling?.classList.contains('dir-children');
+        if (!isExpanded) {
+          dirEl.click(); // expand
+          // Wait for React to render children before continuing
+          requestAnimationFrame(() => expandNext());
+        } else {
+          expandNext();
+        }
+      } else {
+        // Dir element not in DOM yet, wait a frame and retry
+        requestAnimationFrame(() => {
+          expandIdx--;
+          expandNext();
+        });
+      }
     }
+
+    expandNext();
   };
 
   // Git actions
@@ -1877,6 +1925,9 @@ function registerGlobalFunctions() {
           messages: [], lastMessage: '', viewMode: defaultViewMode as 'chat' | 'tui',
           agentType: result.agentType, agentMode: result.agentMode,
           permissionMode: result.mode || 'bypassPermissions', model: result.model || null, _capabilities: result.capabilities,
+          ...(session.metaName ? { metaName: session.metaName } : {}),
+          ...(session.metaDescription ? { metaDescription: session.metaDescription } : {}),
+          ...(session.tags?.length ? { tags: session.tags } : {}),
         };
         store.updateProject(projId, p => ({
           ...p,
@@ -1927,6 +1978,8 @@ function registerGlobalFunctions() {
           agentType: result.agentType, agentMode: result.agentMode,
           permissionMode: result.mode || 'bypassPermissions', model: result.model || null, _capabilities: result.capabilities,
           cliSessionId: result.cliSessionId || null,
+          ...(histEntry?.metaName ? { metaName: histEntry.metaName } : {}),
+          ...(histEntry?.tags?.length ? { tags: histEntry.tags } : {}),
         };
         store.updateProject(projId, p => ({
           ...p,
@@ -2368,15 +2421,6 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
       fitAddon.fit();
     }
 
-    // xterm's canvas/textarea swallow mouse events — dispatch xterm-activity
-    // on mousemove so parent attention-clear handlers can detect mouse interaction
-    el.addEventListener('mousemove', () => {
-      const inst = terminalInstances[termId];
-      if (inst?.container) {
-        inst.container.dispatchEvent(new CustomEvent('xterm-activity', { bubbles: true }));
-      }
-    }, { passive: true });
-
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsPath = wsType === 'shell' ? 'shell' : 'terminal';
     const ws = new WebSocket(`${proto}//${location.host}/ws/${wsPath}/${targetId}`);
@@ -2386,12 +2430,6 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
     ws.onclose = () => { term.write('\r\n\x1b[90m[terminal disconnected]\x1b[0m\r\n'); };
     term.onData((data: string) => {
       if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data }));
-      // Bubble user activity up so attention-clear handlers can detect it
-      // Use inst.container (updated on reattach) rather than closure variable
-      const inst = terminalInstances[termId];
-      if (inst?.container) {
-        inst.container.dispatchEvent(new CustomEvent('xterm-activity', { bubbles: true }));
-      }
     });
     term.onResize(({ cols, rows }: any) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
 
