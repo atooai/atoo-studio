@@ -89,3 +89,36 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: atoo-studio-lxc-${{ matrix.arch }}.tar.gz
+
+  # ── Docs (Docusaurus → WebDAV) ──
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Build docs
+        run: |
+          cd docs
+          npm ci
+          npm run build
+
+      - name: Deploy to WebDAV
+        env:
+          WEBDAV_URL: ${{ vars.DOCS_WEBDAV_URL }}
+          WEBDAV_USER: ${{ vars.DOCS_WEBDAV_USER }}
+          WEBDAV_PASSWORD: ${{ secrets.DOCS_WEBDAV_PASSWORD }}
+        run: |
+          cd docs/build
+          # Create directories first, then upload files
+          find . -type d | sort | while read -r dir; do
+            curl -sf -u "$WEBDAV_USER:$WEBDAV_PASSWORD" -X MKCOL "$WEBDAV_URL/${dir#./}/" || true
+          done
+          find . -type f | while read -r file; do
+            curl -sf -u "$WEBDAV_USER:$WEBDAV_PASSWORD" -T "$file" "$WEBDAV_URL/${file#./}"
+          done

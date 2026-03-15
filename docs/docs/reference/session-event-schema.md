@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 # Session Event Schema
 
 ## How This Type Was Generated
@@ -88,7 +92,7 @@ The `toolUseResult` field on user events carries tool output in various shapes:
 
 | toolUseResult.type | Fields | Tool |
 |---|---|---|
-| `text` | file {content, filePath, numLines, startLine, totalLines} | Read |
+| `text` | file `{content, filePath, numLines, startLine, totalLines}` | Read |
 | `create` | content, filePath, originalFile, structuredPatch | Write |
 | `update` | content, filePath, originalFile, structuredPatch | Edit |
 | `unknown` | content, prompt, status, totalDurationMs, totalTokens, totalToolUseCount, usage | Agent |
@@ -101,4 +105,4 @@ The `toolUseResult` field on user events carries tool output in various shapes:
 | `local_command` | content | Slash command output (/context, etc.) |
 | `stop_hook_summary` | hookCount, hookInfos, hookErrors, hasOutput, preventedContinuation | Post-turn hook results |
 | `bridge_status` | content, url | Claude.ai bridge connection |
-| `compact_boundary` | compactMetadata {preTokens, trigger} | Context compaction marker |
+| `compact_boundary` | compactMetadata `{preTokens, trigger}` | Context compaction marker |
