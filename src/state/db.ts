@@ -105,7 +105,9 @@ export interface SessionMetadata {
 export interface ProjectChange {
   id: string;
   project_id: string;
-  description: string;
+  short_description: string;
+  long_description: string;
+  tags_json: string;
   approx_files_affected: number;
   session_id: string | null;
   created_at: string;
@@ -1031,38 +1033,61 @@ class StudioDatabase {
       CREATE TABLE IF NOT EXISTS project_changes (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        description TEXT NOT NULL,
+        short_description TEXT NOT NULL DEFAULT '',
+        long_description TEXT NOT NULL DEFAULT '',
+        tags_json TEXT NOT NULL DEFAULT '[]',
         approx_files_affected INTEGER NOT NULL DEFAULT 0,
         session_id TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
     `);
+    // Migrate from old schema that had a single 'description' column
+    const columns = this.db.prepare("PRAGMA table_info(project_changes)").all() as any[];
+    const hasOldDesc = columns.some((c: any) => c.name === 'description');
+    const hasShortDesc = columns.some((c: any) => c.name === 'short_description');
+    if (hasOldDesc && !hasShortDesc) {
+      this.db.exec(`
+        ALTER TABLE project_changes ADD COLUMN short_description TEXT NOT NULL DEFAULT '';
+        ALTER TABLE project_changes ADD COLUMN long_description TEXT NOT NULL DEFAULT '';
+        ALTER TABLE project_changes ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]';
+      `);
+      // Move old description into long_description, truncate for short
+      const rows = this.db.prepare('SELECT id, description FROM project_changes').all() as any[];
+      const stmt = this.db.prepare('UPDATE project_changes SET short_description = ?, long_description = ? WHERE id = ?');
+      for (const row of rows) {
+        const short = (row.description || '').split(/[.—\-\n]/)[0].trim().split(/\s+/).slice(0, 10).join(' ');
+        stmt.run(short, row.description || '', row.id);
+      }
+      console.log(`[db] Migrated ${rows.length} project_changes rows to new schema`);
+    }
   }
+
+  private readonly PC_COLS = 'id, project_id, short_description, long_description, tags_json, approx_files_affected, session_id, created_at';
 
   listProjectChanges(projectId: string): ProjectChange[] {
     return this.db.prepare(
-      'SELECT id, project_id, description, approx_files_affected, session_id, created_at FROM project_changes WHERE project_id = ? ORDER BY created_at DESC'
+      `SELECT ${this.PC_COLS} FROM project_changes WHERE project_id = ? ORDER BY created_at DESC`
     ).all(projectId) as ProjectChange[];
   }
 
   getProjectChange(id: string): ProjectChange | undefined {
     return this.db.prepare(
-      'SELECT id, project_id, description, approx_files_affected, session_id, created_at FROM project_changes WHERE id = ?'
+      `SELECT ${this.PC_COLS} FROM project_changes WHERE id = ?`
     ).get(id) as ProjectChange | undefined;
   }
 
-  createProjectChange(projectId: string, description: string, approxFilesAffected: number, sessionId: string | null): ProjectChange {
+  createProjectChange(projectId: string, shortDesc: string, longDesc: string, tags: string[], approxFilesAffected: number, sessionId: string | null): ProjectChange {
     const id = uuidv4();
     this.db.prepare(
-      'INSERT INTO project_changes (id, project_id, description, approx_files_affected, session_id) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, projectId, description, approxFilesAffected, sessionId || null);
+      'INSERT INTO project_changes (id, project_id, short_description, long_description, tags_json, approx_files_affected, session_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, projectId, shortDesc, longDesc, JSON.stringify(tags), approxFilesAffected, sessionId || null);
     return this.getProjectChange(id)!;
   }
 
-  updateProjectChange(id: string, description: string, approxFilesAffected: number): boolean {
+  updateProjectChange(id: string, shortDesc: string, longDesc: string, tags: string[], approxFilesAffected: number): boolean {
     const result = this.db.prepare(
-      'UPDATE project_changes SET description = ?, approx_files_affected = ? WHERE id = ?'
-    ).run(description, approxFilesAffected, id);
+      'UPDATE project_changes SET short_description = ?, long_description = ?, tags_json = ?, approx_files_affected = ? WHERE id = ?'
+    ).run(shortDesc, longDesc, JSON.stringify(tags), approxFilesAffected, id);
     return result.changes > 0;
   }
 

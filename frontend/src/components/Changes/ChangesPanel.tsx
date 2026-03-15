@@ -1,10 +1,12 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '../../api';
 
 interface ProjectChange {
   id: string;
   project_id: string;
-  description: string;
+  short_description: string;
+  long_description: string;
+  tags_json: string;
   approx_files_affected: number;
   session_id: string | null;
   created_at: string;
@@ -24,6 +26,55 @@ function timeAgo(dateStr: string): string {
   const months = Math.floor(days / 30);
   if (months < 12) return `${months}mo ago`;
   return `${Math.floor(months / 12)}y ago`;
+}
+
+function parseTags(tagsJson: string): string[] {
+  try { return JSON.parse(tagsJson || '[]'); } catch { return []; }
+}
+
+function ChangeCard({ change, onDelete, deleting }: {
+  change: ProjectChange;
+  onDelete: () => void;
+  deleting: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const tags = parseTags(change.tags_json);
+  const hasLong = !!change.long_description;
+
+  return (
+    <div className={`changes-card ${expanded ? 'expanded' : ''}`}>
+      <div
+        className="changes-card-header"
+        onClick={() => hasLong && setExpanded(!expanded)}
+        style={{ cursor: hasLong ? 'pointer' : 'default' }}
+      >
+        {hasLong && <span className="changes-card-chevron">{expanded ? '\u25BE' : '\u25B8'}</span>}
+        <div className="changes-card-headline">
+          <span className="changes-card-short">{change.short_description}</span>
+          {tags.length > 0 && (
+            <span className="changes-card-tags">
+              {tags.map((t, i) => <span key={i} className="changes-tag">{t}</span>)}
+            </span>
+          )}
+        </div>
+        <div className="changes-card-right">
+          <span className="changes-card-files">~{change.approx_files_affected}</span>
+          <span className="changes-card-time">{timeAgo(change.created_at)}</span>
+          <button
+            className="changes-card-delete"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            disabled={deleting}
+            title="Delete this entry"
+          >
+            {deleting ? '...' : '\u2715'}
+          </button>
+        </div>
+      </div>
+      {expanded && change.long_description && (
+        <div className="changes-card-long">{change.long_description}</div>
+      )}
+    </div>
+  );
 }
 
 export function ChangesPanel({ projectId }: { projectId: string }) {
@@ -49,13 +100,10 @@ export function ChangesPanel({ projectId }: { projectId: string }) {
     fetchChanges();
   }, [projectId]);
 
-  // Listen for WebSocket broadcast
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail.projectId === projectId) {
-        fetchChanges();
-      }
+      if (detail.projectId === projectId) fetchChanges();
     };
     window.addEventListener('project-changes-updated', handler);
     return () => window.removeEventListener('project-changes-updated', handler);
@@ -69,11 +117,7 @@ export function ChangesPanel({ projectId }: { projectId: string }) {
     } catch (err) {
       console.error('Failed to delete change:', err);
     } finally {
-      setDeletingIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
+      setDeletingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
   };
 
@@ -112,23 +156,12 @@ export function ChangesPanel({ projectId }: { projectId: string }) {
           <div className="changes-empty">No changes tracked yet</div>
         ) : (
           changes.map(c => (
-            <div key={c.id} className="changes-card">
-              <div className="changes-card-body">
-                <div className="changes-card-desc">{c.description}</div>
-                <div className="changes-card-meta">
-                  <span className="changes-card-files">~{c.approx_files_affected} file{c.approx_files_affected !== 1 ? 's' : ''}</span>
-                  <span className="changes-card-time">{timeAgo(c.created_at)}</span>
-                </div>
-              </div>
-              <button
-                className="changes-card-delete"
-                onClick={() => handleDelete(c.id)}
-                disabled={deletingIds.has(c.id)}
-                title="Delete this entry"
-              >
-                {deletingIds.has(c.id) ? '...' : '\u2715'}
-              </button>
-            </div>
+            <ChangeCard
+              key={c.id}
+              change={c}
+              onDelete={() => handleDelete(c.id)}
+              deleting={deletingIds.has(c.id)}
+            />
           ))
         )}
       </div>

@@ -464,36 +464,36 @@ server.tool(
 
 server.tool(
   'track_project_changes',
-  `MANDATORY: You MUST use this tool to help the user keep track of what was accomplished in the project. This is NON-NEGOTIABLE.
+  `MANDATORY: You MUST use this tool to help the user keep track of what was accomplished. This is NON-NEGOTIABLE.
 
-PURPOSE: The user often runs multiple agents in parallel on the same project — each working on different bugs, features, or chores. When the user is done "vibe coding", they need to know what was actually done across all sessions so they can review and test everything. This tool provides that overview. It is NOT about logging individual file changes — it is about recording high-level accomplishments that the user needs to review or test.
+The user often runs multiple agents in parallel on the same project. When they are done, they need to know what was actually done across all sessions so they can review and test everything. This tool provides that overview.
 
-WHEN TO USE:
-1. First call this tool with mode "get" to see what other sessions have already logged
-2. After completing a meaningful task (bug fix, feature, refactor, etc.), call with mode "set" to log a concise summary of what you accomplished and what the user should review or test
+Each entry has:
+- short_description: max 10 words — headline shown on the collapsed card
+- long_description: max 50 words — details shown when expanded, what to review/test
+- tags: array of short labels (max 3 words each, max 10 tags) — shown as badges
+- approx_files_affected: number
 
-Write descriptions from the user's perspective — what changed, what to test, what to look out for. Think of it as a note to the user, not a commit message.
+If your work needs more than 50 words to describe, split it into multiple entries.
 
-Good examples:
-- "Fixed login redirect loop — test login with expired session tokens"
-- "Added dark mode toggle to settings page — review UI in both themes"
-- "Refactored API error handling — check that error toasts still appear correctly"
-
-Bad examples (too granular / too vague):
-- "Modified src/auth.ts" (file-level noise)
-- "Made changes" (useless)
+Write from the user's perspective — NOT file-level noise like "modified src/foo.ts".
+Good: "Fixed login redirect loop" + long: "Test login with expired tokens, check redirect after password reset"
+Good: "Added dark mode toggle" + tags: ["settings page", "UI"] + long: "Review UI in both themes, check contrast on all panels"
+Bad: "Modified 3 files" or "Made changes"
 
 Modes:
 - "get": List all existing entries for the project. Call this first to see context.
-- "set": Create or update an entry. Provide description and approx_files_affected. If id is provided, updates that entry; if omitted, creates a new one.
+- "set": Create or update an entry. If id is provided, updates that entry; if omitted, creates a new one.
 - "delete": Delete a specific entry by id.`,
   {
     mode: z.enum(['get', 'set', 'delete']).describe('Operation mode'),
     id: z.string().optional().describe('ID of existing entry to update or delete. Leave empty to create new.'),
-    description: z.string().optional().describe('What was done (required for "set" mode)'),
+    short_description: z.string().optional().describe('Headline, max 10 words (required for "set" mode)'),
+    long_description: z.string().optional().describe('Details on what to review/test, max 50 words'),
+    tags: z.array(z.string()).optional().describe('Short labels (max 3 words each, max 10 tags)'),
     approx_files_affected: z.number().int().min(0).optional().describe('Approximate number of files affected (required for "set" mode)'),
   },
-  async ({ mode, id, description, approx_files_affected }) => {
+  async ({ mode, id, short_description, long_description, tags, approx_files_affected }) => {
     try {
       const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/track-changes`, {
         method: 'POST',
@@ -501,7 +501,9 @@ Modes:
         body: JSON.stringify({
           mode,
           id,
-          description,
+          short_description,
+          long_description,
+          tags,
           approx_files_affected,
           session_uuid: process.env.ATOO_CURRENT_SESSION_UUID || undefined,
           cwd: process.cwd(),
@@ -516,13 +518,15 @@ Modes:
         if (!data.changes || data.changes.length === 0) {
           return { content: [{ type: 'text' as const, text: 'No change entries tracked yet for this project.' }] };
         }
-        const lines = data.changes.map((c: any) =>
-          `[${c.id}] ${c.description} (~${c.approx_files_affected} files) — ${c.created_at}`
-        );
+        const lines = data.changes.map((c: any) => {
+          const t = c.tags_json ? JSON.parse(c.tags_json) : [];
+          const tagStr = t.length ? ` [${t.join(', ')}]` : '';
+          return `[${c.id}] ${c.short_description}${tagStr} (~${c.approx_files_affected} files) — ${c.created_at}`;
+        });
         return { content: [{ type: 'text' as const, text: `Project changes:\n${lines.join('\n')}` }] };
       } else if (mode === 'set') {
         const c = data.change;
-        return { content: [{ type: 'text' as const, text: `Change ${id ? 'updated' : 'created'}: [${c.id}] ${c.description} (~${c.approx_files_affected} files)` }] };
+        return { content: [{ type: 'text' as const, text: `Change ${id ? 'updated' : 'created'}: [${c.id}] ${c.short_description} (~${c.approx_files_affected} files)` }] };
       } else {
         return { content: [{ type: 'text' as const, text: data.message || 'Change deleted.' }] };
       }

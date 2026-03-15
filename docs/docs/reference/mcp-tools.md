@@ -98,12 +98,14 @@ Help the user keep track of what was accomplished across multiple parallel agent
 **Parameters:**
 - `mode` — `get`, `set`, or `delete`
 - `id` (optional) — ID of an existing entry to update or delete. Omit to create a new entry.
-- `description` — What was done and what to review/test (required for `set`)
+- `short_description` — Headline, max 10 words (required for `set`)
+- `long_description` (optional) — What to review/test, max 50 words
+- `tags` (optional) — Array of short labels (max 3 words each, max 10 tags)
 - `approx_files_affected` — Approximate number of files affected (required for `set`)
 
 The backend automatically fills `session_id` and `created_at`. Entries are visible in the **Changes** tab in the right panel.
 
-Descriptions should be actionable summaries, not file-level noise. Example: "Fixed login redirect loop — test login with expired tokens".
+Cards are collapsed by default (short description + tags). Click to expand and see the long description.
 
 ## Security
 

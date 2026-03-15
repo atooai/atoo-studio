@@ -478,7 +478,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // MCP callback: track project changes ("what has been done")
   app.post('/api/mcp/track-changes', async (req, res) => {
-    const { mode, id, description, approx_files_affected, session_uuid, cwd } = req.body;
+    const { mode, id, short_description, long_description, tags, approx_files_affected, session_uuid, cwd } = req.body;
     if (!mode) return res.status(400).json({ error: 'mode is required' });
 
     // Resolve project from cwd
@@ -491,7 +491,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         const changes = db.listProjectChanges(project.id);
         return res.json({ changes });
       } else if (mode === 'set') {
-        if (!description) return res.status(400).json({ error: 'description is required for set mode' });
+        if (!short_description) return res.status(400).json({ error: 'short_description is required for set mode' });
         if (approx_files_affected === undefined) return res.status(400).json({ error: 'approx_files_affected is required for set mode' });
 
         let change;
@@ -499,11 +499,11 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
           // Update existing
           const existing = db.getProjectChange(id);
           if (!existing) return res.status(404).json({ error: 'Change entry not found' });
-          db.updateProjectChange(id, description, approx_files_affected);
+          db.updateProjectChange(id, short_description, long_description || '', tags || [], approx_files_affected);
           change = db.getProjectChange(id);
         } else {
           // Create new
-          change = db.createProjectChange(project.id, description, approx_files_affected, session_uuid || null);
+          change = db.createProjectChange(project.id, short_description, long_description || '', tags || [], approx_files_affected, session_uuid || null);
         }
 
         // Broadcast to UI

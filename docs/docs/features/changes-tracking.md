@@ -6,30 +6,29 @@ sidebar_position: 3
 
 When you run multiple agents in parallel — each fixing bugs, adding features, or doing chores — it is easy to lose track of what was actually done. By the time all agents finish, you may not remember what to review or test.
 
-Changes Tracking solves this. Each agent logs a high-level summary of what it accomplished, so you always have a single place to see everything that happened across all sessions.
+Changes Tracking solves this. Each agent logs a scannable summary of what it accomplished, so you always have a single place to see everything that happened across all sessions.
 
 ## How It Works
 
 The `track_project_changes` MCP tool is available to all agents. Agents are instructed to:
 
 1. Call `get` at the start to see what other sessions have already logged
-2. Call `set` after completing a meaningful task to log what was done and what you should review or test
+2. Call `set` after completing a meaningful task to log what was done
 
-Entries are written from your perspective — not file-level noise, but actionable summaries like:
+Each entry has a structured format designed for quick scanning:
 
-- "Fixed login redirect loop — test login with expired session tokens"
-- "Added dark mode toggle to settings page — review UI in both themes"
-- "Refactored API error handling — check that error toasts still appear correctly"
+- **Short description** (max 10 words) — the headline, always visible
+- **Long description** (max 50 words) — details on what to review/test, shown when expanded
+- **Tags** (max 10, each max 3 words) — categorization badges
+- **Approx files affected** — scope indicator
 
-Each entry is automatically linked to the session that created it and timestamped by the backend.
+If work needs more than 50 words to describe, agents split it into multiple entries.
 
 ## Viewing Changes
 
-The **Changes** tab in the right panel shows all tracked entries for the current project, ordered by most recent first. Each card displays:
+The **Changes** tab in the right panel shows all tracked entries for the current project, ordered by most recent first.
 
-- **Description** — what was done and what to review
-- **Approximate files affected**
-- **Timestamp** (relative, e.g. "5m ago")
+Cards are **collapsed by default** showing only the short description, tags, file count, and timestamp. Click a card to expand it and see the long description with review/test instructions.
 
 ## Managing Entries
 
@@ -46,7 +45,9 @@ Entries persist across sessions and are stored in the database. Deleting a proje
 |-----------|------|----------|-------------|
 | `mode` | `get` \| `set` \| `delete` | Yes | Operation mode |
 | `id` | string | For `delete`, optional for `set` | Entry ID. Omit on `set` to create new. |
-| `description` | string | For `set` | What was done and what to review/test |
+| `short_description` | string | For `set` | Headline, max 10 words |
+| `long_description` | string | No | What to review/test, max 50 words |
+| `tags` | string[] | No | Short labels (max 3 words each, max 10) |
 | `approx_files_affected` | number | For `set` | Approximate number of files affected |
 
 The `session_id` and `created_at` fields are filled automatically by the backend.
