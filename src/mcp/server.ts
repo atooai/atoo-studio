@@ -464,17 +464,28 @@ server.tool(
 
 server.tool(
   'track_project_changes',
-  `MANDATORY: You MUST use this tool to track what you have done in the project. This is NON-NEGOTIABLE.
+  `MANDATORY: You MUST use this tool to help the user keep track of what was accomplished in the project. This is NON-NEGOTIABLE.
 
-Whenever you create, modify, or delete files, you MUST:
-1. First call this tool with mode "get" to see existing change entries
-2. Then call this tool with mode "set" to log what you did (leave id empty for new entries, provide id to update/refine an existing entry)
+PURPOSE: The user often runs multiple agents in parallel on the same project — each working on different bugs, features, or chores. When the user is done "vibe coding", they need to know what was actually done across all sessions so they can review and test everything. This tool provides that overview. It is NOT about logging individual file changes — it is about recording high-level accomplishments that the user needs to review or test.
 
-This creates a human-readable changelog of work done on the project. Every meaningful unit of work should be tracked.
+WHEN TO USE:
+1. First call this tool with mode "get" to see what other sessions have already logged
+2. After completing a meaningful task (bug fix, feature, refactor, etc.), call with mode "set" to log a concise summary of what you accomplished and what the user should review or test
+
+Write descriptions from the user's perspective — what changed, what to test, what to look out for. Think of it as a note to the user, not a commit message.
+
+Good examples:
+- "Fixed login redirect loop — test login with expired session tokens"
+- "Added dark mode toggle to settings page — review UI in both themes"
+- "Refactored API error handling — check that error toasts still appear correctly"
+
+Bad examples (too granular / too vague):
+- "Modified src/auth.ts" (file-level noise)
+- "Made changes" (useless)
 
 Modes:
-- "get": List all existing change entries for the project. No other params needed.
-- "set": Create or update a change entry. Provide description and approx_files_affected. If id is provided, updates that entry; if omitted, creates a new one.
+- "get": List all existing entries for the project. Call this first to see context.
+- "set": Create or update an entry. Provide description and approx_files_affected. If id is provided, updates that entry; if omitted, creates a new one.
 - "delete": Delete a specific entry by id.`,
   {
     mode: z.enum(['get', 'set', 'delete']).describe('Operation mode'),

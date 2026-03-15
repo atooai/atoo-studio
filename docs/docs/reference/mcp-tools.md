@@ -93,15 +93,17 @@ Open the database explorer with a specific connection.
 
 ### track_project_changes
 
-Track what has been done in a project. Agents use this to maintain a human-readable changelog of work performed. Each entry is scoped to a project and includes the session that created it.
+Help the user keep track of what was accomplished across multiple parallel agent sessions. Agents log high-level summaries of completed tasks so the user knows what to review and test. Each entry is scoped to a project and linked to the session that created it.
 
 **Parameters:**
 - `mode` — `get`, `set`, or `delete`
 - `id` (optional) — ID of an existing entry to update or delete. Omit to create a new entry.
-- `description` — What was done (required for `set`)
+- `description` — What was done and what to review/test (required for `set`)
 - `approx_files_affected` — Approximate number of files affected (required for `set`)
 
 The backend automatically fills `session_id` and `created_at`. Entries are visible in the **Changes** tab in the right panel.
+
+Descriptions should be actionable summaries, not file-level noise. Example: "Fixed login redirect loop — test login with expired tokens".
 
 ## Security
 
