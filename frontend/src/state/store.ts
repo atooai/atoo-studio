@@ -23,7 +23,7 @@ export interface AppState {
   activeTabType: 'session' | 'terminal';
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
-  rightPanelTab: 'sessions' | 'issues' | 'prs';
+  rightPanelTab: 'sessions' | 'issues' | 'prs' | 'changes';
   workspaceLayout: 'classic' | 'carousel';
 
   // Editor state
@@ -104,7 +104,7 @@ export interface AppState {
   setActiveTabType: (t: 'session' | 'terminal') => void;
   setSidebarCollapsed: (v: boolean) => void;
   setRightPanelCollapsed: (v: boolean) => void;
-  setRightPanelTab: (t: 'sessions' | 'issues' | 'prs') => void;
+  setRightPanelTab: (t: 'sessions' | 'issues' | 'prs' | 'changes') => void;
   setWorkspaceLayout: (v: 'classic' | 'carousel') => void;
   setOpenFiles: (files: EditorFile[]) => void;
   setActiveFileIdx: (idx: number) => void;

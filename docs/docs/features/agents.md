@@ -63,6 +63,12 @@ All session conversations are stored and searchable:
 
 Agents use this to recall past decisions, failed approaches, and implementation reasoning from previous sessions.
 
+## Changes Tracking
+
+Agents automatically log what they have done via the `track_project_changes` MCP tool. Each entry includes a description, approximate files affected, and a timestamp. View the full changelog in the **Changes** tab in the right panel.
+
+See [Changes Tracking](./changes-tracking.md) for details.
+
 ## Parallel Sessions
 
 Run multiple agents in parallel across different projects or branches. Each agent operates independently in its own terminal, and you can switch between them using the sidebar.

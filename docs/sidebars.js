@@ -8,6 +8,7 @@ const sidebars = {
       collapsed: false,
       items: [
         'features/agents',
+        'features/changes-tracking',
         'features/preview',
         'features/github',
         'features/git',

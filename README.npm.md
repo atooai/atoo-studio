@@ -31,6 +31,7 @@ docker run -p 3010:3010 ghcr.io/atooai/atoo-studio
 
 - **Multi-agent workflows** — Run Claude Code, Codex CLI and more in parallel across projects and worktrees
 - **Session forking & chaining** — Branch conversations, chain sessions across agents, search history via MCP
+- **Project changes tracking** — Know what was done, by which session, and when
 - **App preview** — Live preview via headless Chrome (CDP pixel streaming), with DevTools and responsive testing
 - **GitHub integration** — Issues, PRs, comments, labels — all from the workspace
 - **Git integration** — Branches, commits, worktrees, stash, diff views, one-click publish
@@ -91,9 +92,9 @@ sudo ./setup-cuse.sh
 
 ## MCP Tools
 
-Atoo Studio exposes 11 MCP tools for agent integration:
+Atoo Studio exposes MCP tools for agent integration:
 
-`generate_certificate` · `report_tcp_services` · `request_serial_device` · `search_session_history` · `suggest_continue_in_other_session` · `open_file` · `get_session_metadata` · `set_session_metadata` · `github_issue_pr_changed` · `connect_database`
+`generate_certificate` · `report_tcp_services` · `request_serial_device` · `search_session_history` · `suggest_continue_in_other_session` · `open_file` · `get_session_metadata` · `set_session_metadata` · `github_issue_pr_changed` · `connect_database` · `track_project_changes`
 
 ## Other Installation Methods
 

@@ -9,6 +9,7 @@ import { SessionsPanel } from '../Sessions/Sessions';
 import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
 import { IssueDetailPanel, IssueActionBar } from '../GitHub/IssueSessionView';
 import { PreviewPanel } from '../Preview/Preview';
+import { ChangesPanel } from '../Changes/ChangesPanel';
 import { AgentTabIcon } from './AgentTabIcon';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
 import { useDraggableTabs } from '../../hooks/useDraggableTabs';
@@ -361,7 +362,7 @@ function RightPanel({ proj }: { proj: any }) {
   const ghAvailable = ghStatus?.available ?? false;
 
   // Persist tab to project settings
-  const handleTabChange = (tab: 'sessions' | 'issues' | 'prs') => {
+  const handleTabChange = (tab: 'sessions' | 'issues' | 'prs' | 'changes') => {
     setRightPanelTab(tab);
     if (proj.pe_id) {
       import('../../api').then(({ api }) => {
@@ -394,13 +395,20 @@ function RightPanel({ proj }: { proj: any }) {
           >
             PRs
           </button>
+          <button
+            className={`rp-tab${rightPanelTab === 'changes' ? ' active' : ''}`}
+            onClick={() => handleTabChange('changes')}
+          >
+            Changes
+          </button>
         </div>
         <button className="rp-collapse-btn" onClick={() => setCollapsed(!collapsed)} title="Collapse/expand">&#x25b8;</button>
       </div>
       {rightPanelTab === 'sessions' && <SessionsPanel />}
       {rightPanelTab === 'issues' && ghStatus && <IssuesPanel projectId={proj.id} ghStatus={ghStatus} />}
       {rightPanelTab === 'prs' && ghStatus && <PullsPanel projectId={proj.id} ghStatus={ghStatus} />}
-      <div className="rp-collapsed-label" onClick={() => setCollapsed(false)}>Sessions / Issues / PRs</div>
+      {rightPanelTab === 'changes' && <ChangesPanel projectId={proj.id} />}
+      <div className="rp-collapsed-label" onClick={() => setCollapsed(false)}>Sessions / Issues / PRs / Changes</div>
     </div>
   );
 }

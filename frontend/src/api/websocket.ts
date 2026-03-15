@@ -344,6 +344,10 @@ function handleStatusMessage(msg: any) {
     window.dispatchEvent(new CustomEvent('github-issue-pr-changed', {
       detail: { repository: msg.repository, itemType: msg.itemType, number: msg.number, sessionUuid: msg.sessionUuid },
     }));
+  } else if (msg.type === 'project_changes_updated') {
+    window.dispatchEvent(new CustomEvent('project-changes-updated', {
+      detail: { projectId: msg.projectId },
+    }));
   } else if (msg.type === 'service_started' && msg.services) {
     const proj = store.projects.find((p) => msg.cwd && msg.cwd.startsWith(p.path));
     const projName = proj?.name || msg.cwd || 'Unknown';

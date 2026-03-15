@@ -476,6 +476,63 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   // MCP callback: database connect/query/schema (must be before auth wall)
   app.post('/api/mcp/connect-database', handleMcpConnectDatabase);
 
+  // MCP callback: track project changes ("what has been done")
+  app.post('/api/mcp/track-changes', async (req, res) => {
+    const { mode, id, description, approx_files_affected, session_uuid, cwd } = req.body;
+    if (!mode) return res.status(400).json({ error: 'mode is required' });
+
+    // Resolve project from cwd
+    const projectPath = cwd || process.cwd();
+    const project = db.findProjectByPath(projectPath);
+    if (!project) return res.status(404).json({ error: `No project found for path: ${projectPath}` });
+
+    try {
+      if (mode === 'get') {
+        const changes = db.listProjectChanges(project.id);
+        return res.json({ changes });
+      } else if (mode === 'set') {
+        if (!description) return res.status(400).json({ error: 'description is required for set mode' });
+        if (approx_files_affected === undefined) return res.status(400).json({ error: 'approx_files_affected is required for set mode' });
+
+        let change;
+        if (id) {
+          // Update existing
+          const existing = db.getProjectChange(id);
+          if (!existing) return res.status(404).json({ error: 'Change entry not found' });
+          db.updateProjectChange(id, description, approx_files_affected);
+          change = db.getProjectChange(id);
+        } else {
+          // Create new
+          change = db.createProjectChange(project.id, description, approx_files_affected, session_uuid || null);
+        }
+
+        // Broadcast to UI
+        const msg = JSON.stringify({ type: 'project_changes_updated', projectId: project.id });
+        for (const ws of store.statusClients) {
+          if (ws.readyState === 1) ws.send(msg);
+        }
+
+        return res.json({ change });
+      } else if (mode === 'delete') {
+        if (!id) return res.status(400).json({ error: 'id is required for delete mode' });
+        const deleted = db.deleteProjectChange(id);
+        if (!deleted) return res.status(404).json({ error: 'Change entry not found' });
+
+        // Broadcast to UI
+        const msg = JSON.stringify({ type: 'project_changes_updated', projectId: project.id });
+        for (const ws of store.statusClients) {
+          if (ws.readyState === 1) ws.send(msg);
+        }
+
+        return res.json({ message: 'Change deleted' });
+      } else {
+        return res.status(400).json({ error: `Unknown mode: ${mode}` });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ═══════════════════════════════════════════════════════
   // Auth middleware — protects all routes below this point
   // Routes above (CA certs, auth, MCP callbacks) are exempt
@@ -633,6 +690,23 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
 
   // Mount changes API routes
   app.use(changesRouter);
+
+  // Project changes ("what has been done") — REST API for frontend
+  app.get('/api/projects/:id/changes', (req, res) => {
+    const changes = db.listProjectChanges(req.params.id);
+    res.json({ changes });
+  });
+
+  app.delete('/api/projects/:id/changes/:changeId', (req, res) => {
+    const deleted = db.deleteProjectChange(req.params.changeId);
+    if (!deleted) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  });
+
+  app.delete('/api/projects/:id/changes', (req, res) => {
+    const count = db.deleteAllProjectChanges(req.params.id);
+    res.json({ deleted: count });
+  });
 
   // Mount project/file/git API routes
   app.use(projectsRouter);

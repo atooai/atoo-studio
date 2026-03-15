@@ -102,6 +102,15 @@ export interface SessionMetadata {
   tags: string[];
 }
 
+export interface ProjectChange {
+  id: string;
+  project_id: string;
+  description: string;
+  approx_files_affected: number;
+  session_id: string | null;
+  created_at: string;
+}
+
 class StudioDatabase {
   private db: Database.Database;
 
@@ -123,6 +132,7 @@ class StudioDatabase {
     this.migrateUserManagement();
     this.migrateSessionMetadata();
     this.migrateDatabaseConnections();
+    this.migrateProjectChanges();
   }
 
   private initSchema(): void {
@@ -1010,6 +1020,60 @@ class StudioDatabase {
 
   deleteDbConnection(id: string): void {
     this.db.prepare(`DELETE FROM saved_db_connections WHERE id = ?`).run(id);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // PROJECT CHANGES ("What has been done" tracking)
+  // ═══════════════════════════════════════════════════
+
+  private migrateProjectChanges(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS project_changes (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        description TEXT NOT NULL,
+        approx_files_affected INTEGER NOT NULL DEFAULT 0,
+        session_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  }
+
+  listProjectChanges(projectId: string): ProjectChange[] {
+    return this.db.prepare(
+      'SELECT id, project_id, description, approx_files_affected, session_id, created_at FROM project_changes WHERE project_id = ? ORDER BY created_at DESC'
+    ).all(projectId) as ProjectChange[];
+  }
+
+  getProjectChange(id: string): ProjectChange | undefined {
+    return this.db.prepare(
+      'SELECT id, project_id, description, approx_files_affected, session_id, created_at FROM project_changes WHERE id = ?'
+    ).get(id) as ProjectChange | undefined;
+  }
+
+  createProjectChange(projectId: string, description: string, approxFilesAffected: number, sessionId: string | null): ProjectChange {
+    const id = uuidv4();
+    this.db.prepare(
+      'INSERT INTO project_changes (id, project_id, description, approx_files_affected, session_id) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, projectId, description, approxFilesAffected, sessionId || null);
+    return this.getProjectChange(id)!;
+  }
+
+  updateProjectChange(id: string, description: string, approxFilesAffected: number): boolean {
+    const result = this.db.prepare(
+      'UPDATE project_changes SET description = ?, approx_files_affected = ? WHERE id = ?'
+    ).run(description, approxFilesAffected, id);
+    return result.changes > 0;
+  }
+
+  deleteProjectChange(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM project_changes WHERE id = ?').run(id);
+    return result.changes > 0;
+  }
+
+  deleteAllProjectChanges(projectId: string): number {
+    const result = this.db.prepare('DELETE FROM project_changes WHERE project_id = ?').run(projectId);
+    return result.changes;
   }
 
   // LIFECYCLE

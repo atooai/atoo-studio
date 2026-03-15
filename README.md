@@ -73,6 +73,7 @@ Atoo Studio was built from that exact pain: creating a workspace that actually m
 - Chain sessions across agents, so you can start with Claude Code and continue with Codex using the same conversation history.
 - Search session history via MCP so agents can reuse past decisions, failed attempts, and implementation context.
 - Set session names, descriptions, and tags for better navigation and recall.
+- Track project-level changes so you always know what has been done, by which session, and when.
 
 ### Preview and debugging
 
@@ -263,6 +264,7 @@ Atoo Studio exposes MCP tools that let agents talk back to the workspace UI.
 | `set_session_metadata` | Set session name, description, and tags |
 | `github_issue_pr_changed` | Notify the UI when a GitHub issue or PR changes |
 | `connect_database` | Open the database explorer with a specific connection |
+| `track_project_changes` | Track what has been done in a project (get/set/delete) |
 
 ## Commercial support
 

@@ -6,6 +6,7 @@ import { GitHistory } from '../Git/GitHistory';
 import { EditorArea } from '../Editor/Editor';
 import { SessionsPanel } from '../Sessions/Sessions';
 import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel';
+import { ChangesPanel } from '../Changes/ChangesPanel';
 import { PreviewPanel } from '../Preview/Preview';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
 import { AgentTabIcon } from './AgentTabIcon';
@@ -323,11 +324,13 @@ function SessionsSlide({ proj }: { proj: any }) {
             <button className={`rp-tab${rightPanelTab === 'sessions' ? ' active' : ''}`} onClick={() => setRightPanelTab('sessions')}>Sessions</button>
             <button className={`rp-tab${rightPanelTab === 'issues' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`} onClick={() => ghAvailable && setRightPanelTab('issues')}>Issues</button>
             <button className={`rp-tab${rightPanelTab === 'prs' ? ' active' : ''}${!ghAvailable ? ' disabled' : ''}`} onClick={() => ghAvailable && setRightPanelTab('prs')}>PRs</button>
+            <button className={`rp-tab${rightPanelTab === 'changes' ? ' active' : ''}`} onClick={() => setRightPanelTab('changes')}>Changes</button>
           </div>
         </div>
         {rightPanelTab === 'sessions' && <SessionsPanel />}
         {rightPanelTab === 'issues' && ghStatus && <IssuesPanel projectId={proj.id} ghStatus={ghStatus} />}
         {rightPanelTab === 'prs' && ghStatus && <PullsPanel projectId={proj.id} ghStatus={ghStatus} />}
+        {rightPanelTab === 'changes' && <ChangesPanel projectId={proj.id} />}
       </div>
     </div>
   );

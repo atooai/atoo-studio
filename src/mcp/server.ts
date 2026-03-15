@@ -462,6 +462,65 @@ server.tool(
   },
 );
 
+server.tool(
+  'track_project_changes',
+  `MANDATORY: You MUST use this tool to track what you have done in the project. This is NON-NEGOTIABLE.
+
+Whenever you create, modify, or delete files, you MUST:
+1. First call this tool with mode "get" to see existing change entries
+2. Then call this tool with mode "set" to log what you did (leave id empty for new entries, provide id to update/refine an existing entry)
+
+This creates a human-readable changelog of work done on the project. Every meaningful unit of work should be tracked.
+
+Modes:
+- "get": List all existing change entries for the project. No other params needed.
+- "set": Create or update a change entry. Provide description and approx_files_affected. If id is provided, updates that entry; if omitted, creates a new one.
+- "delete": Delete a specific entry by id.`,
+  {
+    mode: z.enum(['get', 'set', 'delete']).describe('Operation mode'),
+    id: z.string().optional().describe('ID of existing entry to update or delete. Leave empty to create new.'),
+    description: z.string().optional().describe('What was done (required for "set" mode)'),
+    approx_files_affected: z.number().int().min(0).optional().describe('Approximate number of files affected (required for "set" mode)'),
+  },
+  async ({ mode, id, description, approx_files_affected }) => {
+    try {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/track-changes`, {
+        method: 'POST',
+        headers: mcpHeaders(),
+        body: JSON.stringify({
+          mode,
+          id,
+          description,
+          approx_files_affected,
+          session_uuid: process.env.ATOO_CURRENT_SESSION_UUID || undefined,
+          cwd: process.cwd(),
+        }),
+      });
+      const data = await res.json() as any;
+      if (!res.ok) {
+        return { content: [{ type: 'text' as const, text: `Failed: ${data.error}` }] };
+      }
+
+      if (mode === 'get') {
+        if (!data.changes || data.changes.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No change entries tracked yet for this project.' }] };
+        }
+        const lines = data.changes.map((c: any) =>
+          `[${c.id}] ${c.description} (~${c.approx_files_affected} files) — ${c.created_at}`
+        );
+        return { content: [{ type: 'text' as const, text: `Project changes:\n${lines.join('\n')}` }] };
+      } else if (mode === 'set') {
+        const c = data.change;
+        return { content: [{ type: 'text' as const, text: `Change ${id ? 'updated' : 'created'}: [${c.id}] ${c.description} (~${c.approx_files_affected} files)` }] };
+      } else {
+        return { content: [{ type: 'text' as const, text: data.message || 'Change deleted.' }] };
+      }
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Failed: ${err.message}` }] };
+    }
+  },
+);
+
 const DB_TYPES = [
   'postgresql', 'mysql', 'mariadb', 'sqlite', 'redis', 'mongodb',
   'elasticsearch', 'opensearch', 'clickhouse', 'cockroachdb',
