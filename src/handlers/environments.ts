@@ -287,7 +287,15 @@ environmentsRouter.get('/api/project-links/:peId/settings', (req, res) => {
 });
 
 environmentsRouter.put('/api/project-links/:peId/settings', (req, res) => {
-  db.updateProjectSettings(req.params.peId, req.body);
+  try {
+    db.updateProjectSettings(req.params.peId, req.body);
+  } catch (e: any) {
+    if (e.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+      res.status(404).json({ error: 'Project link not found' });
+      return;
+    }
+    throw e;
+  }
   const settings = db.getProjectSettings(req.params.peId);
   broadcastSettingsChange('project', req.params.peId, settings, (req as any)._settingsWs);
   res.json(settings);

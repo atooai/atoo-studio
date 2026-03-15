@@ -1,5 +1,4 @@
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 
 // Resolve the project root — works for both tsx (src/config.ts) and compiled (dist/src/config.js)
@@ -17,21 +16,3 @@ export const WEB_CERT_PATH = `${CERTS_DIR}web-cert.pem`;
 export const WEB_KEY_PATH = `${CERTS_DIR}web-key.pem`;
 export const CDP_PORT_START = 9300;
 export const CDP_PORT_END = 9399;
-
-// Docker preview settings
-export const DOCKER_PREVIEW_IMAGE = 'atoo-studio-preview:latest';
-export const DOCKER_PREVIEW_SOCKET_DIR = path.join(os.tmpdir(), 'atoo-studio-preview-sockets');
-import { execSync as _execSync } from 'child_process';
-
-function detectContainerRuntime(): string {
-  if (process.env.ATOO_CONTAINER_RUNTIME) return process.env.ATOO_CONTAINER_RUNTIME;
-  for (const cmd of ['docker', 'podman']) {
-    try {
-      _execSync(`${cmd} --version`, { stdio: 'ignore' });
-      return cmd;
-    } catch {}
-  }
-  return 'docker'; // default even if not found — will fail gracefully later
-}
-
-export const DOCKER_RUNTIME = detectContainerRuntime();

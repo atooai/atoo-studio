@@ -4,12 +4,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Duplex } from 'stream';
 import { previewManager } from '../services/preview-manager.js';
 
-/** Make an HTTP GET request — via TCP port or unix socket */
-function httpGet(instance: { cdpPort?: number; cdpSocketPath?: string }, urlPath: string): Promise<string> {
+/** Make an HTTP GET request to Chrome's CDP endpoint */
+function httpGet(instance: { cdpPort?: number }, urlPath: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const opts = instance.cdpPort
-      ? { host: 'localhost', port: instance.cdpPort, path: urlPath }
-      : { socketPath: instance.cdpSocketPath!, path: urlPath };
+    const opts = { host: 'localhost', port: instance.cdpPort!, path: urlPath };
     const req = http.get(opts, (resp) => {
       const chunks: Buffer[] = [];
       resp.on('data', (c: Buffer) => chunks.push(c));
@@ -20,13 +18,9 @@ function httpGet(instance: { cdpPort?: number; cdpSocketPath?: string }, urlPath
   });
 }
 
-/** Build WS URL to Chrome CDP — via TCP or unix socket */
-function buildCdpWsUrl(instance: { cdpPort?: number; cdpSocketPath?: string }, cdpPath: string): string {
-  if (instance.cdpPort) {
-    return `ws://localhost:${instance.cdpPort}/${cdpPath}`;
-  }
-  // ws+unix:// for connecting via unix socket
-  return `ws+unix://${instance.cdpSocketPath}:/${cdpPath}`;
+/** Build WS URL to Chrome CDP */
+function buildCdpWsUrl(instance: { cdpPort?: number }, cdpPath: string): string {
+  return `ws://localhost:${instance.cdpPort}/${cdpPath}`;
 }
 
 // HTTP proxy middleware for Chrome DevTools frontend
@@ -40,7 +34,7 @@ export function devtoolsProxyMiddleware(): express.Router {
     if (!instance) {
       return res.status(404).json({ error: 'Preview instance not found' });
     }
-    if (!instance.cdpPort && !instance.cdpSocketPath) {
+    if (!instance.cdpPort) {
       return res.status(400).json({ error: 'DevTools not available for this instance' });
     }
 
@@ -81,7 +75,7 @@ export function devtoolsProxyMiddleware(): express.Router {
     if (!instance) {
       return res.status(404).json({ error: 'Preview instance not found' });
     }
-    if (!instance.cdpPort && !instance.cdpSocketPath) {
+    if (!instance.cdpPort) {
       return res.status(400).json({ error: 'DevTools not available for this instance' });
     }
 
@@ -90,9 +84,7 @@ export function devtoolsProxyMiddleware(): express.Router {
     const targetPath = `/devtools/${devtoolsPath}${queryString}`;
 
     try {
-      const opts = instance.cdpPort
-        ? { host: 'localhost', port: instance.cdpPort, path: targetPath }
-        : { socketPath: instance.cdpSocketPath!, path: targetPath };
+      const opts = { host: 'localhost', port: instance.cdpPort!, path: targetPath };
 
       const proxyReq = http.get(opts, (proxyRes) => {
         res.status(proxyRes.statusCode || 200);
@@ -138,7 +130,7 @@ export function handleDevtoolsWsUpgrade(
   const cdpPath = match[3];
 
   const instance = previewManager.get(projectId, tabId);
-  if (!instance || (!instance.cdpPort && !instance.cdpSocketPath)) {
+  if (!instance || !instance.cdpPort) {
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
     socket.destroy();
     return;

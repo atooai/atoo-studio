@@ -18,8 +18,6 @@ export interface PreviewInstanceBase {
   targetPort: number;
   /** CDP port — only available in headless mode */
   cdpPort?: number;
-  /** CDP unix socket path — only available in Docker mode */
-  cdpSocketPath?: string;
   headerHost?: string;
   protocol: 'http' | 'https';
   viewport: PreviewViewport;
@@ -48,7 +46,7 @@ export interface CreatePreviewOpts {
 }
 
 export interface PreviewBackend {
-  readonly mode: 'headless' | 'docker';
+  readonly mode: 'headless';
 
   create(key: string, opts: CreatePreviewOpts): Promise<PreviewInstanceBase>;
   destroy(instance: PreviewInstanceBase): Promise<void>;

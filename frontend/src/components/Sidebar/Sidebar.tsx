@@ -134,8 +134,17 @@ function ProjectItem({ project: p, isActive, isChild, hasChildren }: { project: 
               ? `?deleteProject=true${deleteFiles ? '&deleteFiles=true' : ''}`
               : '';
             await api('DELETE', `/api/project-links/${p.pe_id}${params}`);
-            const current = useStore.getState().projects;
-            setProjects(current.filter(proj => proj.id !== p.id));
+            const state = useStore.getState();
+            const remaining = state.projects.filter(proj => proj.id !== p.id);
+            setProjects(remaining);
+            // If we just removed the active project, select another or clear
+            if (state.activeProjectId === p.id) {
+              if (remaining.length > 0) {
+                (window as any).selectProject(remaining[0].id, remaining[0].pe_id || '');
+              } else {
+                useStore.setState({ activeProjectId: null, activeProjectEnvironmentId: null, openFiles: [], activeFileIdx: -1 });
+              }
+            }
             addToast(p.name, deleteFiles ? 'Project removed and files deleted' : 'Project removed', 'success');
             setModal(null);
           } catch (e: any) {

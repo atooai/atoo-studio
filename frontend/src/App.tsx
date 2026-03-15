@@ -294,6 +294,14 @@ async function reloadProjects() {
       };
     });
     store.setProjects(newProjects);
+    // If the active project was removed (e.g. deleted from another tab), select another
+    if (store.activeProjectId && !newProjects.find((p: any) => p.id === store.activeProjectId)) {
+      if (newProjects.length > 0) {
+        selectProject(newProjects[0].id, newProjects[0].pe_id);
+      } else {
+        useStore.setState({ activeProjectId: null, activeProjectEnvironmentId: null, openFiles: [], activeFileIdx: -1 });
+      }
+    }
   } catch {}
 }
 

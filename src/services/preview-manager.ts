@@ -1,7 +1,6 @@
 import { WebSocket } from 'ws';
 import { PreviewBackend, PreviewInstanceBase, CreatePreviewOpts } from './preview/preview-backend.js';
 import { HeadlessBackend } from './preview/headless-backend.js';
-import { DockerBackend } from './preview/docker-backend.js';
 
 const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 const CLEANUP_INTERVAL = 10 * 1000; // 10 seconds (also serves as stream watchdog)

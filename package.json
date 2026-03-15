@@ -18,7 +18,6 @@
     "src/serial/native/pty_pair.c"
   ],
   "scripts": {
-    "setup": "tsx scripts/setup.ts",
     "dev": "tsx --watch src/index.ts & cd frontend && npx vite build --watch & wait",
     "start": "tsx src/index.ts",
     "build:preload": "make -C preload",

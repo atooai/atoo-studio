@@ -93,7 +93,41 @@ async function main() {
 const knownSans = new Set<string>();
 let webKeyPem: string = '';
 
+function ensureCACert(): void {
+  if (fs.existsSync(CA_CERT_PATH)) return;
+
+  console.log('[tls] First run — generating CA certificate...');
+  fs.mkdirSync(path.dirname(CA_CERT_PATH), { recursive: true });
+
+  const keys = forge.pki.rsa.generateKeyPair(2048);
+  const cert = forge.pki.createCertificate();
+  cert.publicKey = keys.publicKey;
+  cert.serialNumber = '01';
+  cert.validity.notBefore = new Date();
+  cert.validity.notAfter = new Date();
+  cert.validity.notAfter.setFullYear(cert.validity.notAfter.getFullYear() + 10);
+
+  const attrs = [
+    { name: 'commonName', value: 'Atoo Studio Local CA' },
+    { name: 'organizationName', value: 'Atoo Studio' },
+  ];
+  cert.setSubject(attrs);
+  cert.setIssuer(attrs);
+  cert.setExtensions([
+    { name: 'basicConstraints', cA: true, critical: true },
+    { name: 'keyUsage', keyCertSign: true, cRLSign: true, critical: true },
+    { name: 'subjectKeyIdentifier' },
+  ]);
+  cert.sign(keys.privateKey, forge.md.sha256.create());
+
+  fs.writeFileSync(CA_CERT_PATH, forge.pki.certificateToPem(cert));
+  fs.writeFileSync(CA_KEY_PATH, forge.pki.privateKeyToPem(keys.privateKey), { mode: 0o600 });
+  console.log('[tls] CA certificate generated.');
+}
+
 function getOrCreateWebCert(): { key: string; cert: string } {
+  ensureCACert();
+
   // Seed known SANs with local IPs
   knownSans.add('localhost');
   knownSans.add('127.0.0.1');

@@ -14,13 +14,13 @@ export function ConfirmDialog({ title, message, confirmLabel = 'Delete', danger 
   const ref = useRef<HTMLDivElement>(null);
 
   const handleConfirm = () => {
-    onConfirm();
     onClose();
+    onConfirm();
   };
 
   const handleSecondary = () => {
-    secondaryAction!.onClick();
     onClose();
+    secondaryAction!.onClick();
   };
 
   useEffect(() => {
