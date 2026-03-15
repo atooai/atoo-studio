@@ -192,8 +192,8 @@ changesRouter.post('/api/sessions/:id/changes/revert-all', async (req, res) => {
 });
 
 // GET /api/objects/:hash — download raw file content from object store
-changesRouter.get('/api/objects/:hash(*)', async (req, res) => {
-  const hash = req.params.hash;
+changesRouter.get('/api/objects/{*hash}', async (req, res) => {
+  const hash = Array.isArray(req.params.hash) ? req.params.hash.join('/') : (req.params.hash ?? '') as string;
   if (!hash) return res.status(400).json({ error: 'Hash required' });
 
   const content = await fsMonitor.getFileContent(hash);

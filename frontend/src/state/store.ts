@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment, SerialRequest, ReportedService } from '../types';
+import { DEVICE_PRESETS } from '../data/device-presets';
 
 export interface AppState {
   // Environment state
@@ -226,22 +227,19 @@ export const useStore = create<AppState>((set, get) => ({
   setPreviewResponsive: (v) => set({ previewResponsive: v }),
   setPreviewViewport: (w, h) => set({ previewViewportWidth: w, previewViewportHeight: h, previewDevicePreset: 'custom' }),
   setPreviewDevicePreset: (id) => {
-    // Import device presets dynamically to set dpr/mobile/touch along with dimensions
-    import('../data/device-presets').then(({ DEVICE_PRESETS }) => {
-      const preset = DEVICE_PRESETS.find(p => p.id === id);
-      if (preset) {
-        set({
-          previewDevicePreset: id,
-          previewViewportWidth: preset.width,
-          previewViewportHeight: preset.height,
-          previewDpr: preset.dpr,
-          previewIsMobile: preset.isMobile,
-          previewHasTouch: preset.hasTouch,
-        });
-      } else {
-        set({ previewDevicePreset: id });
-      }
-    });
+    const preset = DEVICE_PRESETS.find(p => p.id === id);
+    if (preset) {
+      set({
+        previewDevicePreset: id,
+        previewViewportWidth: preset.width,
+        previewViewportHeight: preset.height,
+        previewDpr: preset.dpr,
+        previewIsMobile: preset.isMobile,
+        previewHasTouch: preset.hasTouch,
+      });
+    } else {
+      set({ previewDevicePreset: id });
+    }
   },
   setPreviewZoom: (z) => set({ previewZoom: z }),
   setPreviewDpr: (d) => set({ previewDpr: d }),

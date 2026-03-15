@@ -532,14 +532,18 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         const result = await mammoth.default.extractRawText({ buffer: buf });
         text = result.value;
       } else if (ext === 'xlsx' || ext === 'xls') {
-        const XLSX = await import('xlsx');
-        const workbook = XLSX.read(buf, { type: 'buffer' });
+        const ExcelJS = await import('exceljs');
+        const workbook = new ExcelJS.default.Workbook();
+        await workbook.xlsx.load(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
         const sheets: string[] = [];
-        for (const sheetName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sheetName];
-          const csv = XLSX.utils.sheet_to_csv(sheet);
-          sheets.push(`--- Sheet: ${sheetName} ---\n${csv}`);
-        }
+        workbook.eachSheet((sheet) => {
+          const rows: string[] = [];
+          sheet.eachRow((row) => {
+            const values = (row.values as any[]).slice(1); // ExcelJS row.values is 1-indexed
+            rows.push(values.map(v => v ?? '').join(','));
+          });
+          sheets.push(`--- Sheet: ${sheet.name} ---\n${rows.join('\n')}`);
+        });
         text = sheets.join('\n\n');
       } else if (ext === 'pptx') {
         // pptx is a zip of XML slides — extract text from slide XML files
@@ -959,7 +963,7 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   const projectRoot = PROJECT_ROOT;
   const frontendDist = path.join(projectRoot, 'frontend', 'dist');
   app.use(express.static(frontendDist));
-  app.get('*', (req, res, next) => {
+  app.get('{*path}', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/ws/')) return next();
     res.sendFile(path.join(frontendDist, 'index.html'), (err) => {
       if (err) {

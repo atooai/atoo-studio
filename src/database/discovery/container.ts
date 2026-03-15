@@ -29,7 +29,6 @@ const IMAGE_DB_MAP: Record<string, DbType> = {
   cockroachdb: 'cockroachdb',
   cockroach: 'cockroachdb',
   memcached: 'memcached',
-  duckdb: 'duckdb',
 };
 
 const DEFAULT_PORTS: Partial<Record<DbType, number>> = {

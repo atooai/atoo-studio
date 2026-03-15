@@ -174,7 +174,7 @@ databasesRouter.post('/api/databases/reconnect', async (req: Request, res: Respo
 // Delete a saved connection
 databasesRouter.delete('/api/databases/saved/:id', async (req: Request, res: Response) => {
   try {
-    db.deleteDbConnection(req.params.id);
+    db.deleteDbConnection(req.params.id as string);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -234,7 +234,7 @@ databasesRouter.post('/api/databases/update-cell', async (req: Request, res: Res
 
 databasesRouter.get('/api/databases/:connectionId/tables', async (req: Request, res: Response) => {
   try {
-    const tables = await connectionManager.getTables(req.params.connectionId);
+    const tables = await connectionManager.getTables(req.params.connectionId as string);
     res.json(tables);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -243,7 +243,7 @@ databasesRouter.get('/api/databases/:connectionId/tables', async (req: Request, 
 
 databasesRouter.get('/api/databases/:connectionId/tables/:table', async (req: Request, res: Response) => {
   try {
-    const schema = await connectionManager.describeTable(req.params.connectionId, req.params.table);
+    const schema = await connectionManager.describeTable(req.params.connectionId as string, req.params.table as string);
     res.json(schema);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -252,7 +252,7 @@ databasesRouter.get('/api/databases/:connectionId/tables/:table', async (req: Re
 
 databasesRouter.get('/api/databases/:connectionId/databases', async (req: Request, res: Response) => {
   try {
-    const databases = await connectionManager.getDatabases(req.params.connectionId);
+    const databases = await connectionManager.getDatabases(req.params.connectionId as string);
     res.json(databases);
   } catch (e: any) {
     res.status(500).json({ error: e.message });

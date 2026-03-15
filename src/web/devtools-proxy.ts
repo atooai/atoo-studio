@@ -69,8 +69,8 @@ export function devtoolsProxyMiddleware(): express.Router {
   });
 
   // Proxy DevTools frontend files: /apps/:projectId/:tabId/devtools/*
-  router.get('/apps/:projectId/:tabId/devtools/*', async (req, res) => {
-    const { projectId, tabId } = req.params;
+  router.get('/apps/:projectId/:tabId/devtools/{*rest}', async (req, res) => {
+    const projectId = req.params.projectId as string, tabId = req.params.tabId as string;
     const instance = previewManager.get(projectId, tabId);
     if (!instance) {
       return res.status(404).json({ error: 'Preview instance not found' });
@@ -79,7 +79,8 @@ export function devtoolsProxyMiddleware(): express.Router {
       return res.status(400).json({ error: 'DevTools not available for this instance' });
     }
 
-    const devtoolsPath = (req.params as any)[0] || '';
+    const restParam = req.params.rest;
+    const devtoolsPath = Array.isArray(restParam) ? restParam.join('/') : (restParam || '');
     const queryString = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
     const targetPath = `/devtools/${devtoolsPath}${queryString}`;
 

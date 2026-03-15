@@ -8,8 +8,7 @@ const DB_TYPES = [
   { value: 'sqlite', label: 'SQLite', defaultPort: 0 },
   { value: 'redis', label: 'Redis', defaultPort: 6379 },
   { value: 'mongodb', label: 'MongoDB', defaultPort: 27017 },
-  { value: 'duckdb', label: 'DuckDB', defaultPort: 0 },
-  { value: 'elasticsearch', label: 'Elasticsearch', defaultPort: 9200 },
+{ value: 'elasticsearch', label: 'Elasticsearch', defaultPort: 9200 },
   { value: 'opensearch', label: 'OpenSearch', defaultPort: 9200 },
   { value: 'clickhouse', label: 'ClickHouse', defaultPort: 8123 },
   { value: 'cockroachdb', label: 'CockroachDB', defaultPort: 26257 },
@@ -42,7 +41,7 @@ export function AddConnectionForm({ onConnect, onCancel }: Props) {
   const [connecting, setConnecting] = React.useState(false);
   const [error, setError] = React.useState('');
 
-  const isSqlite = dbType === 'sqlite' || dbType === 'duckdb';
+  const isSqlite = dbType === 'sqlite';
   const selectedType = DB_TYPES.find(t => t.value === dbType);
 
   // Fetch available SSH connections

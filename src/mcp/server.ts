@@ -464,7 +464,7 @@ server.tool(
 
 const DB_TYPES = [
   'postgresql', 'mysql', 'mariadb', 'sqlite', 'redis', 'mongodb',
-  'duckdb', 'elasticsearch', 'opensearch', 'clickhouse', 'cockroachdb',
+  'elasticsearch', 'opensearch', 'clickhouse', 'cockroachdb',
   'cassandra', 'scylladb', 'neo4j', 'influxdb', 'memcached',
 ] as const;
 
@@ -490,7 +490,7 @@ Actions:
       username: z.string().optional(),
       password: z.string().optional(),
       database: z.string().optional(),
-      filename: z.string().optional().describe('For SQLite/DuckDB — path to database file'),
+      filename: z.string().optional().describe('For SQLite — path to database file'),
       connection_string: z.string().optional().describe('Full connection URI'),
       ssh_connection_id: z.string().optional().describe('Tunnel through an existing Atoo Studio SSH connection (pass the SSH connection ID)'),
       ssh_remote_host: z.string().optional().describe('Remote host to connect to through SSH tunnel (default: 127.0.0.1)'),

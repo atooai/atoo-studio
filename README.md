@@ -67,7 +67,7 @@ Browse issues and pull requests, view details and comments, close/reopen issues 
 Branch overview with full commit history, stash management, diff views, and one-click commit/push workflow. Worktree support for working on multiple branches simultaneously as separate projects in the sidebar. A "Publish" button commits, pushes, and creates a PR in one action.
 
 ### Database explorer
-Connect to 16 database types (PostgreSQL, MySQL, SQLite, Redis, MongoDB, DuckDB, Elasticsearch, ClickHouse, CockroachDB, Cassandra, Neo4j, InfluxDB, and more) with specialized views for each — key browsers for Redis, document viewers for MongoDB, graph visualization for Neo4j, charts for InfluxDB. Auto-discovers connections from docker-compose files, environment variables, and port scanning.
+Connect to 15 database types (PostgreSQL, MySQL, SQLite, Redis, MongoDB, Elasticsearch, ClickHouse, CockroachDB, Cassandra, Neo4j, InfluxDB, and more) with specialized views for each — key browsers for Redis, document viewers for MongoDB, graph visualization for Neo4j, charts for InfluxDB. Auto-discovers connections from docker-compose files, environment variables, and port scanning.
 
 ### Container management
 Manage Docker, Podman and LXC containers from the workspace. List, inspect, start, stop, restart and delete containers. Browse images, volumes, networks, and docker-compose projects. View container logs and stats.

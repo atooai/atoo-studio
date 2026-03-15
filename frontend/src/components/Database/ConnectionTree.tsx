@@ -251,7 +251,7 @@ export function ConnectionTree({
 function getDbIcon(dbType: string): string {
   const icons: Record<string, string> = {
     postgresql: '🐘', mysql: '🐬', mariadb: '🐬', sqlite: '📄', redis: '🔴',
-    mongodb: '🍃', duckdb: '🦆', elasticsearch: '🔍', opensearch: '🔍',
+    mongodb: '🍃', elasticsearch: '🔍', opensearch: '🔍',
     clickhouse: '⚡', neo4j: '🔗', influxdb: '📈', cassandra: '👁',
     cockroachdb: '🪳', memcached: '💾',
   };

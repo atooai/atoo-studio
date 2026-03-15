@@ -12,7 +12,6 @@ import { sshManager } from '../services/ssh-manager.js';
 async function loadDriver(name: string): Promise<{ new(): DatabaseDriver }> {
   try {
     switch (name) {
-      case 'duckdb': return (await import('./drivers/duckdb.js')).DuckDBDriver;
       case 'elasticsearch': return (await import('./drivers/elasticsearch.js')).ElasticsearchDriver;
       case 'clickhouse': return (await import('./drivers/clickhouse.js')).ClickHouseDriver;
       case 'neo4j': return (await import('./drivers/neo4j.js')).Neo4jDriver;
@@ -31,7 +30,7 @@ async function loadDriver(name: string): Promise<{ new(): DatabaseDriver }> {
 
 function getPackageName(driver: string): string {
   const map: Record<string, string> = {
-    duckdb: 'duckdb', elasticsearch: '@elastic/elasticsearch',
+    elasticsearch: '@elastic/elasticsearch',
     clickhouse: '@clickhouse/client', neo4j: 'neo4j-driver',
     influxdb: '@influxdata/influxdb-client', cassandra: 'cassandra-driver',
     memcached: 'memjs',
@@ -73,7 +72,7 @@ async function createDriver(dbType: DbType): Promise<DatabaseDriver> {
   }
   // Tier 2+3 — lazy loaded
   const driverMap: Record<string, string> = {
-    duckdb: 'duckdb', elasticsearch: 'elasticsearch', opensearch: 'elasticsearch',
+    elasticsearch: 'elasticsearch', opensearch: 'elasticsearch',
     clickhouse: 'clickhouse', neo4j: 'neo4j', influxdb: 'influxdb',
     cassandra: 'cassandra', scylladb: 'cassandra', memcached: 'memcached',
   };

@@ -157,7 +157,7 @@ containersRouter.get('/api/containers/lxc/storage', async (_req: Request, res: R
 
 containersRouter.get('/api/containers/lxc/storage/:name', async (req: Request, res: Response) => {
   if (!getRuntimeStatus().lxc.accessible) return res.status(403).json({ error: getRuntimeStatus().lxc.error || 'lxc not available' });
-  const { name } = req.params;
+  const name = req.params.name as string;
   if (!validateId(name)) return res.status(400).json({ error: 'Invalid storage name' });
   try {
     const out = await execCmd('lxc', ['storage', 'info', name, '--format', 'json']);
@@ -169,7 +169,7 @@ containersRouter.get('/api/containers/lxc/storage/:name', async (req: Request, r
 
 containersRouter.post('/api/containers/lxc/containers/:name/:action', async (req: Request, res: Response) => {
   if (!getRuntimeStatus().lxc.accessible) return res.status(403).json({ error: getRuntimeStatus().lxc.error || 'lxc not available' });
-  const { name, action } = req.params;
+  const name = req.params.name as string, action = req.params.action as string;
   if (!validateId(name)) return res.status(400).json({ error: 'Invalid container name' });
   if (!(ACTIONS as readonly string[]).includes(action)) return res.status(400).json({ error: 'Invalid action' });
   try {
@@ -182,7 +182,7 @@ containersRouter.post('/api/containers/lxc/containers/:name/:action', async (req
 
 containersRouter.delete('/api/containers/lxc/containers/:name', async (req: Request, res: Response) => {
   if (!getRuntimeStatus().lxc.accessible) return res.status(403).json({ error: getRuntimeStatus().lxc.error || 'lxc not available' });
-  const { name } = req.params;
+  const name = req.params.name as string;
   if (!validateId(name)) return res.status(400).json({ error: 'Invalid container name' });
   try {
     await execCmd('lxc', ['delete', name, '--force']);
@@ -194,7 +194,7 @@ containersRouter.delete('/api/containers/lxc/containers/:name', async (req: Requ
 
 containersRouter.delete('/api/containers/lxc/images/:fingerprint', async (req: Request, res: Response) => {
   if (!getRuntimeStatus().lxc.accessible) return res.status(403).json({ error: getRuntimeStatus().lxc.error || 'lxc not available' });
-  const { fingerprint } = req.params;
+  const fingerprint = req.params.fingerprint as string;
   if (!validateId(fingerprint)) return res.status(400).json({ error: 'Invalid fingerprint' });
   try {
     await execCmd('lxc', ['image', 'delete', fingerprint]);
@@ -209,7 +209,7 @@ containersRouter.delete('/api/containers/lxc/images/:fingerprint', async (req: R
 // ═══════════════════════════════════════════════════════
 
 containersRouter.get('/api/containers/:runtime/containers', async (req: Request, res: Response) => {
-  const { runtime } = req.params;
+  const runtime = req.params.runtime as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   try {
@@ -221,7 +221,7 @@ containersRouter.get('/api/containers/:runtime/containers', async (req: Request,
 });
 
 containersRouter.get('/api/containers/:runtime/images', async (req: Request, res: Response) => {
-  const { runtime } = req.params;
+  const runtime = req.params.runtime as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   try {
@@ -233,7 +233,7 @@ containersRouter.get('/api/containers/:runtime/images', async (req: Request, res
 });
 
 containersRouter.get('/api/containers/:runtime/volumes', async (req: Request, res: Response) => {
-  const { runtime } = req.params;
+  const runtime = req.params.runtime as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   try {
@@ -245,7 +245,7 @@ containersRouter.get('/api/containers/:runtime/volumes', async (req: Request, re
 });
 
 containersRouter.get('/api/containers/:runtime/networks', async (req: Request, res: Response) => {
-  const { runtime } = req.params;
+  const runtime = req.params.runtime as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   try {
@@ -257,7 +257,7 @@ containersRouter.get('/api/containers/:runtime/networks', async (req: Request, r
 });
 
 containersRouter.get('/api/containers/:runtime/compose', async (req: Request, res: Response) => {
-  const { runtime } = req.params;
+  const runtime = req.params.runtime as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   try {
@@ -270,7 +270,7 @@ containersRouter.get('/api/containers/:runtime/compose', async (req: Request, re
 });
 
 containersRouter.get('/api/containers/:runtime/containers/:id/inspect', async (req: Request, res: Response) => {
-  const { runtime, id } = req.params;
+  const runtime = req.params.runtime as string, id = req.params.id as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   if (!validateId(id)) return res.status(400).json({ error: 'Invalid container ID' });
@@ -283,7 +283,7 @@ containersRouter.get('/api/containers/:runtime/containers/:id/inspect', async (r
 });
 
 containersRouter.get('/api/containers/:runtime/containers/:id/stats', async (req: Request, res: Response) => {
-  const { runtime, id } = req.params;
+  const runtime = req.params.runtime as string, id = req.params.id as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   if (!validateId(id)) return res.status(400).json({ error: 'Invalid container ID' });
@@ -297,7 +297,7 @@ containersRouter.get('/api/containers/:runtime/containers/:id/stats', async (req
 });
 
 containersRouter.get('/api/containers/:runtime/volumes/:name/inspect', async (req: Request, res: Response) => {
-  const { runtime, name } = req.params;
+  const runtime = req.params.runtime as string, name = req.params.name as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   if (!validateId(name)) return res.status(400).json({ error: 'Invalid volume name' });
@@ -310,7 +310,7 @@ containersRouter.get('/api/containers/:runtime/volumes/:name/inspect', async (re
 });
 
 containersRouter.post('/api/containers/:runtime/containers/:id/:action', async (req: Request, res: Response) => {
-  const { runtime, id, action } = req.params;
+  const runtime = req.params.runtime as string, id = req.params.id as string, action = req.params.action as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   if (!validateId(id)) return res.status(400).json({ error: 'Invalid container ID' });
@@ -324,7 +324,7 @@ containersRouter.post('/api/containers/:runtime/containers/:id/:action', async (
 });
 
 containersRouter.delete('/api/containers/:runtime/containers/:id', async (req: Request, res: Response) => {
-  const { runtime, id } = req.params;
+  const runtime = req.params.runtime as string, id = req.params.id as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   if (!validateId(id)) return res.status(400).json({ error: 'Invalid container ID' });
@@ -337,7 +337,7 @@ containersRouter.delete('/api/containers/:runtime/containers/:id', async (req: R
 });
 
 containersRouter.delete('/api/containers/:runtime/images/:id', async (req: Request, res: Response) => {
-  const { runtime, id } = req.params;
+  const runtime = req.params.runtime as string, id = req.params.id as string;
   if (!validateRuntime(runtime)) return res.status(400).json({ error: 'Invalid runtime' });
   if (!getRuntimeStatus()[runtime].accessible) return res.status(403).json({ error: getRuntimeStatus()[runtime].error || `${runtime} not available` });
   if (!validateId(id)) return res.status(400).json({ error: 'Invalid image ID' });

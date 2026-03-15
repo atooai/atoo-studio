@@ -1260,6 +1260,7 @@ function registerGlobalFunctions() {
                     startedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
                     messages: [], viewMode: defaultViewMode, agentType: agent.agentType, agentMode: agent.mode,
                     permissionMode: 'bypassPermissions', showVerbose: true,
+                    lastMessage: '', model: null,
                   }],
                 }));
                 store.setActiveTabType('session');

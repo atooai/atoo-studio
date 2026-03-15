@@ -7,8 +7,6 @@ const DB_EXTENSIONS: Record<string, DbType> = {
   '.sqlite': 'sqlite',
   '.sqlite3': 'sqlite',
   '.db': 'sqlite',
-  '.duckdb': 'duckdb',
-  '.parquet': 'duckdb',
 };
 
 /**

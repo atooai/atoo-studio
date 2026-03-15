@@ -1,6 +1,6 @@
 export type DbType =
   | 'postgresql' | 'mysql' | 'mariadb' | 'sqlite' | 'redis'
-  | 'mongodb' | 'duckdb' | 'elasticsearch' | 'opensearch'
+  | 'mongodb' | 'elasticsearch' | 'opensearch'
   | 'clickhouse' | 'cockroachdb' | 'cassandra' | 'scylladb'
   | 'neo4j' | 'influxdb' | 'memcached';
 

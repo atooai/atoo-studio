@@ -62,28 +62,28 @@ usersRouter.put('/api/users/:id', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Invalid input' });
   }
 
-  const user = db.getUser(req.params.id);
+  const user = db.getUser(req.params.id as string);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  db.updateUser(req.params.id, parsed.data);
+  db.updateUser(req.params.id as string, parsed.data);
   res.json({ ok: true });
 });
 
 // DELETE /api/users/:id — delete user (admin only, cannot delete self)
 usersRouter.delete('/api/users/:id', requireAdmin, (req, res) => {
-  if (req.params.id === req.user!.id) {
+  if (req.params.id as string === req.user!.id) {
     return res.status(400).json({ error: 'Cannot delete yourself' });
   }
 
-  const user = db.getUser(req.params.id);
+  const user = db.getUser(req.params.id as string);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  destroyAllUserSessions(req.params.id);
-  db.deleteUser(req.params.id);
+  destroyAllUserSessions(req.params.id as string);
+  db.deleteUser(req.params.id as string);
   res.json({ ok: true });
 });
 
@@ -98,26 +98,26 @@ usersRouter.post('/api/users/:id/reset-password', requireAdmin, async (req, res)
     return res.status(400).json({ error: 'Invalid input' });
   }
 
-  const user = db.getUser(req.params.id);
+  const user = db.getUser(req.params.id as string);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
 
   const hash = await hashPassword(parsed.data.password);
-  db.updateUserPassword(req.params.id, hash);
-  destroyAllUserSessions(req.params.id);
+  db.updateUserPassword(req.params.id as string, hash);
+  destroyAllUserSessions(req.params.id as string);
   res.json({ ok: true });
 });
 
 // POST /api/users/:id/reset-totp — admin removes TOTP
 usersRouter.post('/api/users/:id/reset-totp', requireAdmin, (req, res) => {
-  removeTotpSecret(req.params.id);
+  removeTotpSecret(req.params.id as string);
   res.json({ ok: true });
 });
 
 // POST /api/users/:id/reset-passkeys — admin removes all passkeys
 usersRouter.post('/api/users/:id/reset-passkeys', requireAdmin, (req, res) => {
-  db.deleteAllUserPasskeys(req.params.id);
+  db.deleteAllUserPasskeys(req.params.id as string);
   res.json({ ok: true });
 });
 
@@ -230,7 +230,7 @@ usersRouter.get('/api/users/me/passkeys', requireAuth, (req, res) => {
 
 // DELETE /api/users/me/passkeys/:id — remove a passkey
 usersRouter.delete('/api/users/me/passkeys/:id', requireAuth, (req, res) => {
-  const deleted = db.deletePasskey(req.params.id, req.user!.id);
+  const deleted = db.deletePasskey(req.params.id as string, req.user!.id);
   if (!deleted) {
     return res.status(404).json({ error: 'Passkey not found' });
   }

@@ -40,23 +40,6 @@ declare module '@clickhouse/client' {
   export { createClient, ClickHouseClientConfig };
 }
 
-declare module 'duckdb' {
-  class Database {
-    constructor(path: string, callback?: (err: Error | null) => void);
-    connect(): Connection;
-    close(callback?: (err: Error | null) => void): void;
-  }
-  class Connection {
-    all(sql: string, ...params: any[]): any[];
-    all(sql: string, callback: (err: Error | null, rows: any[]) => void): void;
-    all(sql: string, params: any[], callback: (err: Error | null, rows: any[]) => void): void;
-    run(sql: string, ...params: any[]): void;
-    run(sql: string, callback: (err: Error | null) => void): void;
-  }
-  export { Database, Connection };
-  export default { Database, Connection };
-}
-
 declare module '@elastic/elasticsearch' {
   interface ClientOptions {
     node?: string;
