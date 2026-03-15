@@ -26,6 +26,8 @@
     "build:frontend": "cd frontend && npm install && npm run build",
     "build": "npm run build:backend && npm run build:frontend",
     "postinstall": "[ -f src/serial/native/pty_pair.c ] && ([ \"$(uname)\" = \"Linux\" ] && make -C preload 2>/dev/null; cd src/serial/native && node-gyp rebuild 2>/dev/null) || true",
+    "prepack": "cp README.md README.github.md && cp README.npm.md README.md",
+    "postpack": "mv README.github.md README.md",
     "prepublishOnly": "npm run build",
     "production": "node dist/src/index.js"
   },
