@@ -1,4 +1,5 @@
 import React from 'react';
+import { api } from '../../api/index';
 
 const shortcuts: { key: string; description: string }[] = [
   { key: 'Ctrl+S', description: 'Save current file' },
@@ -12,8 +13,17 @@ const shortcuts: { key: string; description: string }[] = [
   { key: 'Enter', description: 'Confirm dialog' },
 ];
 
+interface Dependency {
+  name: string;
+  description: string;
+  installed: boolean;
+  version: string | null;
+  required: boolean;
+  category: string;
+}
+
 export function HelpModal({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = React.useState<'shortcuts' | 'about'>('shortcuts');
+  const [tab, setTab] = React.useState<'shortcuts' | 'system' | 'about'>('shortcuts');
 
   React.useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -28,12 +38,14 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
       <div className="help-modal-header">
         <div className="help-modal-tabs">
           <button className={`help-tab ${tab === 'shortcuts' ? 'active' : ''}`} onClick={() => setTab('shortcuts')}>Keyboard Shortcuts</button>
+          <button className={`help-tab ${tab === 'system' ? 'active' : ''}`} onClick={() => setTab('system')}>System</button>
           <button className={`help-tab ${tab === 'about' ? 'active' : ''}`} onClick={() => setTab('about')}>About</button>
         </div>
         <button className="help-modal-close" onClick={onClose}>&#x2715;</button>
       </div>
       <div className="help-modal-body">
         {tab === 'shortcuts' && <ShortcutsTab />}
+        {tab === 'system' && <SystemTab />}
         {tab === 'about' && <AboutTab />}
       </div>
     </div>
@@ -61,6 +73,94 @@ function ShortcutsTab() {
       </table>
     </div>
   );
+}
+
+function SystemTab() {
+  const [deps, setDeps] = React.useState<Dependency[] | null>(null);
+  const [platform, setPlatform] = React.useState<string>('');
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    api('GET', '/api/dependencies')
+      .then((data: { platform: string; deps: Dependency[] }) => {
+        setPlatform(data.platform);
+        setDeps(data.deps);
+      })
+      .catch((err: Error) => setError(err.message));
+  }, []);
+
+  if (error) {
+    return <div className="help-system"><div className="help-system-error">Failed to load: {error}</div></div>;
+  }
+  if (!deps) {
+    return <div className="help-system"><div className="help-system-loading">Checking dependencies...</div></div>;
+  }
+
+  const platformLabel = platform === 'linux' ? 'Linux' : platform === 'darwin' ? 'macOS' : platform;
+
+  // Group by category
+  const categories: { name: string; deps: Dependency[] }[] = [];
+  for (const dep of deps) {
+    let cat = categories.find(c => c.name === dep.category);
+    if (!cat) {
+      cat = { name: dep.category, deps: [] };
+      categories.push(cat);
+    }
+    cat.deps.push(dep);
+  }
+
+  return (
+    <div className="help-system">
+      <div className="help-system-platform">
+        Platform: <strong>{platformLabel}</strong>
+      </div>
+      <table className="help-system-table">
+        <thead>
+          <tr>
+            <th>Dependency</th>
+            <th>Feature</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {categories.map(cat => (
+            <React.Fragment key={cat.name}>
+              <tr className="help-system-category-row">
+                <td colSpan={3}>{cat.name}</td>
+              </tr>
+              {cat.deps.map(dep => (
+                <tr key={dep.name}>
+                  <td className="help-system-name">
+                    {dep.name}
+                    {dep.required && <span className="help-system-required">required</span>}
+                  </td>
+                  <td className="help-system-desc">{dep.description}</td>
+                  <td className="help-system-status">
+                    {dep.installed ? (
+                      <span className="help-system-ok" title={dep.version || 'Installed'}>
+                        {dep.version ? trimVersion(dep.version) : 'Installed'}
+                      </span>
+                    ) : (
+                      <span className="help-system-missing">Not found</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Extract a short version string from verbose --version output */
+function trimVersion(raw: string): string {
+  // Take first line only
+  const first = raw.split('\n')[0];
+  // Try to extract version number pattern
+  const match = first.match(/\d+\.\d+[\w.-]*/);
+  return match ? match[0] : first.slice(0, 40);
 }
 
 function AboutTab() {

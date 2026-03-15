@@ -5,6 +5,7 @@ import https from 'https';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import cookieParser from 'cookie-parser';
 import { store } from '../state/store.js';
@@ -772,6 +773,134 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     res.json({
       sessions: store.sessions.size,
     });
+  });
+
+  // Dependencies check
+  app.get('/api/dependencies', (_req, res) => {
+    function getVersion(cmd: string): string | null {
+      try {
+        return execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }).trim();
+      } catch {
+        return null;
+      }
+    }
+
+    function hasCommand(cmd: string): boolean {
+      try {
+        execSync(`which ${cmd}`, { stdio: 'ignore', timeout: 3000 });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    const platform = process.platform;
+    const deps: { name: string; description: string; installed: boolean; version: string | null; required: boolean; category: string }[] = [];
+
+    // Required
+    deps.push({
+      name: 'git',
+      description: 'Version control, worktrees, file tracking',
+      installed: hasCommand('git'),
+      version: getVersion('git --version'),
+      required: true,
+      category: 'Core',
+    });
+
+    // Agent CLIs
+    deps.push({
+      name: 'claude',
+      description: 'Claude Code agent',
+      installed: hasCommand('claude'),
+      version: getVersion('claude --version'),
+      required: false,
+      category: 'Agents',
+    });
+    deps.push({
+      name: 'codex',
+      description: 'Codex agent',
+      installed: hasCommand('codex'),
+      version: getVersion('codex --version'),
+      required: false,
+      category: 'Agents',
+    });
+
+    // Integrations
+    deps.push({
+      name: 'gh',
+      description: 'GitHub integration (issues, PRs)',
+      installed: hasCommand('gh'),
+      version: getVersion('gh --version'),
+      required: false,
+      category: 'Integrations',
+    });
+
+    // Container runtimes
+    deps.push({
+      name: 'docker',
+      description: 'Docker container management',
+      installed: hasCommand('docker'),
+      version: getVersion('docker --version'),
+      required: false,
+      category: 'Containers',
+    });
+    deps.push({
+      name: 'podman',
+      description: 'Podman container management',
+      installed: hasCommand('podman'),
+      version: getVersion('podman --version'),
+      required: false,
+      category: 'Containers',
+    });
+    deps.push({
+      name: 'lxc',
+      description: 'LXC container management',
+      installed: hasCommand('lxc'),
+      version: getVersion('lxc --version'),
+      required: false,
+      category: 'Containers',
+    });
+
+    // Media
+    deps.push({
+      name: 'ffmpeg',
+      description: 'Screen recording',
+      installed: hasCommand('ffmpeg'),
+      version: getVersion('ffmpeg -version'),
+      required: false,
+      category: 'Media',
+    });
+
+    // Linux-specific
+    if (platform === 'linux') {
+      let chromeLibs = false;
+      try {
+        execSync('ldconfig -p | grep -q libatk-1.0', { stdio: 'ignore', timeout: 3000 });
+        chromeLibs = true;
+      } catch {}
+
+      deps.push({
+        name: 'Chrome libs',
+        description: 'Browser preview (Puppeteer dependencies)',
+        installed: chromeLibs,
+        version: null,
+        required: false,
+        category: 'Preview',
+      });
+
+      const cusebin = path.join(process.env.HOME || '', '.atoo-studio', 'bin', 'cuse_serial');
+      const cuseReady = fs.existsSync('/dev/cuse') && fs.existsSync(cusebin);
+      deps.push({
+        name: 'CUSE',
+        description: 'Serial control signals (DTR/RTS)',
+        installed: cuseReady,
+        version: null,
+        required: false,
+        category: 'Serial',
+      });
+    }
+
+    res.json({ platform, deps });
   });
 
 

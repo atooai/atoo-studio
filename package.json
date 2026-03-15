@@ -10,7 +10,7 @@
     "setup.sh",
     "dist/",
     "frontend/dist/",
-    "docker/preview/",
+    "setup-cuse.sh",
     "preload/atoo-studio-preload.c",
     "preload/atoo-studio-preload.so",
     "preload/Makefile",

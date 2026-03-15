@@ -17,7 +17,12 @@ import { getInjectedScript } from './injected-scripts.js';
 import { buildUniversalSetterExpression } from './universal-setter.js';
 
 const CHROME_PATH = '/home/furti/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome';
-const FFMPEG_PATH = '/usr/bin/ffmpeg';
+let FFMPEG_PATH: string;
+try {
+  FFMPEG_PATH = execSync('which ffmpeg', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+} catch {
+  FFMPEG_PATH = '/usr/bin/ffmpeg';
+}
 const DOWNLOAD_DIR = path.join(os.tmpdir(), 'atoo-studio-downloads');
 
 export interface HeadlessInstance extends PreviewInstanceBase {

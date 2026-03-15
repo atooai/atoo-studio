@@ -96,11 +96,68 @@ Responsive mobile layout with swipe gestures, bottom navigation, and dedicated v
 ### Installable as desktop app
 PWA support — install Atoo Studio as a standalone desktop application from the browser.
 
+## Platform Support
+
+| Feature | Linux | macOS | Windows |
+|---------|-------|-------|---------|
+| Core (agents, terminal, git, files) | Yes | Yes | No |
+| Browser preview (CDP streaming) | Yes | Yes | - |
+| Serial devices (DTR/RTS via CUSE) | Yes | No | - |
+| Serial devices (PTY fallback) | Yes | Yes | - |
+
+**Windows** is not supported. Use WSL instead.
+
+### Linux setup
+
+After installing, run the setup scripts to enable all features:
+
+```bash
+# Install Chrome/Puppeteer dependencies and ffmpeg (for screen recordings)
+sudo ./setup.sh
+
+# Optional: Enable CUSE for serial control signals (DTR/RTS)
+# Required for auto-reset sequences when flashing devices like ESP32
+sudo ./setup-cuse.sh
+```
+
+`setup.sh` supports apt-get (Debian/Ubuntu), dnf (Fedora/RHEL) and pacman (Arch).
+
+`setup-cuse.sh` builds a native CUSE helper, loads the kernel module, and sets up permissions. See the script header for container-specific instructions (LXC/Docker).
+
+### macOS setup
+
+No additional setup required for core functionality. Puppeteer bundles its own Chromium and macOS provides all necessary system libraries.
+
+For screen recording support, run the setup script (installs ffmpeg via Homebrew):
+
+```bash
+./setup.sh
+```
+
+CUSE is not available on macOS, so serial control signals (DTR/RTS) are not supported. When flashing devices, use the BOOT button instead.
+
 ## Getting Started
 
 ### Requirements
+
+**Required:**
 - Node.js 18+
 - Linux, macOS or WSL
+- git
+
+**Optional (features degrade gracefully if missing):**
+
+| Dependency | Feature |
+|------------|---------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) | Claude Code agent |
+| [Codex CLI](https://github.com/openai/codex) (`codex`) | Codex agent |
+| [GitHub CLI](https://cli.github.com/) (`gh`) | GitHub integration (issues, PRs) |
+| docker, podman, or lxc | Container management |
+| ffmpeg | Screen recording |
+| Chrome libs (Linux only) | Browser preview — installed by `setup.sh` |
+| CUSE (Linux only) | Serial control signals (DTR/RTS) — installed by `setup-cuse.sh` |
+
+Missing dependencies are reported as warnings on startup.
 
 ### Quick start
 
@@ -108,13 +165,46 @@ PWA support — install Atoo Studio as a standalone desktop application from the
 npx atoo-studio
 ```
 
-Then open `http://localhost:3000` in your browser.
+Then open `https://localhost:3010` in your browser.
 
 ### Docker
 
 ```bash
 docker run -p 3010:3010 ghcr.io/atooai/atoo-studio
 ```
+
+To persist data across container restarts, mount the data directory:
+
+```bash
+docker run -p 3010:3010 -v atoo-data:/home/atoo/.atoo-studio ghcr.io/atooai/atoo-studio
+```
+
+### LXC / LXD
+
+Download the LXC image from the [latest release](https://github.com/atooai/atoo-studio/releases) and import it:
+
+```bash
+lxc image import atoo-studio-lxc-amd64.tar.gz --alias atoo-studio
+lxc launch atoo-studio my-atoo-studio
+```
+
+### Proxmox
+
+One-command setup scripts for Proxmox VE. Run on your Proxmox host:
+
+**LXC container** (recommended — lightweight, 2 CPU / 2GB RAM / 20GB disk):
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/lxc.sh)"
+```
+
+**VM** (full isolation, CUSE/serial support, 4 CPU / 4GB RAM / 50GB disk):
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/vm.sh)"
+```
+
+Both scripts prompt for container/VM ID, hostname, storage, and resources with sensible defaults.
 
 ## Architecture
 

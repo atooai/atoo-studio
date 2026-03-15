@@ -8,12 +8,34 @@ set -e
 # system deps are not needed — everything runs inside the container.
 # Only ffmpeg is still useful on the host for encoding screen recordings.
 
+echo "=== atoo-studio system setup ==="
+
+if [ "$(uname -s)" = "Darwin" ]; then
+  # --- macOS ---
+  # Puppeteer bundles Chromium and macOS has all required system libs.
+  # Only ffmpeg is needed for screen recording support.
+  echo ""
+  echo "Installing ffmpeg for screen recording support..."
+
+  if command -v brew &>/dev/null; then
+    brew install ffmpeg
+  else
+    echo "Error: Homebrew not found. Install it from https://brew.sh"
+    echo "Then re-run this script, or install ffmpeg manually."
+    exit 1
+  fi
+
+  echo ""
+  echo "=== Setup complete ==="
+  echo "You can now run: npx atoo-studio"
+  exit 0
+fi
+
+# --- Linux ---
 if [ "$(id -u)" -ne 0 ]; then
   echo "Error: This script must be run as root (sudo $0)"
   exit 1
 fi
-
-echo "=== atoo-studio system setup ==="
 
 # --- Chrome / Puppeteer dependencies ---
 echo ""

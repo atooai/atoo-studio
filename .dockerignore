@@ -1,0 +1,15 @@
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+certs/
+.git/
+.github/
+*.log
+*.so
+*.node
+src/serial/native/build/
+research/
+.overlay-bench/
+proxmox/
+scripts/
