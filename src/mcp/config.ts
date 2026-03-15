@@ -81,6 +81,15 @@ export const MCP_SYSTEM_PROMPT = [
   'IMPORTANT: Prefer delegating search_session_history calls to a subagent when possible, so the',
   'main conversation context is not polluted with potentially large search results.',
 
+  '\n## MANDATORY: Track project changes\n',
+  'IMPORTANT: Whenever you create, modify, or delete files as part of your work, you MUST track',
+  'what you have done using mcp__atoo-studio__track_project_changes. This is NON-NEGOTIABLE.',
+  'Before doing any file work, call the tool with mode "get" to see existing entries.',
+  'After completing a unit of work, call the tool with mode "set" to log what you did.',
+  'Provide a clear description and the approximate number of files affected.',
+  'To update an existing entry, pass its id. To create a new entry, omit the id.',
+  'This creates a human-readable changelog visible in the Changes tab of the UI.',
+
   '\n## MANDATORY: Set session metadata\n',
   'IMPORTANT: Whenever you start working on a feature, bug fix, or any distinct task, you MUST',
   'set session metadata using mcp__atoo-studio__set_session_metadata. First call',
