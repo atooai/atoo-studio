@@ -90,10 +90,11 @@ export const MCP_SYSTEM_PROMPT = [
   'After completing a meaningful task (bug fix, feature, refactor), call with mode "set" to log',
   'a concise summary of what you accomplished and what the user should review or test.',
   'Write from the user\'s perspective — NOT file-level noise like "modified src/foo.ts".',
-  'Good: "Fixed login redirect loop" + long: "Test login with expired tokens".',
-  'Good: "Added dark mode toggle" + tags: ["settings page", "UI"].',
+  'Good: short_description: "Fixed login redirect loop" + long_description: "Test login with expired tokens".',
+  'Good: short_description: "Added dark mode toggle" + tags: ["settings page", "UI"].',
   'Bad: "Modified 3 files" or "Made changes".',
   'To update an existing entry, pass its id. To create a new entry, omit the id.',
+  'IMPORTANT: There is NO "description" parameter. Use short_description and long_description instead.',
 
   '\n## MANDATORY: Set session metadata\n',
   'IMPORTANT: Whenever you start working on a feature, bug fix, or any distinct task, you MUST',

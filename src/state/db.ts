@@ -1060,6 +1060,41 @@ class StudioDatabase {
       }
       console.log(`[db] Migrated ${rows.length} project_changes rows to new schema`);
     }
+    // Drop old 'description' column if it still exists (it has NOT NULL and breaks INSERTs)
+    if (hasOldDesc) {
+      try {
+        this.db.exec('ALTER TABLE project_changes DROP COLUMN description');
+        console.log('[db] Dropped old description column from project_changes');
+      } catch {
+        // SQLite < 3.35.0 doesn't support DROP COLUMN — recreate table
+        const txn = this.db.transaction(() => {
+          const existing = this.db.prepare(
+            'SELECT id, project_id, short_description, long_description, tags_json, approx_files_affected, session_id, created_at FROM project_changes'
+          ).all() as any[];
+          this.db.exec('DROP TABLE project_changes');
+          this.db.exec(`
+            CREATE TABLE project_changes (
+              id TEXT PRIMARY KEY,
+              project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+              short_description TEXT NOT NULL DEFAULT '',
+              long_description TEXT NOT NULL DEFAULT '',
+              tags_json TEXT NOT NULL DEFAULT '[]',
+              approx_files_affected INTEGER NOT NULL DEFAULT 0,
+              session_id TEXT,
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+          `);
+          const ins = this.db.prepare(
+            'INSERT INTO project_changes (id, project_id, short_description, long_description, tags_json, approx_files_affected, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+          );
+          for (const r of existing) {
+            ins.run(r.id, r.project_id, r.short_description || '', r.long_description || '', r.tags_json || '[]', r.approx_files_affected || 0, r.session_id, r.created_at);
+          }
+          console.log(`[db] Recreated project_changes table without old description column (${existing.length} rows preserved)`);
+        });
+        txn();
+      }
+    }
   }
 
   private readonly PC_COLS = 'id, project_id, short_description, long_description, tags_json, approx_files_affected, session_id, created_at';
