@@ -6,7 +6,7 @@ import type { WireMessage } from '../events/wire.js';
 // Agent Status
 // ═══════════════════════════════════════════════════════
 
-export type AgentStatus = 'initializing' | 'idle' | 'active' | 'waiting' | 'error' | 'exited';
+export type AgentStatus = 'open' | 'active' | 'attention' | 'exited';
 
 // ═══════════════════════════════════════════════════════
 // Agent UI Mode
@@ -105,7 +105,10 @@ export interface Agent extends EventEmitter {
   setModel(model: string): void;
   refreshContext(): void;
   sendKey(key: string): void;
-  markViewed(): void;
+
+  // Activity status (focus/blur tracking for attention management)
+  onFocused(): void;
+  onBlurred(): void;
 
   // Forking
   /**
@@ -180,7 +183,4 @@ export type AgentCommand =
   | { action: 'set_mode'; mode: string }
   | { action: 'set_model'; model: string }
   | { action: 'refresh_context' }
-  | { action: 'send_key'; key: string }
-  | { action: 'session_viewed' }
-  | { action: 'session_focus' }
-  | { action: 'session_blur' };
+  | { action: 'send_key'; key: string };

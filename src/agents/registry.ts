@@ -57,8 +57,12 @@ class AgentRegistry {
       this.broadcastToClients(sessionId, msg);
     });
 
-    // Agent status is now tracked via buffer activity in spawner.ts.
-    // The agent.on('status') event is no longer forwarded to the global store.
+    // Forward agent status to the global store for WebSocket broadcasting.
+    // Each agent adapter owns its activity status (open/active/attention).
+    agent.on('status', (status: string) => {
+      if (status === 'exited') return; // handled by destroyAgent
+      store.setAgentStatus(sessionId, status as any);
+    });
 
     agent.on('context_in_progress', (inProgress: boolean) => {
       const e = this.agents.get(sessionId);
@@ -106,6 +110,14 @@ class AgentRegistry {
     store.removeAgentStatus(sessionId);
 
     console.log(`[agent-registry] Agent destroyed: ${sessionId}`);
+  }
+
+  setSessionFocused(sessionId: string): void {
+    this.agents.get(sessionId)?.agent.onFocused();
+  }
+
+  setSessionBlurred(sessionId: string): void {
+    this.agents.get(sessionId)?.agent.onBlurred();
   }
 
   setBrowserState(sessionId: string, state: Partial<BrowserState>): void {

@@ -1290,6 +1290,16 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         for (const sid of store.contextInProgressSessions) {
           ws.send(JSON.stringify({ type: 'context_in_progress', session_id: sid, inProgress: true }));
         }
+        ws.on('message', (data) => {
+          try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === 'session_focus' && msg.session_id) {
+              agentRegistry.setSessionFocused(msg.session_id);
+            } else if (msg.type === 'session_blur' && msg.session_id) {
+              agentRegistry.setSessionBlurred(msg.session_id);
+            }
+          } catch {}
+        });
         ws.on('close', () => store.statusClients.delete(ws));
       });
     } else if (url.startsWith('/ws/settings')) {

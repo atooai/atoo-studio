@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../../state/store';
-import { sendAgentCommand } from '../../api/websocket';
+import { sendStatusMessage } from '../../api/websocket';
 import { FileTree } from '../FileTree/FileTree';
 import { GitHistory } from '../Git/GitHistory';
 import { EditorArea } from '../Editor/Editor';
@@ -92,9 +92,9 @@ function CarouselSlide({
 /* ── Track session focus/blur for attention state management ── */
 function useSessionFocusTracking(sessionId: string) {
   useEffect(() => {
-    sendAgentCommand(sessionId, { action: 'session_focus' });
+    sendStatusMessage({ type: 'session_focus', session_id: sessionId });
     return () => {
-      sendAgentCommand(sessionId, { action: 'session_blur' });
+      sendStatusMessage({ type: 'session_blur', session_id: sessionId });
     };
   }, [sessionId]);
 }

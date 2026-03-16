@@ -42,6 +42,15 @@ export function setPendingAgentCreation(v: boolean) {
   pendingAgentCreation = v;
 }
 
+/** Send a message through the always-connected status WebSocket */
+export function sendStatusMessage(msg: any): boolean {
+  if (statusWs && statusWs.readyState === 1) {
+    statusWs.send(JSON.stringify(msg));
+    return true;
+  }
+  return false;
+}
+
 function getWsProto() {
   return location.protocol === 'https:' ? 'wss:' : 'ws:';
 }

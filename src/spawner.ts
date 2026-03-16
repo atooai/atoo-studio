@@ -52,213 +52,8 @@ const spawnedProcesses = new Map<string, SpawnedProcess>();
 const MAX_SPAWNER_SCROLLBACK = 200_000;
 const spawnerScrollback = new Map<string, string>();
 
-// ═══════════════════════════════════════════════════════
-// Activity tracking — buffer-based status detection
-// ═══════════════════════════════════════════════════════
-
-export type ActivityStatus = 'open' | 'active' | 'attention';
-
-interface ActivityState {
-  userIsViewing: boolean;           // true while user has this session tab focused
-  currentStatus: ActivityStatus;
-  // Burst tracking: swallow short PTY activity (e.g. resize re-renders)
-  // - Set 'active' instantly for good UX
-  // - But only transition to 'attention' if the burst was sustained (>= BURST_PROMOTE_MS)
-  // - Short bursts (< BURST_PROMOTE_MS) revert to the pre-burst status instead
-  burstStartTime: number | null;   // when the current burst began
-  burstPromoted: boolean;          // true once burst exceeded BURST_PROMOTE_MS
-  burstIdleTimer: ReturnType<typeof setTimeout> | null;  // fires after BURST_IDLE_MS of silence
-  preBurstStatus: ActivityStatus;  // status to revert to if burst is short
-}
-
-const activityStates = new Map<string, ActivityState>();
-
-const BURST_IDLE_MS = 1000;      // 1s of PTY silence = burst ended
-const BURST_PROMOTE_MS = 3000;   // 3s of sustained output = real work (not a re-render)
-
-// Explicit envId → sessionId mapping for agent-registry sessions
-// (store.sessions may use different IDs than the agent registry)
-const envToSessionIds = new Map<string, Set<string>>();
-// Reverse lookup: sessionId → envId (for focus/blur commands from frontend)
-const sessionIdToEnvId = new Map<string, string>();
-
-/**
- * Register an agent session ID for an envId so activity status
- * changes are broadcast under the correct session ID.
- */
-export function registerActivitySession(envId: string, sessionId: string): void {
-  if (!envToSessionIds.has(envId)) {
-    envToSessionIds.set(envId, new Set());
-  }
-  envToSessionIds.get(envId)!.add(sessionId);
-  sessionIdToEnvId.set(sessionId, envId);
-}
-
-export function unregisterActivitySession(envId: string, sessionId: string): void {
-  const set = envToSessionIds.get(envId);
-  if (set) {
-    set.delete(sessionId);
-    if (set.size === 0) envToSessionIds.delete(envId);
-  }
-  sessionIdToEnvId.delete(sessionId);
-}
-
-function broadcastActivityStatus(envId: string, status: ActivityStatus): void {
-  const broadcasted = new Set<string>();
-
-  // First: explicit registrations (agent-registry sessions)
-  const registered = envToSessionIds.get(envId);
-  if (registered) {
-    for (const sessionId of registered) {
-      store.setAgentStatus(sessionId, status);
-      broadcasted.add(sessionId);
-    }
-  }
-
-  // Fallback: store.sessions (ingress-based sessions)
-  for (const [sessionId, session] of store.sessions.entries()) {
-    if (session.environmentId === envId && !broadcasted.has(sessionId)) {
-      store.setAgentStatus(sessionId, status);
-    }
-  }
-}
-
-function setStatus(envId: string, state: ActivityState, status: ActivityStatus): void {
-  if (status !== state.currentStatus) {
-    state.currentStatus = status;
-    broadcastActivityStatus(envId, status);
-  }
-}
-
-/**
- * Called when PTY produces visible output.
- *
- * Burst filter algorithm:
- * 1. Set 'active' instantly (good UX — user sees agent is working)
- * 2. Start/extend a burst window; reset the 1s idle timer on each data chunk
- * 3. If output sustains for >= 3s, "promote" the burst — it's real work
- * 4. When PTY goes idle for 1s (burst ends):
- *    - If promoted AND user is viewing: → 'open' (user is watching)
- *    - If promoted AND NOT viewing: → 'attention' (real work, user hasn't seen)
- *    - If NOT promoted: revert to pre-burst status, or 'open' if user is viewing
- *
- * userIsViewing is continuous state tracked via session_focus/session_blur,
- * not a one-shot event. This eliminates race conditions between interaction
- * detection and burst timing.
- */
-function markActivityData(envId: string): void {
-  let state = activityStates.get(envId);
-  if (!state) {
-    state = {
-      userIsViewing: false,
-      currentStatus: 'open',
-      burstStartTime: null,
-      burstPromoted: false,
-      burstIdleTimer: null,
-      preBurstStatus: 'open',
-    };
-    activityStates.set(envId, state);
-  }
-
-  const now = Date.now();
-
-  // New burst: record pre-burst status and start time
-  if (state.burstStartTime === null) {
-    state.preBurstStatus = state.currentStatus;
-    state.burstStartTime = now;
-    state.burstPromoted = false;
-  }
-
-  // Check if burst should be promoted (sustained output >= BURST_PROMOTE_MS)
-  if (!state.burstPromoted && (now - state.burstStartTime) >= BURST_PROMOTE_MS) {
-    state.burstPromoted = true;
-  }
-
-  // Set active instantly for responsive UX
-  setStatus(envId, state, 'active');
-
-  // Reset the idle timer — burst continues as long as data keeps flowing
-  if (state.burstIdleTimer) clearTimeout(state.burstIdleTimer);
-  state.burstIdleTimer = setTimeout(() => onBurstIdle(envId), BURST_IDLE_MS);
-}
-
-/**
- * Called when PTY has been silent for BURST_IDLE_MS — the burst is over.
- */
-function onBurstIdle(envId: string): void {
-  const state = activityStates.get(envId);
-  if (!state) return;
-
-  const wasPromoted = state.burstPromoted;
-
-  // Clear burst tracking
-  state.burstStartTime = null;
-  state.burstPromoted = false;
-  state.burstIdleTimer = null;
-
-  if (wasPromoted) {
-    if (state.userIsViewing) {
-      // User is watching this session — go to 'open'
-      setStatus(envId, state, 'open');
-    } else {
-      // Real work finished, user isn't viewing — 'attention'
-      setStatus(envId, state, 'attention');
-    }
-  } else {
-    // Short burst (re-render, keystroke echo) — revert, but respect viewing state
-    if (state.userIsViewing) {
-      setStatus(envId, state, 'open');
-    } else {
-      setStatus(envId, state, state.preBurstStatus);
-    }
-  }
-}
-
-/**
- * Called when the user focuses this session's tab.
- * Sets userIsViewing=true and immediately clears 'attention' if present.
- */
-export function markSessionFocused(envId: string): void {
-  let state = activityStates.get(envId);
-  if (!state) {
-    state = {
-      userIsViewing: true,
-      currentStatus: 'open',
-      burstStartTime: null,
-      burstPromoted: false,
-      burstIdleTimer: null,
-      preBurstStatus: 'open',
-    };
-    activityStates.set(envId, state);
-    return;
-  }
-  state.userIsViewing = true;
-  // Immediately clear attention — the user is now looking at it
-  if (state.currentStatus === 'attention') {
-    setStatus(envId, state, 'open');
-  }
-}
-
-/**
- * Called when the user leaves this session's tab (switches to another tab/session).
- */
-export function markSessionBlurred(envId: string): void {
-  const state = activityStates.get(envId);
-  if (!state) return;
-  state.userIsViewing = false;
-}
-
-function removeActivityState(envId: string): void {
-  const state = activityStates.get(envId);
-  if (state?.burstIdleTimer) clearTimeout(state.burstIdleTimer);
-  activityStates.delete(envId);
-  // Clean up reverse lookup entries for this envId
-  const sessionIds = envToSessionIds.get(envId);
-  if (sessionIds) {
-    for (const sid of sessionIds) sessionIdToEnvId.delete(sid);
-  }
-  envToSessionIds.delete(envId);
-}
+// Activity tracking has been moved into agent adapters via PtyActivityTracker.
+// See src/agents/lib/pty-activity-tracker.ts
 
 // ═══════════════════════════════════════════════════════
 // Generic PTY spawn
@@ -299,24 +94,18 @@ export function spawnProcess(options: SpawnOptions): { envId: string; term: ITer
   spawnedProcesses.set(envId, { pty: term, envId, pid, preloadSessionId: options.preloadSessionId });
   spawnerScrollback.set(envId, '');
 
+  // Scrollback buffer (activity tracking is handled by agent adapters via PtyActivityTracker)
   term.onData((data: string) => {
     let buf = spawnerScrollback.get(envId) || '';
     buf += data;
     if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
     spawnerScrollback.set(envId, buf);
-    // Only count as activity if there's visible content (not just cursor blink / ANSI codes)
-    const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
-    if (stripped) {
-      markActivityData(envId);
-      console.log(`[spawner:${pid}] ${stripped.substring(0, 200)}`);
-    }
   });
 
   term.onExit(({ exitCode }) => {
     console.log(`[spawner] ${logPrefix} (pid=${pid}) exited with code ${exitCode}`);
     spawnedProcesses.delete(envId);
     spawnerScrollback.delete(envId);
-    removeActivityState(envId);
   });
 
   return { envId, term, pid };
@@ -358,18 +147,12 @@ export async function spawnRemoteProcess(options: {
     buf += data;
     if (buf.length > MAX_SPAWNER_SCROLLBACK) buf = buf.slice(-MAX_SPAWNER_SCROLLBACK);
     spawnerScrollback.set(envId, buf);
-    const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\r\n]+/g, ' ').trim();
-    if (stripped) {
-      markActivityData(envId);
-      console.log(`[spawner:ssh] ${stripped.substring(0, 200)}`);
-    }
   });
 
   term.onExit(({ exitCode }) => {
     console.log(`[spawner] ${logPrefix} via SSH exited with code ${exitCode}`);
     spawnedProcesses.delete(envId);
     spawnerScrollback.delete(envId);
-    removeActivityState(envId);
   });
 
   return { envId, term };
@@ -397,7 +180,6 @@ export function killCliProcess(envId: string): boolean {
     proc.pty.kill();
     spawnedProcesses.delete(envId);
     spawnerScrollback.delete(envId);
-    removeActivityState(envId);
     console.log(`[spawner] Killed process for ${envId}`);
     return true;
   }
@@ -411,8 +193,6 @@ export function killAllCliProcesses(): void {
   }
   spawnedProcesses.clear();
   spawnerScrollback.clear();
-  activityStates.clear();
-  envToSessionIds.clear();
 }
 
 export function getPty(envId: string): ITerminal | undefined {
@@ -420,13 +200,9 @@ export function getPty(envId: string): ITerminal | undefined {
 }
 
 export function getEnvIdForSession(sessionId: string): string | undefined {
-  // Try store.sessions first (ingress-based sessions)
   const session = store.sessions.get(sessionId);
   if (session && spawnedProcesses.has(session.environmentId)) {
     return session.environmentId;
   }
-  // Fallback: reverse lookup from registerActivitySession (agent-registry sessions)
-  const envId = sessionIdToEnvId.get(sessionId);
-  if (envId) return envId;
   return undefined;
 }

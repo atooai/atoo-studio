@@ -15,10 +15,11 @@ import { toWireMessages } from '../../events/wire.js';
 import { mapCodexJsonlLine } from '../lib/codex/jsonl-mapper.js';
 import { codexSessionScanner } from '../lib/codex/fs-sessions.js';
 import { forkEventsToResumable } from '../lib/claude/jsonl-writer.js';
-import { getProcessPid, getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
+import { getProcessPid, getPty, killCliProcess } from '../../spawner.js';
 import { spawnCodexCliProcess } from './spawner.js';
 import { CodexJsonlWatcher } from './jsonl-watcher.js';
 import { initFileTracking, ToolResultFileTracker } from '../lib/fs-tracking.js';
+import { PtyActivityTracker } from '../lib/pty-activity-tracker.js';
 
 import { precreateCodexSession } from '../lib/session-precreate.js';
 
@@ -30,7 +31,8 @@ import { precreateCodexSession } from '../lib/session-precreate.js';
 export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
   readonly sessionId: string;
   envId: string | null = null;
-  private status: AgentStatus = 'initializing';
+  private status: AgentStatus = 'open';
+  private activityTracker: PtyActivityTracker | null = null;
   private cwd: string | null = null;
   private createdAt = Date.now();
   private destroyed = false;
@@ -72,8 +74,14 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
       });
       this.envId = envId;
 
-      // Register envId → sessionId mapping for activity tracking
-      registerActivitySession(this.envId, this.sessionId);
+      // Set up PTY activity tracking (burst detection → status events)
+      this.activityTracker = new PtyActivityTracker((status) => {
+        this.setStatus(status);
+      });
+      const pty = getPty(this.envId);
+      if (pty) {
+        pty.onData((data: string) => this.activityTracker?.onPtyData(data));
+      }
 
       // Start file change detection (all 3 levels)
       const pid = getProcessPid(this.envId);
@@ -90,10 +98,8 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
       // Start tailing the known session file — UUID is known, no discovery needed
       this.startTailing(resumeUuid);
 
-      this.setStatus('idle');
       this.emit('ready');
     } catch (err: any) {
-      this.setStatus('error');
       this.emit('error', err);
       throw err;
     }
@@ -102,6 +108,11 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
+
+    if (this.activityTracker) {
+      this.activityTracker.dispose();
+      this.activityTracker = null;
+    }
 
     if (this.jsonlWatcher) {
       this.jsonlWatcher.stop();
@@ -116,14 +127,8 @@ export class CodexTerminalChatROAgent extends EventEmitter implements Agent {
     this.emit('exit');
   }
 
-  /**
-   * Called when the user views this session tab — clears attention.
-   */
-  markViewed(): void {
-    if (this.status === 'waiting') {
-      this.setStatus('idle');
-    }
-  }
+  onFocused(): void { this.activityTracker?.onFocused(); }
+  onBlurred(): void { this.activityTracker?.onBlurred(); }
 
   // Terminal-only: type message directly into the PTY
   sendMessage(text: string, _attachments?: Attachment[]): void {

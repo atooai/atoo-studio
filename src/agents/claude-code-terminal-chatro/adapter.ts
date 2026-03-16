@@ -12,11 +12,12 @@ import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
 import { toWireMessages } from '../../events/wire.js';
 import { forkEventsToResumable } from '../lib/claude/jsonl-writer.js';
-import { getProcessPid, getPty, killCliProcess, registerActivitySession } from '../../spawner.js';
+import { getProcessPid, getPty, killCliProcess } from '../../spawner.js';
 import { spawnTerminalCliProcess } from './spawner.js';
 import { JsonlWatcher, type SubagentMetadata } from './jsonl-watcher.js';
 import { fsSessionScanner } from '../lib/claude/fs-sessions.js';
 import { initFileTracking, ToolResultFileTracker } from '../lib/fs-tracking.js';
+import { PtyActivityTracker } from '../lib/pty-activity-tracker.js';
 
 import { precreateClaudeSession } from '../lib/session-precreate.js';
 
@@ -28,8 +29,9 @@ import { precreateClaudeSession } from '../lib/session-precreate.js';
 export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent {
   readonly sessionId: string;
   envId: string | null = null;
-  private status: AgentStatus = 'initializing';
+  private status: AgentStatus = 'open';
   private mode = 'default';
+  private activityTracker: PtyActivityTracker | null = null;
   private cwd: string | null = null;
   private createdAt = Date.now();
   private destroyed = false;
@@ -90,8 +92,14 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       });
       this.envId = envId;
 
-      // Register envId → sessionId mapping for activity tracking
-      registerActivitySession(this.envId, this.sessionId);
+      // Set up PTY activity tracking (burst detection → status events)
+      this.activityTracker = new PtyActivityTracker((status) => {
+        this.setStatus(status);
+      });
+      const pty = getPty(this.envId);
+      if (pty) {
+        pty.onData((data: string) => this.activityTracker?.onPtyData(data));
+      }
 
       // Start file change detection (all 3 levels)
       const pid = getProcessPid(this.envId);
@@ -108,10 +116,8 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
       // Start tailing the known JSONL file — UUID is known, no discovery needed
       this.jsonlWatcher.startTailingKnownUuid(resumeUuid);
 
-      this.setStatus('idle');
       this.emit('ready');
     } catch (err: any) {
-      this.setStatus('error');
       this.emit('error', err);
       throw err;
     }
@@ -120,6 +126,11 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
+
+    if (this.activityTracker) {
+      this.activityTracker.dispose();
+      this.activityTracker = null;
+    }
 
     if (this.jsonlWatcher) {
       this.jsonlWatcher.stop();
@@ -150,7 +161,9 @@ export class ClaudeCodeTerminalChatROAgent extends EventEmitter implements Agent
   setMode(_mode: string): void {}
   setModel(_model: string): void {}
   refreshContext(): void {}
-  markViewed(): void {}
+
+  onFocused(): void { this.activityTracker?.onFocused(); }
+  onBlurred(): void { this.activityTracker?.onBlurred(); }
 
   sendKey(key: string): void {
     if (!this.envId) return;

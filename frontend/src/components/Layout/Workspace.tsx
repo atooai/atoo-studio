@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../../state/store';
-import { sendAgentCommand } from '../../api/websocket';
+import { sendStatusMessage } from '../../api/websocket';
 import { FileTree } from '../FileTree/FileTree';
 import { GitHistory } from '../Git/GitHistory';
 import { EditorArea } from '../Editor/Editor';
@@ -31,18 +31,18 @@ export function Workspace() {
 
     // Blur previous session if we switched away
     if (prevSessionId && prevSessionId !== currentSessionId) {
-      sendAgentCommand(prevSessionId, { action: 'session_blur' });
+      sendStatusMessage({ type: 'session_blur', session_id: prevSessionId });
     }
     // Focus new session
     if (currentSessionId && currentSessionId !== prevSessionId) {
-      sendAgentCommand(currentSessionId, { action: 'session_focus' });
+      sendStatusMessage({ type: 'session_focus', session_id: currentSessionId });
     }
     prevFocusedRef.current = currentSessionId;
 
     // On unmount, blur the current session
     return () => {
       if (prevFocusedRef.current) {
-        sendAgentCommand(prevFocusedRef.current, { action: 'session_blur' });
+        sendStatusMessage({ type: 'session_blur', session_id: prevFocusedRef.current });
         prevFocusedRef.current = null;
       }
     };
