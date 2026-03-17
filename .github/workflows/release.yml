@@ -30,6 +30,8 @@ jobs:
 
       - run: npm ci
       - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ── Docker image (multi-platform) ──
   docker:
@@ -104,7 +106,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build LXC image
-        run: bash scripts/build-lxc-image.sh "ghcr.io/atooai/atoo-studio:${{ github.event.release.tag_name }}" "${{ matrix.arch }}"
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          bash scripts/build-lxc-image.sh "ghcr.io/atooai/atoo-studio:${VERSION}" "${{ matrix.arch }}"
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
