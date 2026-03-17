@@ -19,6 +19,14 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      - name: Sync version from release tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting version to $VERSION"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npm version "$VERSION" --no-git-tag-version --allow-same-version --prefix frontend
+          npm version "$VERSION" --no-git-tag-version --allow-same-version --prefix docs
+
       - run: npm ci
       - run: npm publish --provenance --access public
 
@@ -30,6 +38,18 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sync version from release tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting version to $VERSION"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npm version "$VERSION" --no-git-tag-version --allow-same-version --prefix frontend
+          npm version "$VERSION" --no-git-tag-version --allow-same-version --prefix docs
 
       - uses: docker/setup-qemu-action@v3
 
