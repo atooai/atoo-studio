@@ -132,6 +132,8 @@ Atoo Studio was built from that exact pain: creating a workspace that actually m
 
 **Native Windows is not supported. Use WSL instead.**
 
+**macOS support is completely untested at this time.** It should work in principle, but expect rough edges.
+
 ## Getting started
 
 ### Requirements
