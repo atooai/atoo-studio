@@ -19,6 +19,7 @@ import { MobileApp } from './components/Mobile';
 import { getMonacoLang, debounce, getServerIp, isRenderable, isImageFile } from './utils';
 
 const MOBILE_BREAKPOINT = 768;
+const IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
 
 function useIsMobile() {
   const setIsMobileLayout = useStore(s => s.setIsMobileLayout);
@@ -108,7 +109,7 @@ export function App() {
   return (
     <>
       {showStart && <StartPage />}
-      <div id="app" className={sidebarCollapsed ? 'sidebar-collapsed' : ''} style={{ display: showStart ? 'none' : '' }}>
+      <div id="app" className={`${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${IS_STANDALONE ? 'standalone' : ''}`} style={{ display: showStart ? 'none' : '' }}>
         <Sidebar />
         <div className="sidebar-vsplit" id="sidebar-vsplit" onMouseDown={(e) => (window as any).startSidebarSplitDrag(e.nativeEvent)}></div>
         <TopBar />
@@ -349,10 +350,11 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
   if (useStore.getState().showHidden) rootPathParams.set('showHidden', 'true');
   const rootPathParam = rootPathParams.toString() ? `?${rootPathParams.toString()}` : '';
 
-  // Lazy-load file tree
+  // Lazy-load file tree (shallow — 1 level; subdirs expand on demand)
   if (!proj._filesLoaded) {
     try {
-      const files = await api('GET', `/api/projects/${proj.id}/files${rootPathParam}`);
+      const sep = rootPathParam ? '&' : '?';
+      const files = await api('GET', `/api/projects/${proj.id}/files${rootPathParam}${sep}maxDepth=1`);
       useStore.getState().updateProject(proj.id, p => ({ ...p, files, _filesLoaded: true }));
     } catch (e) {
       useStore.getState().updateProject(proj.id, p => ({ ...p, files: [], _filesLoaded: true }));
@@ -398,11 +400,13 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
   // Always reload sessions + historical on project switch (sessions are per-project)
   {
     try {
-      const [sessions, historical, agentSessions] = await Promise.all([
+      const [sessions, agentSessions] = await Promise.all([
         api('GET', `/api/projects/${proj.id}/sessions`),
-        api('GET', `/api/historical-sessions?cwd=${encodeURIComponent(proj.path)}`).catch(() => []),
         api('GET', '/api/agent-sessions').catch(() => []),
       ]);
+      // Historical sessions can be slow (scans JSONL files on first load) — load in background
+      const historicalPromise = api('GET', `/api/historical-sessions?cwd=${encodeURIComponent(proj.path)}`).catch(() => []);
+      const historical: any[] = [];
 
       // Build a map of existing sessions to preserve messages/state
       const existingSessions = new Map(
@@ -478,19 +482,6 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
           };
         });
 
-      const activeIds = new Set([...legacyIds, ...matchingAgentSessions.map((s: any) => s.id)]);
-      const historicalSessions = historical
-        .filter((h: any) => !activeIds.has(h.id))
-        .map((h: any) => ({
-          id: h.id,
-          agentType: h.agentType,
-          title: h.title || 'Untitled',
-          lastModified: h.lastModified,
-          eventCount: h.eventCount,
-          ...(h.metaName ? { metaName: h.metaName } : {}),
-          ...(h.tags?.length ? { tags: h.tags } : {}),
-        }));
-
       for (const s of matchingAgentSessions) {
         connectAgentWs(s.id);
       }
@@ -499,9 +490,29 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
       useStore.getState().updateProject(proj.id, p => ({
         ...p,
         sessions: allSessions,
-        historicalSessions,
+        historicalSessions: [],
         _sessionsLoaded: true,
       }));
+
+      // Merge historical sessions when they arrive (deferred to avoid blocking startup)
+      historicalPromise.then((historical: any[]) => {
+        const activeIds = new Set([...allSessions.map((s: any) => s.id)]);
+        const historicalSessions = historical
+          .filter((h: any) => !activeIds.has(h.id))
+          .map((h: any) => ({
+            id: h.id,
+            agentType: h.agentType,
+            title: h.title || 'Untitled',
+            lastModified: h.lastModified,
+            eventCount: h.eventCount,
+            ...(h.metaName ? { metaName: h.metaName } : {}),
+            ...(h.tags?.length ? { tags: h.tags } : {}),
+          }));
+        useStore.getState().updateProject(proj.id, p => ({
+          ...p,
+          historicalSessions,
+        }));
+      });
 
       // Fetch metadata for all active sessions (also updates matching historical sessions)
       const fetchedChains = new Set<string>();

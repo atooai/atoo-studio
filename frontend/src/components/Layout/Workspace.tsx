@@ -194,7 +194,7 @@ function CenterTabs({ proj }: { proj: any }) {
           </div>
         );
       })}
-      <button className="center-tab-add" onClick={() => (window as any).newSession()} title="New Claude session">+ <span className="add-label">Session</span></button>
+      <button className="center-tab-add" onClick={() => (window as any).newSession()} title="New Claude session">+ <span className="add-label">Agent</span></button>
       {terminals.length > 0 && <div className="center-tab-sep"></div>}
       {terminals.map((t: any, i: number) => {
         const isActive = activeTabType === 'terminal' && i === (proj.activeTerminalIdx || 0);
@@ -212,7 +212,7 @@ function CenterTabs({ proj }: { proj: any }) {
           </div>
         );
       })}
-      <button className="center-tab-add" onClick={() => (window as any).addTerminal()} title="New terminal">+ <span className="add-label">Term</span></button>
+      <button className="center-tab-add" onClick={() => (window as any).addTerminal()} title="New terminal">+ <span className="add-label">Terminal</span></button>
     </div>
   );
 }

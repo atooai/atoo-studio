@@ -14,6 +14,7 @@ import { agentRegistry } from './agents/registry.js';
 import { ClaudeCodeTerminalAgentFactory } from './agents/claude-code-terminal/index.js';
 import { ClaudeCodeTerminalChatROAgentFactory } from './agents/claude-code-terminal-chatro/index.js';
 import { CodexTerminalChatROAgentFactory } from './agents/codex-terminal-chatro/index.js';
+import { CodexTerminalAgentFactory } from './agents/codex-terminal/index.js';
 import { sshManager } from './services/ssh-manager.js';
 import { previewManager } from './services/preview-manager.js';
 
@@ -27,8 +28,9 @@ async function main() {
 
   // 2. Register agent factories
   agentRegistry.registerFactory(new ClaudeCodeTerminalAgentFactory());
-  agentRegistry.registerFactory(new ClaudeCodeTerminalChatROAgentFactory());
-  agentRegistry.registerFactory(new CodexTerminalChatROAgentFactory());
+  // agentRegistry.registerFactory(new ClaudeCodeTerminalChatROAgentFactory());
+  // agentRegistry.registerFactory(new CodexTerminalChatROAgentFactory());
+  agentRegistry.registerFactory(new CodexTerminalAgentFactory());
 
   // 3. Clean up stale per-session MCP config files (older than 24h)
   cleanupStaleMcpConfigs();

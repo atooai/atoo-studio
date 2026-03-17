@@ -1,0 +1,68 @@
+/**
+ * Codex Terminal–specific spawn logic.
+ * Spawns a plain `codex` PTY with MCP, system prompt, and LD_PRELOAD for file tracking.
+ */
+import crypto from 'crypto';
+import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
+import { spawnProcess } from '../../spawner.js';
+import { getMcpServerDef, MCP_SYSTEM_PROMPT, CHAIN_SYSTEM_PROMPT, registerMcpToken } from '../../mcp/config.js';
+import { addPreloadEnv } from '../lib/fs-tracking.js';
+
+export function spawnCodexCliProcess(options: {
+  skipPermissions?: boolean;
+  cwd?: string;
+  resumeSessionUuid?: string;
+  isChainContinuation?: boolean;
+}): { envId: string; preloadSessionId: string } {
+  const cwd = options.cwd || process.env.HOME || os.homedir();
+
+  let command: string;
+  let args: string[];
+
+  const baseArgs: string[] = [];
+  if (options.skipPermissions) baseArgs.push('--full-auto');
+
+  // Inject MCP server config via -c flags (per-process, doesn't affect other codex instances)
+  const mcpToken = crypto.randomUUID();
+  registerMcpToken(mcpToken);
+  const mcp = getMcpServerDef();
+  const mcpEnv: Record<string, string> = { ...mcp.env, ATOO_MCP_TOKEN: mcpToken };
+  if (options.resumeSessionUuid) {
+    mcpEnv.ATOO_CURRENT_SESSION_UUID = options.resumeSessionUuid;
+  }
+  baseArgs.push('-c', `mcp_servers.atoo-studio.command="${mcp.command}"`);
+  baseArgs.push('-c', `mcp_servers.atoo-studio.args=${JSON.stringify(mcp.args)}`);
+  for (const [key, value] of Object.entries(mcpEnv)) {
+    baseArgs.push('-c', `mcp_servers.atoo-studio.env.${key}="${value}"`);
+  }
+
+  // Inject system prompt with MCP tool usage instructions
+  const systemPrompt = options.isChainContinuation
+    ? MCP_SYSTEM_PROMPT + CHAIN_SYSTEM_PROMPT
+    : MCP_SYSTEM_PROMPT;
+  baseArgs.push('-c', `developer_instructions=${JSON.stringify(systemPrompt)}`);
+
+  if (options.resumeSessionUuid) {
+    command = 'codex';
+    args = ['resume', options.resumeSessionUuid, ...baseArgs];
+  } else {
+    command = 'codex';
+    args = [...baseArgs];
+  }
+
+  const preloadSessionId = uuidv4();
+  const env: Record<string, string | undefined> = { ...process.env };
+  addPreloadEnv(env, preloadSessionId);
+
+  const { envId } = spawnProcess({
+    command,
+    args,
+    cwd,
+    env,
+    preloadSessionId,
+    logPrefix: 'codex-terminal',
+  });
+
+  return { envId, preloadSessionId };
+}

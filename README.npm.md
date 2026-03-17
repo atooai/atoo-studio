@@ -30,7 +30,7 @@ docker run -p 3010:3010 ghcr.io/atooai/atoo-studio
 ## Features
 
 - **Multi-agent workflows** — Run Claude Code, Codex CLI and more in parallel across projects and worktrees
-- **Session forking & chaining** — Branch conversations, chain sessions across agents, search history via MCP
+- **Session forking & chaining** — Chain sessions across agents, search history via MCP
 - **Project changes tracking** — Know what was done, by which session, and when
 - **App preview** — Live preview via headless Chrome (CDP pixel streaming), with DevTools and responsive testing
 - **GitHub integration** — Issues, PRs, comments, labels — all from the workspace

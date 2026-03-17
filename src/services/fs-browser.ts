@@ -1,4 +1,5 @@
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 
 interface FileNode {
@@ -11,12 +12,12 @@ const SKIP_NAMES = new Set(['.git', '.atoo-studio', 'node_modules', '.next', '.n
 const MAX_DEPTH = 8;
 const MAX_ENTRIES = 2000;
 
-export function getFileTree(dirPath: string, depth: number = 0, showHidden: boolean = false): FileNode[] {
-  if (depth > MAX_DEPTH) return [];
+export async function getFileTree(dirPath: string, depth: number = 0, showHidden: boolean = false, maxDepth: number = MAX_DEPTH): Promise<FileNode[]> {
+  if (depth > maxDepth) return [];
 
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    entries = await fsp.readdir(dirPath, { withFileTypes: true });
   } catch {
     return [];
   }
@@ -34,8 +35,13 @@ export function getFileTree(dirPath: string, depth: number = 0, showHidden: bool
     if (count >= MAX_ENTRIES) break;
     if (entry.isDirectory()) {
       if (!showHidden && SKIP_NAMES.has(entry.name)) continue;
-      const children = getFileTree(path.join(dirPath, entry.name), depth + 1, showHidden);
-      result.push({ name: entry.name, type: 'dir', children });
+      if (depth >= maxDepth) {
+        // At max depth, include dir without loading children
+        result.push({ name: entry.name, type: 'dir' });
+      } else {
+        const children = await getFileTree(path.join(dirPath, entry.name), depth + 1, showHidden, maxDepth);
+        result.push({ name: entry.name, type: 'dir', children });
+      }
     } else if (entry.isFile() || entry.isSymbolicLink()) {
       if (!showHidden && SKIP_NAMES.has(entry.name)) continue;
       result.push({ name: entry.name, type: 'file' });

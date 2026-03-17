@@ -53,6 +53,7 @@ export function Sidebar() {
         <StatusChip type="open-chats" count={openChats} label="Open Chats" filter="chats" />
       </div>
       <div className="project-list-header">
+        <button className="sidebar-pwa-collapse-btn" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title="Collapse sidebar">▸</button>
         <span className="project-list-title">Projects</span>
         <AddMenu />
       </div>

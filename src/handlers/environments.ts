@@ -125,15 +125,6 @@ environmentsRouter.get('/api/environments/:id/projects', async (req, res) => {
     return { ...p, isGit };
   }));
   res.json(withGit);
-  // Start watchers in the background, yielding between each so the event loop can serve other requests
-  const localProjects = projects.filter(p => !p.ssh_connection_id);
-  (function watchNext(i: number) {
-    if (i >= localProjects.length) return;
-    setImmediate(() => {
-      watchProject(localProjects[i].id, localProjects[i].path);
-      watchNext(i + 1);
-    });
-  })(0);
 });
 
 // Create project + link to environment

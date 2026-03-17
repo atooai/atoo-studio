@@ -54,7 +54,7 @@ export function MobileDashboard() {
       </div>
       <div className="mobile-quick-actions">
         <button className="mobile-quick-btn" onClick={() => (window as any).newSession?.()}>
-          + New Session
+          + New Agent
         </button>
         <button className="mobile-quick-btn" onClick={() => useStore.getState().setModal({ type: 'container-manager' })}>
           Containers

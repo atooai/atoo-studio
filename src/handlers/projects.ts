@@ -72,12 +72,17 @@ projectsRouter.get('/api/projects/:id/files', async (req, res) => {
   try {
     const rootPath = (req.query.rootPath as string) || ctx.cwd;
     const showHidden = req.query.showHidden === 'true';
+    const maxDepth = req.query.maxDepth != null ? parseInt(req.query.maxDepth as string, 10) : undefined;
     if (ctx.connectionId) {
       const tree = await getRemoteFileTree(ctx.connectionId, rootPath);
       res.json(tree);
     } else {
-      const tree = getFileTree(rootPath, 0, showHidden);
+      const tree = await getFileTree(rootPath, 0, showHidden, maxDepth);
       res.json(tree);
+      // Start watching when project root is first accessed (lazy — avoids watching all projects on startup)
+      if (!req.query.rootPath && !ctx.connectionId) {
+        setImmediate(() => watchProject(req.params.id, ctx.cwd));
+      }
     }
   } catch (err: any) {
     res.status(500).json({ error: err.message });

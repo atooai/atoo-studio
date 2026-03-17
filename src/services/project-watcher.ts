@@ -30,10 +30,10 @@ function broadcastToStatus(msg: any) {
 
 function handleFileChange(entry: WatchEntry) {
   if (entry.debounceTimer) clearTimeout(entry.debounceTimer);
-  entry.debounceTimer = setTimeout(() => {
+  entry.debounceTimer = setTimeout(async () => {
     entry.debounceTimer = null;
     try {
-      const files = getFileTree(entry.projectPath);
+      const files = await getFileTree(entry.projectPath, 0, false, 1);
       broadcastToStatus({
         type: 'project_files_changed',
         projectId: entry.projectId,
@@ -68,7 +68,7 @@ async function handleGitChange(entry: WatchEntry) {
 
       // Also refresh file tree — git operations (revert, checkout, stash) change working tree
       try {
-        const files = getFileTree(entry.projectPath);
+        const files = await getFileTree(entry.projectPath, 0, false, 1);
         broadcastToStatus({
           type: 'project_files_changed',
           projectId: entry.projectId,

@@ -224,7 +224,7 @@ function handleStatusMessage(msg: any) {
     const proj = s.projects.find((p) => p.id === msg.projectId);
     if (s.showHidden) {
       // Watcher sends default (hidden-filtered) tree; re-fetch with showHidden
-      api('GET', `/api/projects/${msg.projectId}/files?showHidden=true`).then((files: any) => {
+      api('GET', `/api/projects/${msg.projectId}/files?showHidden=true&maxDepth=1`).then((files: any) => {
         useStore.getState().updateProject(msg.projectId, (p) => ({ ...p, files }));
       }).catch(() => {});
     } else {

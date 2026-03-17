@@ -69,7 +69,7 @@ Atoo Studio was built from that exact pain: creating a workspace that actually m
 
 - Run multiple coding agents in parallel across isolated projects and worktrees.
 - Each agent runs in a real PTY session with full terminal capabilities.
-- Fork sessions like Git branches to explore alternative approaches without losing the original context.
+- Fork sessions to explore alternative approaches without losing the original context.
 - Chain sessions across agents, so you can start with Claude Code and continue with Codex using the same conversation history.
 - Search session history via MCP so agents can reuse past decisions, failed attempts, and implementation context.
 - Set session names, descriptions, and tags for better navigation and recall.

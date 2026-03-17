@@ -155,10 +155,10 @@ export function FileTree() {
   const filesWithDeleted = tooManyChanges ? (proj.files || []) : mergeDeletedFiles(proj.files || [], gitMap, '');
   const displayFiles = isSystem ? systemFiles : filesWithDeleted;
 
-  // Fetch system root files when in system mode
+  // Fetch system root files when in system mode (shallow — 1 level only)
   useEffect(() => {
     if (!isSystem || !proj) return;
-    const params = new URLSearchParams({ rootPath: '/', showHidden: 'true' });
+    const params = new URLSearchParams({ rootPath: '/', showHidden: 'true', maxDepth: '1' });
     api('GET', `/api/projects/${proj.id}/files?${params}`).then(setSystemFiles).catch(() => setSystemFiles([]));
   }, [isSystem, proj?.id]);
 
@@ -305,9 +305,30 @@ function TreeNodes({ nodes, parentPath, gitMap, gitStaged, gitOldPaths, dirtyDir
 
 function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, depth, selectedPath, onSelect, pathPrefix }: { node: FileNode; fullPath: string; gitMap: Record<string, string>; gitStaged: Record<string, boolean>; gitOldPaths: Record<string, string>; dirtyDirs: Set<string>; depth: number; selectedPath: string | null; onSelect: (p: string) => void; pathPrefix?: string }) {
   const [open, setOpen] = useState(false);
+  const [lazyChildren, setLazyChildren] = useState<FileNode[] | null>(null);
+  const [loading, setLoading] = useState(false);
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gitBadge = gitMap[fullPath];
   const isDirty = dirtyDirs.has(fullPath);
+  const { activeProjectId } = useStore();
+
+  // Determine if children need lazy loading (undefined = not yet fetched from server)
+  const needsLazyLoad = node.children === undefined;
+  const displayChildren = needsLazyLoad ? (lazyChildren || []) : (node.children || []);
+
+  const handleToggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && needsLazyLoad && !lazyChildren && !loading && activeProjectId) {
+      setLoading(true);
+      const absPath = (pathPrefix || '') + fullPath;
+      const params = new URLSearchParams({ rootPath: absPath, showHidden: 'true', maxDepth: '1' });
+      api('GET', `/api/projects/${activeProjectId}/files?${params}`)
+        .then(setLazyChildren)
+        .catch(() => setLazyChildren([]))
+        .finally(() => setLoading(false));
+    }
+  };
 
   const clearExpandTimer = () => {
     if (expandTimer.current) { clearTimeout(expandTimer.current); expandTimer.current = null; }
@@ -321,7 +342,7 @@ function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, de
         data-path={fullPath}
         data-type="dir"
         draggable
-        onClick={() => setOpen(!open)}
+        onClick={handleToggle}
         onContextMenu={(e) => { e.preventDefault(); (window as any).showCtxMenu(e.nativeEvent, fullPath, 'dir'); }}
         onDragStart={(e) => { (window as any).dragStart(fullPath, 'dir', e.currentTarget, e.dataTransfer); }}
         onDragEnd={() => (window as any).dragEnd()}
@@ -329,7 +350,7 @@ function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, de
           e.stopPropagation();
           // Auto-expand collapsed folder after 300ms of hover
           if (!open && !expandTimer.current) {
-            expandTimer.current = setTimeout(() => { setOpen(true); expandTimer.current = null; }, 300);
+            expandTimer.current = setTimeout(() => { handleToggle(); expandTimer.current = null; }, 300);
           }
           (window as any).dragOverItem(fullPath, 'dir', e.currentTarget, e);
         }}
@@ -350,7 +371,10 @@ function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, de
       </div>
       {open && (
         <div className="dir-children">
-          <TreeNodes nodes={node.children || []} parentPath={fullPath} gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} dirtyDirs={dirtyDirs} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} pathPrefix={pathPrefix} />
+          {loading
+            ? <div className="file-tree-item" style={{ '--depth': depth + 1 } as React.CSSProperties}><span className="file-tree-name file" style={{ color: 'var(--text-muted)' }}>Loading...</span></div>
+            : <TreeNodes nodes={displayChildren} parentPath={fullPath} gitMap={gitMap} gitStaged={gitStaged} gitOldPaths={gitOldPaths} dirtyDirs={dirtyDirs} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} pathPrefix={pathPrefix} />
+          }
         </div>
       )}
     </>
