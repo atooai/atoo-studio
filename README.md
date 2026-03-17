@@ -300,6 +300,7 @@ Bug reports and feedback are welcome.
 - [ ] Self-hosted Git platform support: Gitea, GitLab, and Azure DevOps Server
 - [ ] Evaluate cloud platforms for native management (containers, databases, infrastructure)
 - [ ] Experiment with alternative workspace layouts
+- [ ] Optional per-project development containers
 - [ ] Replace xterm.js with atoo-term (currently in development)
 
 ## Feedback
