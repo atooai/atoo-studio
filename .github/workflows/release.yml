@@ -7,7 +7,7 @@ on:
 jobs:
   # ── npm publish ──
   npm:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       id-token: write
@@ -32,7 +32,7 @@ jobs:
 
   # ── Docker image (multi-platform) ──
   docker:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -83,7 +83,7 @@ jobs:
   # ── LXC image (attached to release) ──
   lxc:
     needs: docker
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write
       packages: read
@@ -112,7 +112,7 @@ jobs:
 
   # ── Docs (Docusaurus → WebDAV) ──
   docs:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
