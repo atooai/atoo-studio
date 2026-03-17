@@ -184,6 +184,9 @@ function CommitList({ proj }: { proj: any }) {
                 <div className="gh-commit-meta">
                   <span className={`gh-commit-expand ${isExpanded ? 'open' : ''}`} onClick={(e) => { e.stopPropagation(); toggleExpand(c.hash); }}>&#x25B8;</span>
                   <span className="gh-commit-hash" onClick={(e) => { e.stopPropagation(); copyHash(c.hash); }}>{c.hash}</span>
+                  {(c.refs || []).filter(r => r.type === 'tag').map((r, i) => (
+                    <span key={i} className="gh-ref-badge tag-badge">{r.label}</span>
+                  ))}
                   <span className="gh-commit-author">{c.author}</span>
                   {files.length > 0 && <span className="gh-commit-file-count">{files.length} files</span>}
                   <span className="gh-commit-date">{c.date}</span>
