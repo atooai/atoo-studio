@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment, SerialRequest, ReportedService } from '../types';
+import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment, SerialRequest, ReportedService, NiriLayoutState, NiriColumn, NiriWidthMode } from '../types';
 import { DEVICE_PRESETS } from '../data/device-presets';
 
 export interface AppState {
@@ -24,7 +24,8 @@ export interface AppState {
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
   rightPanelTab: 'sessions' | 'issues' | 'prs' | 'changes';
-  workspaceLayout: 'classic' | 'carousel';
+  workspaceLayout: 'classic' | 'carousel' | 'niri';
+  niriLayout: NiriLayoutState;
 
   // Editor state
   openFiles: EditorFile[];
@@ -105,7 +106,17 @@ export interface AppState {
   setSidebarCollapsed: (v: boolean) => void;
   setRightPanelCollapsed: (v: boolean) => void;
   setRightPanelTab: (t: 'sessions' | 'issues' | 'prs' | 'changes') => void;
-  setWorkspaceLayout: (v: 'classic' | 'carousel') => void;
+  setWorkspaceLayout: (v: 'classic' | 'carousel' | 'niri') => void;
+  setNiriLayout: (layout: NiriLayoutState) => void;
+  niriSetFocus: (columnIdx: number, windowIdx: number) => void;
+  niriSetOverview: (v: boolean) => void;
+  niriSetColumnWidth: (columnIdx: number, mode: NiriWidthMode, customPx?: number) => void;
+  niriSetWindowHeight: (columnIdx: number, windowIdx: number, fraction: number) => void;
+  niriMoveWindow: (fromCol: number, fromWin: number, toCol: number, toWinIdx: number) => void;
+  niriAddColumn: (afterIdx: number, column: NiriColumn) => void;
+  niriRemoveColumn: (columnIdx: number) => void;
+  niriRemoveWindow: (columnIdx: number, windowIdx: number) => void;
+  niriSetToolbarPosition: (pos: 'left' | 'right' | 'top' | 'bottom') => void;
   setOpenFiles: (files: EditorFile[]) => void;
   setActiveFileIdx: (idx: number) => void;
   setMonacoReady: (v: boolean) => void;
@@ -167,6 +178,24 @@ export const useStore = create<AppState>((set, get) => ({
   rightPanelCollapsed: false,
   rightPanelTab: 'sessions',
   workspaceLayout: 'classic',
+  niriLayout: {
+    columns: [
+      { id: 'col-explorer', windows: [
+        { id: 'w-filetree', type: 'file-tree' },
+        { id: 'w-githistory', type: 'git-history' },
+      ], widthMode: '1/3' },
+      { id: 'col-editor', windows: [
+        { id: 'w-editor', type: 'editor' },
+      ], widthMode: '1/2' },
+      { id: 'col-sessions', windows: [
+        { id: 'w-sessions', type: 'sessions-list' },
+      ], widthMode: '1/3' },
+    ],
+    focusedColumnIdx: 1,
+    focusedWindowIdx: 0,
+    overviewMode: false,
+    toolbarPosition: 'left',
+  },
   openFiles: [],
   activeFileIdx: -1,
   monacoReady: false,
@@ -219,6 +248,80 @@ export const useStore = create<AppState>((set, get) => ({
   setRightPanelCollapsed: (v) => set({ rightPanelCollapsed: v }),
   setRightPanelTab: (t) => set({ rightPanelTab: t }),
   setWorkspaceLayout: (v) => set({ workspaceLayout: v }),
+  setNiriLayout: (layout) => set({ niriLayout: layout }),
+  niriSetFocus: (columnIdx, windowIdx) => set((s) => ({
+    niriLayout: { ...s.niriLayout, focusedColumnIdx: columnIdx, focusedWindowIdx: windowIdx },
+  })),
+  niriSetOverview: (v) => set((s) => ({
+    niriLayout: { ...s.niriLayout, overviewMode: v },
+  })),
+  niriSetColumnWidth: (columnIdx, mode, customPx) => set((s) => {
+    const cols = [...s.niriLayout.columns];
+    cols[columnIdx] = { ...cols[columnIdx], widthMode: mode, customWidthPx: customPx };
+    return { niriLayout: { ...s.niriLayout, columns: cols } };
+  }),
+  niriSetWindowHeight: (columnIdx, windowIdx, fraction) => set((s) => {
+    const cols = [...s.niriLayout.columns];
+    const col = { ...cols[columnIdx], windows: [...cols[columnIdx].windows] };
+    const wins = col.windows;
+    if (wins.length < 2) return s;
+    // Adjust this window and the next one to compensate
+    const nextIdx = windowIdx + 1;
+    if (nextIdx >= wins.length) return s;
+    const oldFrac = wins[windowIdx].heightFraction ?? (1 / wins.length);
+    const nextOldFrac = wins[nextIdx].heightFraction ?? (1 / wins.length);
+    const delta = fraction - oldFrac;
+    wins[windowIdx] = { ...wins[windowIdx], heightFraction: fraction };
+    wins[nextIdx] = { ...wins[nextIdx], heightFraction: Math.max(0.05, nextOldFrac - delta) };
+    cols[columnIdx] = col;
+    return { niriLayout: { ...s.niriLayout, columns: cols } };
+  }),
+  niriMoveWindow: (fromCol, fromWin, toCol, toWinIdx) => set((s) => {
+    const cols = s.niriLayout.columns.map(c => ({ ...c, windows: [...c.windows] }));
+    const [win] = cols[fromCol].windows.splice(fromWin, 1);
+    if (!win) return s;
+    cols[toCol].windows.splice(toWinIdx, 0, win);
+    // Recalculate height fractions for affected columns
+    for (const idx of [fromCol, toCol]) {
+      const n = cols[idx].windows.length;
+      cols[idx].windows = cols[idx].windows.map(w => ({ ...w, heightFraction: 1 / Math.max(1, n) }));
+    }
+    // Remove empty columns
+    const filtered = cols.filter(c => c.windows.length > 0);
+    // Adjust focus
+    let focusedColumnIdx = s.niriLayout.focusedColumnIdx;
+    let focusedWindowIdx = toWinIdx;
+    const newColIdx = filtered.findIndex(c => c.id === cols[toCol].id);
+    if (newColIdx >= 0) focusedColumnIdx = newColIdx;
+    return { niriLayout: { ...s.niriLayout, columns: filtered, focusedColumnIdx, focusedWindowIdx } };
+  }),
+  niriAddColumn: (afterIdx, column) => set((s) => {
+    const cols = [...s.niriLayout.columns];
+    cols.splice(afterIdx + 1, 0, column);
+    return { niriLayout: { ...s.niriLayout, columns: cols, focusedColumnIdx: afterIdx + 1, focusedWindowIdx: 0 } };
+  }),
+  niriRemoveColumn: (columnIdx) => set((s) => {
+    const cols = s.niriLayout.columns.filter((_, i) => i !== columnIdx);
+    const focusedColumnIdx = Math.min(s.niriLayout.focusedColumnIdx, Math.max(0, cols.length - 1));
+    return { niriLayout: { ...s.niriLayout, columns: cols, focusedColumnIdx, focusedWindowIdx: 0 } };
+  }),
+  niriRemoveWindow: (columnIdx, windowIdx) => set((s) => {
+    const cols = s.niriLayout.columns.map(c => ({ ...c, windows: [...c.windows] }));
+    cols[columnIdx].windows.splice(windowIdx, 1);
+    // Recalculate fractions
+    const n = cols[columnIdx].windows.length;
+    if (n > 0) {
+      cols[columnIdx].windows = cols[columnIdx].windows.map(w => ({ ...w, heightFraction: 1 / n }));
+    }
+    // Remove empty columns
+    const filtered = cols.filter(c => c.windows.length > 0);
+    const focusedColumnIdx = Math.min(s.niriLayout.focusedColumnIdx, Math.max(0, filtered.length - 1));
+    const focusedWindowIdx = Math.min(s.niriLayout.focusedWindowIdx, Math.max(0, (filtered[focusedColumnIdx]?.windows.length ?? 1) - 1));
+    return { niriLayout: { ...s.niriLayout, columns: filtered, focusedColumnIdx, focusedWindowIdx } };
+  }),
+  niriSetToolbarPosition: (pos) => set((s) => ({
+    niriLayout: { ...s.niriLayout, toolbarPosition: pos },
+  })),
   setOpenFiles: (files) => set({ openFiles: files }),
   setActiveFileIdx: (idx) => set({ activeFileIdx: idx }),
   setMonacoReady: (v) => set({ monacoReady: v }),

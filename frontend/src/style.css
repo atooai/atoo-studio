@@ -9741,3 +9741,419 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   line-height: 1.5;
   word-break: break-word;
 }
+
+/* ══════════════════════════════════════════════════════
+   Niri-style layout
+   ══════════════════════════════════════════════════════ */
+
+.workspace.layout-niri {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Toolbar ── */
+.niri-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-secondary, #1a1a2e);
+  border-right: 1px solid var(--border, #2a2a4a);
+  z-index: 10;
+  flex-shrink: 0;
+}
+.niri-toolbar-left,
+.niri-toolbar-right {
+  flex-direction: column;
+  width: 40px;
+  align-items: center;
+}
+.niri-toolbar-top,
+.niri-toolbar-bottom {
+  flex-direction: row;
+  height: 40px;
+  align-items: center;
+  width: 100%;
+  border-right: none;
+}
+.niri-toolbar-right {
+  border-right: none;
+  border-left: 1px solid var(--border, #2a2a4a);
+  order: 10;
+}
+.niri-toolbar-top {
+  border-bottom: 1px solid var(--border, #2a2a4a);
+}
+.niri-toolbar-bottom {
+  border-top: 1px solid var(--border, #2a2a4a);
+  order: 10;
+}
+
+/* Toolbar position affects workspace flex direction */
+.workspace.layout-niri.niri-toolbar-pos-left,
+.workspace.layout-niri.niri-toolbar-pos-right {
+  flex-direction: row;
+}
+.workspace.layout-niri.niri-toolbar-pos-top,
+.workspace.layout-niri.niri-toolbar-pos-bottom {
+  flex-direction: column;
+}
+
+.niri-tb-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #888);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.niri-tb-btn:hover {
+  background: var(--bg-hover, #2a2a4a);
+  color: var(--text, #eee);
+}
+.niri-tb-btn.active {
+  background: var(--accent-blue, #4488ff);
+  color: #fff;
+}
+.niri-tb-sep {
+  flex: 1;
+}
+
+/* ── Sidebar overlay ── */
+.niri-sidebar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 100vh;
+  z-index: 100;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
+}
+.niri-sidebar-overlay-right {
+  left: auto;
+  right: 0;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+}
+.niri-sidebar-overlay-top {
+  width: 100vw;
+  height: 300px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+.niri-sidebar-overlay-bottom {
+  width: 100vw;
+  height: 300px;
+  top: auto;
+  bottom: 0;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+}
+.niri-sidebar-overlay #sidebar {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
+  max-height: none;
+}
+
+/* ── Strip container ── */
+.niri-strip-container {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.niri-strip {
+  display: flex;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  transition: transform 0.3s ease;
+  transform-origin: top left;
+}
+.niri-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* Overview mode */
+.niri-strip.niri-overview {
+  transform: scale(var(--niri-overview-scale, 1));
+  overflow: visible;
+  cursor: pointer;
+}
+
+.niri-overview-labels {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  z-index: 20;
+  pointer-events: none;
+}
+.niri-overview-label {
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--text-muted, #aaa);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+.niri-overview-label.focused {
+  border-color: var(--accent-blue, #4488ff);
+  color: var(--text, #eee);
+}
+.niri-overview-label:hover {
+  background: rgba(0, 0, 0, 0.85);
+  color: var(--text, #eee);
+}
+
+/* ── Column ── */
+.niri-column {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  height: 100%;
+  position: relative;
+  border-right: 1px solid var(--border, #2a2a4a);
+  transition: box-shadow 0.2s;
+}
+.niri-column:last-of-type {
+  border-right: none;
+}
+.niri-column-focused {
+  box-shadow: inset 0 0 0 1px var(--accent-blue, #4488ff33);
+}
+
+/* ── Column header ── */
+.niri-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg-secondary, #1a1a2e);
+  border-bottom: 1px solid var(--border, #2a2a4a);
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted, #888);
+}
+.niri-col-header-width {
+  font-family: monospace;
+}
+
+/* ── Column splitter ── */
+.niri-col-splitter {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 5;
+}
+.niri-col-splitter:hover {
+  background: var(--accent-blue, #4488ff);
+}
+
+/* ── Window cell ── */
+.niri-window-cell {
+  overflow: hidden;
+  position: relative;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.15s;
+}
+.niri-window-cell.focused {
+  box-shadow: inset 0 0 0 2px var(--accent-blue, #4488ff);
+}
+
+/* ── Window header ── */
+.niri-win-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  background: var(--bg-tertiary, #151528);
+  border-bottom: 1px solid var(--border, #2a2a4a);
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  user-select: none;
+}
+.niri-win-header:hover {
+  background: var(--bg-hover, #1e1e38);
+}
+.niri-win-header.focused {
+  color: var(--text, #eee);
+  background: var(--bg-hover, #1e1e38);
+}
+.niri-win-header-icon {
+  font-size: 12px;
+}
+.niri-win-header-label {
+  font-weight: 500;
+}
+.niri-win-header-param {
+  font-size: 10px;
+  opacity: 0.6;
+  font-family: monospace;
+}
+.niri-win-header-spacer {
+  flex: 1;
+}
+.niri-win-header-close {
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #888);
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.niri-win-header:hover .niri-win-header-close {
+  opacity: 1;
+}
+.niri-win-header-close:hover {
+  background: #e44;
+  color: #fff;
+}
+
+/* ── Window content ── */
+.niri-window-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Window splitter (vertical) ── */
+.niri-win-splitter {
+  height: 5px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 5;
+}
+.niri-win-splitter:hover {
+  background: var(--accent-blue, #4488ff);
+}
+
+/* ── TUI / terminal views ── */
+.niri-tui-view,
+.niri-terminal-view {
+  width: 100%;
+  height: 100%;
+}
+.niri-tui-view .xterm,
+.niri-terminal-view .xterm {
+  height: 100%;
+}
+
+/* ── Add panel button ── */
+.niri-add-panel {
+  position: relative;
+}
+.niri-add-panel-btn {
+  width: 24px;
+  height: 20px;
+  border: 1px solid var(--border, #2a2a4a);
+  background: transparent;
+  color: var(--text-muted, #888);
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.niri-add-panel-btn:hover {
+  background: var(--bg-hover, #2a2a4a);
+  color: var(--text, #eee);
+}
+.niri-add-panel-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  min-width: 180px;
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid var(--border, #2a2a4a);
+  border-radius: 6px;
+  padding: 4px;
+  z-index: 50;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.niri-add-panel-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text, #eee);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.niri-add-panel-item:hover {
+  background: var(--bg-hover, #2a2a4a);
+}
+
+/* ── Trailing add column ── */
+.niri-add-column-end {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 50px;
+  flex-shrink: 0;
+  padding: 0 12px;
+}
+.niri-add-column-end .niri-add-panel-btn {
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
+  border-radius: 50%;
+}
+
+/* ── Panel empty state ── */
+.niri-panel-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted, #888);
+  font-size: 13px;
+}
+
+/* ── Hide main sidebar when in niri mode ── */
+.workspace.layout-niri ~ #sidebar,
+#app:has(.workspace.layout-niri) > #sidebar,
+#app:has(.workspace.layout-niri) > .sidebar-vsplit {
+  display: none;
+}

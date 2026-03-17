@@ -314,3 +314,34 @@ export interface PreviewTab {
   // Legacy iframe mode (backward compat)
   url?: string;
 }
+
+// ─── Niri layout types ───
+
+export type NiriPanelType =
+  | 'file-tree' | 'git-history' | 'editor'
+  | 'agent-tui' | 'agent-chat' | 'terminal'
+  | 'preview' | 'sessions-list' | 'issues' | 'pulls' | 'changes';
+
+export interface NiriWindow {
+  id: string;
+  type: NiriPanelType;
+  params?: Record<string, string>;
+  heightFraction?: number;
+}
+
+export type NiriWidthMode = '1/3' | '1/2' | '2/3' | 'full' | 'custom';
+
+export interface NiriColumn {
+  id: string;
+  windows: NiriWindow[];
+  widthMode: NiriWidthMode;
+  customWidthPx?: number;
+}
+
+export interface NiriLayoutState {
+  columns: NiriColumn[];
+  focusedColumnIdx: number;
+  focusedWindowIdx: number;
+  overviewMode: boolean;
+  toolbarPosition: 'left' | 'right' | 'top' | 'bottom';
+}

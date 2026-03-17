@@ -279,16 +279,25 @@ function EnvSelector() {
   );
 }
 
+const LAYOUT_CYCLE: Array<{ key: 'classic' | 'carousel' | 'niri'; icon: string; label: string }> = [
+  { key: 'classic', icon: '⊞', label: 'Classic' },
+  { key: 'carousel', icon: '⇔', label: 'Carousel' },
+  { key: 'niri', icon: '⊟', label: 'Niri' },
+];
+
 function LayoutToggle() {
   const { workspaceLayout, setWorkspaceLayout } = useStore();
-  const isCarousel = workspaceLayout === 'carousel';
+  const currentIdx = LAYOUT_CYCLE.findIndex(l => l.key === workspaceLayout);
+  const current = LAYOUT_CYCLE[currentIdx >= 0 ? currentIdx : 0];
+  const nextIdx = (currentIdx + 1) % LAYOUT_CYCLE.length;
+  const next = LAYOUT_CYCLE[nextIdx];
   return (
     <button
-      className={`topbar-btn ${isCarousel ? 'active' : ''}`}
-      onClick={() => setWorkspaceLayout(isCarousel ? 'classic' : 'carousel')}
-      title={isCarousel ? 'Switch to classic layout' : 'Switch to carousel layout'}
+      className={`topbar-btn ${workspaceLayout !== 'classic' ? 'active' : ''}`}
+      onClick={() => setWorkspaceLayout(next.key)}
+      title={`Switch to ${next.label} layout`}
     >
-      {isCarousel ? '⊞' : '⇔'} {isCarousel ? 'Classic' : 'Carousel (Experimental)'}
+      {current.icon} {current.label}
     </button>
   );
 }

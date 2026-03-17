@@ -8,6 +8,7 @@ import { TopBar } from './components/TopBar/TopBar';
 import { Overview } from './components/Overview/Overview';
 import { Workspace } from './components/Layout/Workspace';
 import { CarouselWorkspace } from './components/Layout/CarouselWorkspace';
+import { NiriWorkspace } from './components/Layout/NiriWorkspace';
 import { StartPage } from './components/Layout/StartPage';
 import { ToastContainer } from './components/Layout/Toast';
 import { ModalContainer } from './components/Modals/ModalContainer';
@@ -40,7 +41,9 @@ function useIsMobile() {
 
 function WorkspaceRouter() {
   const layout = useStore(s => s.workspaceLayout);
-  return layout === 'carousel' ? <CarouselWorkspace /> : <Workspace />;
+  if (layout === 'niri') return <NiriWorkspace />;
+  if (layout === 'carousel') return <CarouselWorkspace />;
+  return <Workspace />;
 }
 
 export function App() {
@@ -584,6 +587,8 @@ function applyProjectSettings(settings: any, proj: any) {
   store.setPreviewTabs(settings.preview_tabs || []);
   store.setPreviewActiveIdx(settings.preview_active_idx ?? 0);
   if (settings.rightPanelTab) store.setRightPanelTab(settings.rightPanelTab);
+  if (settings.workspace_layout) store.setWorkspaceLayout(settings.workspace_layout);
+  if (settings.niri_layout) store.setNiriLayout(settings.niri_layout);
   // previewMode removed (streaming only, no iframe)
 
   // Apply DOM-level layout settings
@@ -641,6 +646,8 @@ function gatherProjectSettings(): Record<string, any> {
     preview_tabs: store.previewTabs,
     preview_active_idx: store.previewActiveIdx,
     rightPanelTab: store.rightPanelTab,
+    workspace_layout: store.workspaceLayout,
+    niri_layout: store.niriLayout,
   };
 }
 
