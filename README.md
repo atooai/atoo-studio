@@ -26,26 +26,19 @@
 
 ## Demo
 
-> **30-second demo coming soon**
->
-> A short walkthrough showing:
-> - two agent sessions running in parallel
-> - forking a session
-> - continuing the same task in another agent
-> - live app preview with integrated DevTools
-> - switching to Git / database / hardware panels
-
-<!--
-Replace this block with a linked thumbnail when the demo is ready.
-
-Example:
+<p align="center">
+  <img src="demoassets/layout-21-9.png" alt="Atoo Studio ultrawide layout" width="820">
+</p>
 
 <p align="center">
-  <a href="https://your-video-url">
-    <img src="docs/demo-thumbnail.png" alt="Atoo Studio 30-second demo" width="900">
-  </a>
+  <img src="demoassets/layout-16-9.png" alt="Atoo Studio standard layout" width="560">
+  &nbsp;&nbsp;
+  <img src="demoassets/mobile-mockup-portrait.jpg" alt="Atoo Studio mobile view" width="140">
 </p>
--->
+
+<p align="center">
+  <img src="demoassets/atoo-studio-carousel-mode.gif" alt="Atoo Studio carousel mode" width="420">
+</p>
 
 ## What is Atoo Studio?
 

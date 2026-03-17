@@ -28,7 +28,7 @@ async function main() {
 
   // 2. Register agent factories
   agentRegistry.registerFactory(new ClaudeCodeTerminalAgentFactory());
-  // agentRegistry.registerFactory(new ClaudeCodeTerminalChatROAgentFactory());
+  agentRegistry.registerFactory(new ClaudeCodeTerminalChatROAgentFactory());
   // agentRegistry.registerFactory(new CodexTerminalChatROAgentFactory());
   agentRegistry.registerFactory(new CodexTerminalAgentFactory());
 
