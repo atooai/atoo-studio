@@ -37,7 +37,7 @@ Pre-built LXC images are available from [GitHub Releases](https://github.com/ato
 
 ### Proxmox
 
-See the [Proxmox installation scripts](https://github.com/atooai/atoo-studio/tree/master/proxmox) for VM and LXC setup.
+See the [Proxmox installation scripts](https://github.com/atooai/atoo-studio/tree/main/proxmox) for VM and LXC setup.
 
 ## Prerequisites
 

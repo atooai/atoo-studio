@@ -6,10 +6,10 @@ set -euo pipefail
 # Creates an LXC container on Proxmox VE with all dependencies pre-installed.
 #
 # Usage (on Proxmox host):
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/lxc.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/main/proxmox/lxc.sh)"
 #
 # Or download and run:
-#   curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/lxc.sh -o lxc.sh
+#   curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/main/proxmox/lxc.sh -o lxc.sh
 #   bash lxc.sh
 
 # ── Colors ──

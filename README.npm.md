@@ -106,7 +106,7 @@ Atoo Studio exposes MCP tools for agent integration:
 
 - **Docker**: `ghcr.io/atooai/atoo-studio`
 - **LXC/LXD**: Download from [GitHub Releases](https://github.com/atooai/atoo-studio/releases)
-- **Proxmox**: One-command [LXC](https://github.com/atooai/atoo-studio/tree/master/proxmox) and [VM](https://github.com/atooai/atoo-studio/tree/master/proxmox) scripts
+- **Proxmox**: One-command [LXC](https://github.com/atooai/atoo-studio/tree/main/proxmox) and [VM](https://github.com/atooai/atoo-studio/tree/main/proxmox) scripts
 
 ## Links
 

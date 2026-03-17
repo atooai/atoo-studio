@@ -9,7 +9,7 @@ One-command installation scripts are available for Proxmox environments.
 ## LXC Container
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/lxc.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/main/proxmox/lxc.sh)"
 ```
 
 This creates a privileged LXC container with Atoo Studio pre-installed. The script handles:
@@ -21,7 +21,7 @@ This creates a privileged LXC container with Atoo Studio pre-installed. The scri
 ## Virtual Machine
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/vm.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/main/proxmox/vm.sh)"
 ```
 
 Creates a full VM with Atoo Studio installed. Use this when you need:

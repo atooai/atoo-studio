@@ -6,10 +6,10 @@ set -euo pipefail
 # Creates a VM on Proxmox VE with cloud-init that installs all dependencies.
 #
 # Usage (on Proxmox host):
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/vm.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/main/proxmox/vm.sh)"
 #
 # Or download and run:
-#   curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/vm.sh -o vm.sh
+#   curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/main/proxmox/vm.sh -o vm.sh
 #   bash vm.sh
 
 # ── Colors ──

@@ -199,13 +199,13 @@ Run one of the setup scripts on your Proxmox host:
 **LXC container** — lightweight, 2 CPU / 2 GB RAM / 20 GB disk
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/lxc.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/main/proxmox/lxc.sh)"
 ```
 
 **VM** — stronger isolation, CUSE/serial support, 4 CPU / 4 GB RAM / 50 GB disk
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/master/proxmox/vm.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/atooai/atoo-studio/main/proxmox/vm.sh)"
 ```
 
 Both scripts prompt for container or VM ID, hostname, storage, and resources with sensible defaults.
