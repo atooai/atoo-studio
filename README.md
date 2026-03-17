@@ -31,16 +31,15 @@
   <sub>Ultrawide (21:9) — the full workspace with agent sessions, file tree, editor, and live app preview side by side.</sub>
 </p>
 
-<table align="center">
-  <tr>
-    <td align="center"><img src="demoassets/layout-16-9.png" alt="Atoo Studio on a standard display" width="560"></td>
-    <td align="center"><img src="demoassets/mobile-mockup-portrait.jpg" alt="Atoo Studio on mobile" width="225"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Standard (16:9) — collapsible sidebars keep the full workspace usable, including the live app preview.</sub></td>
-    <td align="center"><sub>Mobile — a dedicated layout with all features accessible on any phone or tablet.</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="demoassets/layout-16-9.png" alt="Atoo Studio on a standard display" width="560"><br>
+  <sub>Standard (16:9) — collapsible sidebars keep the full workspace usable, including the live app preview.</sub>
+</p>
+
+<p align="center">
+  <img src="demoassets/mobile-mockup-portrait.jpg" alt="Atoo Studio on mobile" width="225"><br>
+  <sub>Mobile — a dedicated layout with all features accessible on any phone or tablet.</sub>
+</p>
 
 <p align="center">
   <img src="demoassets/atoo-studio-carousel-mode.gif" alt="Atoo Studio carousel mode" width="420"><br>
