@@ -7,7 +7,7 @@ on:
 jobs:
   # ── npm publish ──
   npm:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
