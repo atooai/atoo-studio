@@ -186,7 +186,7 @@ lxc image import atoo-studio-lxc-amd64.tar.gz --alias atoo-studio
 lxc launch atoo-studio my-atoo-studio
 ```
 
-### Proxmox
+### Proxmox (experimental)
 
 Run one of the setup scripts on your Proxmox host:
 
