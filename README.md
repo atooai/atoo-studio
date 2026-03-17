@@ -27,17 +27,24 @@
 ## Demo
 
 <p align="center">
-  <img src="demoassets/layout-21-9.png" alt="Atoo Studio ultrawide layout" width="820">
+  <img src="demoassets/layout-21-9.png" alt="Atoo Studio on an ultrawide display" width="820"><br>
+  <sub>Ultrawide (21:9) — the full workspace with agent sessions, file tree, editor, and live app preview side by side.</sub>
 </p>
 
 <p align="center">
-  <img src="demoassets/layout-16-9.png" alt="Atoo Studio standard layout" width="560">
+  <img src="demoassets/layout-16-9.png" alt="Atoo Studio on a standard display" width="560">
   &nbsp;&nbsp;
-  <img src="demoassets/mobile-mockup-portrait.jpg" alt="Atoo Studio mobile view" width="140">
+  <img src="demoassets/mobile-mockup-portrait.jpg" alt="Atoo Studio on mobile" width="225">
+</p>
+<p align="center">
+  <sub><b>Left:</b> Standard (16:9) — collapsible sidebars keep the full workspace usable, including the live app preview.
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <b>Right:</b> Mobile — a dedicated layout with all features accessible on any phone or tablet.</sub>
 </p>
 
 <p align="center">
-  <img src="demoassets/atoo-studio-carousel-mode.gif" alt="Atoo Studio carousel mode" width="420">
+  <img src="demoassets/atoo-studio-carousel-mode.gif" alt="Atoo Studio carousel mode" width="420"><br>
+  <sub>Experimental carousel view — a 2D panel layout where the active view follows mouse movement automatically.</sub>
 </p>
 
 ## What is Atoo Studio?
