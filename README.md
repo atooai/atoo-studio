@@ -288,7 +288,7 @@ Commercial support and consulting are available via [IT Trail GmbH](https://www.
 
 Atoo Studio is in **early alpha**. It is used for real day-to-day development across multiple projects and worktrees, but APIs, configuration, and UI may change without notice.
 
-Bug reports, feedback, and focused contributions are welcome.
+Bug reports and feedback are welcome.
 
 ## Roadmap
 
@@ -297,9 +297,11 @@ Bug reports, feedback, and focused contributions are welcome.
 - [ ] Session migration between environments
 - [ ] Configurable trust levels per tool
 
-## Contributing
+## Feedback
 
-Contributions are welcome. For bugs, feature ideas, or workflow pain points, open an issue first so the direction stays coherent.
+Atoo Studio is not accepting code contributions at this stage. The architecture is evolving quickly and external PRs would likely conflict with ongoing changes.
+
+Bug reports, feature ideas, and workflow pain points are very welcome — please open an issue.
 
 ## License
 
