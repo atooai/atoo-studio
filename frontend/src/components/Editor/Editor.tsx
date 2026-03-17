@@ -229,6 +229,12 @@ function SourceEditorView({ file }: { file: EditorFile }) {
 
     filePathRef.current = file.path;
 
+    // If the editor exists but is attached to a different (stale) container, dispose and recreate
+    if (monacoEditor && !containerRef.current.contains(monacoEditor.getDomNode())) {
+      monacoEditor.dispose();
+      monacoEditor = null;
+    }
+
     if (monacoEditor) {
       monacoEditor.setModel(monacoInstance.editor.createModel(file.content, file.lang));
     } else {

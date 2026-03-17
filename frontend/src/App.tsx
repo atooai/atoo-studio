@@ -2285,6 +2285,238 @@ async function loadXterm() {
   webLinksAddonModule = webLinks;
 }
 
+// ── Terminal file paste/drop ──────────────────────────────────────────
+// Detects file/image content in paste or drop events, uploads to the server,
+// and injects the file path as text into the PTY.
+// Agent terminals: [file: /tmp/atoo/attachment_<uuid>/name.png]
+// Shell terminals:  /tmp/atoo/attachment_<uuid>/name.png
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10 MB
+
+const MAGIC_BYTES: Record<string, { ext: string; offset?: number }> = {
+  '89504e47': { ext: 'png' },
+  'ffd8ff': { ext: 'jpg' },
+  '47494638': { ext: 'gif' },
+  '424d': { ext: 'bmp' },
+  '52494646': { ext: 'webp', offset: 8 }, // check WEBP at offset 8
+  '49492a00': { ext: 'tiff' },
+  '4d4d002a': { ext: 'tiff' },
+  '00000100': { ext: 'ico' },
+  '25504446': { ext: 'pdf' },
+  '504b0304': { ext: 'zip' }, // also xlsx/docx/pptx
+};
+
+function detectExtFromBytes(buf: ArrayBuffer): string | null {
+  const bytes = new Uint8Array(buf.slice(0, 12));
+  const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  for (const [magic, info] of Object.entries(MAGIC_BYTES)) {
+    if (hex.startsWith(magic)) {
+      // Special case: RIFF header — check for WEBP at offset 8
+      if (magic === '52494646') {
+        const sub = hex.slice(16, 24); // bytes 8-11
+        if (sub.startsWith('57454250')) return 'webp'; // "WEBP"
+        return null; // RIFF but not WEBP (e.g. AVI)
+      }
+      // ZIP-based: could be docx/xlsx/pptx — caller should prefer original extension
+      return info.ext;
+    }
+  }
+  // AVIF/HEIC: ftyp box at offset 4
+  if (hex.slice(8, 16) === '66747970') {
+    const brand = hex.slice(16, 24);
+    if (brand.startsWith('61766966')) return 'avif'; // "avif"
+    if (brand.startsWith('68656963') || brand.startsWith('6d696631')) return 'heic';
+  }
+  return null;
+}
+
+function filenameForBlob(mimeType: string, buf: ArrayBuffer): string {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
+  // Try mime first
+  const mimeExt: Record<string, string> = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+    'image/bmp': 'bmp', 'image/tiff': 'tiff', 'image/avif': 'avif', 'image/heic': 'heic',
+    'image/svg+xml': 'svg', 'image/x-icon': 'ico', 'application/pdf': 'pdf',
+  };
+  let ext = mimeExt[mimeType] || detectExtFromBytes(buf) || 'bin';
+  return `clipboard_${ts}.${ext}`;
+}
+
+async function handleTerminalFilePaste(files: File[], ws: WebSocket, isAgent: boolean) {
+  for (const file of files) {
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      console.warn(`[attachment] Skipping ${file.name}: ${(file.size / 1024 / 1024).toFixed(1)}MB exceeds 10MB limit`);
+      continue;
+    }
+    const buf = await file.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+    // Determine filename: use original name if available, detect from bytes otherwise
+    let filename = file.name && file.name !== 'image.png' && file.name !== 'blob'
+      ? file.name
+      : filenameForBlob(file.type, buf);
+
+    // For ZIP-based Office formats, prefer original extension over generic .zip
+    if (filename.endsWith('.zip') && file.name) {
+      const origExt = file.name.split('.').pop()?.toLowerCase();
+      if (origExt && ['xlsx', 'docx', 'pptx'].includes(origExt)) {
+        filename = file.name;
+      }
+    }
+
+    try {
+      const res = await fetch('/api/terminal/attachment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, data: base64 }),
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const { path: filePath } = await res.json();
+
+      // Inject path into PTY as text
+      const text = isAgent ? `[file: ${filePath}]` : filePath;
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'input', data: text }));
+      }
+    } catch (err) {
+      console.error('[attachment] Upload failed:', err);
+    }
+  }
+}
+
+function setupTerminalPasteDrop(term: any, el: HTMLElement, container: HTMLElement, ws: WebSocket, isAgent: boolean) {
+  // ── Paste handler ───────────────────────────────────────────────────
+  // xterm's customKeyEventHandler returns false for Ctrl+V which tells xterm
+  // to skip processing the key, but does NOT call preventDefault — so the
+  // browser's native paste event still fires on xterm's internal textarea.
+  // We listen there and handle text vs file content ourselves.
+  const onPaste = (e: ClipboardEvent) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+
+    let textContent: string | null = null;
+    const files: File[] = [];
+
+    for (let i = 0; i < dt.items.length; i++) {
+      const item = dt.items[i];
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      } else if (item.kind === 'string' && item.type === 'text/plain') {
+        textContent = dt.getData('text/plain');
+      }
+    }
+
+    const hasText = textContent !== null && textContent.length > 0;
+    const hasFiles = files.length > 0;
+
+    if (!hasFiles && !hasText) return; // nothing useful
+
+    // Always prevent default — we handle everything ourselves
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (hasFiles && hasText) {
+      // Both text and file — ask the user
+      const capturedText = textContent!;
+      const capturedFiles = [...files];
+      useStore.getState().setModal({
+        type: 'confirm',
+        props: {
+          title: 'Paste clipboard',
+          message: `Clipboard contains both text and a file (${capturedFiles[0].type}). What would you like to paste?`,
+          confirmLabel: 'Attach File',
+          danger: false,
+          onConfirm: () => handleTerminalFilePaste(capturedFiles, ws, isAgent),
+          secondaryAction: {
+            label: 'Paste Text',
+            onClick: () => {
+              if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: capturedText }));
+            },
+          },
+        },
+      });
+    } else if (hasFiles) {
+      handleTerminalFilePaste(files, ws, isAgent);
+    } else if (hasText) {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: textContent }));
+    }
+  };
+
+  // xterm's textarea is where paste events fire
+  const pasteTarget: HTMLElement = term.textarea || el;
+  pasteTarget.addEventListener('paste', onPaste as unknown as EventListener, true);
+
+  // ── Drop handler ────────────────────────────────────────────────────
+  // Both dragenter and dragover must call preventDefault for the browser
+  // to allow a drop (otherwise it shows the 🚫 cursor).
+  // We use the container (parent of xterm's el) so it covers everything.
+  const onDragEnter = (e: DragEvent) => {
+    if (!e.dataTransfer) return;
+    const hasFiles = Array.from(e.dataTransfer.types).includes('Files');
+    const hasText = Array.from(e.dataTransfer.types).includes('text/plain');
+    if (hasFiles || hasText) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      container.classList.add('terminal-drop-active');
+    }
+  };
+  const onDragOver = (e: DragEvent) => {
+    if (!e.dataTransfer) return;
+    const hasFiles = Array.from(e.dataTransfer.types).includes('Files');
+    const hasText = Array.from(e.dataTransfer.types).includes('text/plain');
+    if (hasFiles || hasText) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+  const onDragLeave = (e: DragEvent) => {
+    // Only remove highlight when truly leaving the container
+    const related = e.relatedTarget as Node | null;
+    if (related && container.contains(related)) return;
+    container.classList.remove('terminal-drop-active');
+  };
+  const onDrop = async (e: DragEvent) => {
+    container.classList.remove('terminal-drop-active');
+    if (!e.dataTransfer) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Check for Atoo Studio explorer drag (internal file path, not a native file)
+    const hasFiles = e.dataTransfer.files.length > 0;
+    const internalPath = e.dataTransfer.getData('text/plain');
+    if (internalPath && !hasFiles) {
+      const proj = useStore.getState().getActiveProject();
+      const fullPath = proj?.path ? `${proj.path}/${internalPath}` : internalPath;
+      const text = isAgent ? `[file: ${fullPath}]` : fullPath;
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'input', data: text }));
+      }
+      return;
+    }
+
+    if (hasFiles) {
+      await handleTerminalFilePaste(Array.from(e.dataTransfer.files), ws, isAgent);
+    }
+  };
+
+  // Capture phase on container — fires before xterm's internal handlers
+  container.addEventListener('dragenter', onDragEnter as unknown as EventListener, true);
+  container.addEventListener('dragover', onDragOver as unknown as EventListener, true);
+  container.addEventListener('dragleave', onDragLeave as unknown as EventListener, true);
+  container.addEventListener('drop', onDrop as unknown as EventListener, true);
+
+  return () => {
+    pasteTarget.removeEventListener('paste', onPaste as unknown as EventListener, true);
+    container.removeEventListener('dragenter', onDragEnter as unknown as EventListener, true);
+    container.removeEventListener('dragover', onDragOver as unknown as EventListener, true);
+    container.removeEventListener('dragleave', onDragLeave as unknown as EventListener, true);
+    container.removeEventListener('drop', onDrop as unknown as EventListener, true);
+  };
+}
+
 function attachXterm(termId: string, targetId: string, container: HTMLElement, wsType = 'terminal') {
   if (terminalInstances[termId]) {
     const inst = terminalInstances[termId];
@@ -2323,19 +2555,20 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
       fontFamily: 'JetBrains Mono, monospace', fontSize: 13, cursorBlink: true,
     });
 
-    // Windows Terminal-style Ctrl+C: copy when text is selected, interrupt otherwise.
-    // Ctrl+V: block xterm from sending ^V, let browser paste event handle it.
+    // Ctrl+C: copy when text is selected, interrupt otherwise.
+    // Ctrl+V / Cmd+V: return false to tell xterm "don't send ^V to PTY", but
+    // crucially this does NOT call preventDefault — so the browser still fires
+    // a paste event on xterm's textarea, which our paste handler intercepts.
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type !== 'keydown') return true;
-      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.shiftKey && !e.altKey) {
         if (e.key === 'c' && term.hasSelection()) {
           navigator.clipboard.writeText(term.getSelection());
           term.clearSelection();
           return false;
         }
-        if (e.key === 'v') {
-          return false;
-        }
+        if (e.key === 'v') return false;
       }
       return true;
     });
@@ -2438,7 +2671,11 @@ function attachXterm(termId: string, targetId: string, container: HTMLElement, w
     window.addEventListener('resize', resizeHandler);
     const resizeObserver = new ResizeObserver(() => fitFn());
     resizeObserver.observe(container);
-    terminalInstances[termId] = { term, fitAddon, ws, el, container, resizeHandler, resizeObserver, fitFn };
+
+    // File paste/drop: intercept paste & drop on the terminal container
+    const cleanupPasteDrop = setupTerminalPasteDrop(term, el, container, ws, isAgent);
+
+    terminalInstances[termId] = { term, fitAddon, ws, el, container, resizeHandler, resizeObserver, fitFn, cleanupPasteDrop };
     setTimeout(() => fitFn(), 100);
   }).catch((err: any) => {
     container.innerHTML = `<div style="color:var(--text-muted);padding:12px;font-size:12px">Failed to load terminal: ${err.message}</div>`;
@@ -2826,18 +3063,27 @@ async function handleNativeFileDrop(destRelDir: string, dataTransfer: DataTransf
     try { await api('POST', '/api/files/create', { path: basePath + '/' + dir, type: 'dir' }); } catch (_) { /* may exist */ }
   }
 
-  // Upload files
+  // Upload files using streaming XHR for progress tracking
   let uploaded = 0;
   for (const { relPath, file } of filesToUpload) {
-    store.setUploadProgress({ total, done: uploaded, currentFile: relPath });
+    store.setUploadProgress({ total, done: uploaded, currentFile: relPath, fileProgress: 0 });
     try {
       const fullPath = basePath + '/' + relPath;
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const base64 = btoa(binary);
-      await api('POST', '/api/files/binary', { path: fullPath, data: base64 });
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `/api/files/upload?path=${encodeURIComponent(fullPath)}`);
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            store.setUploadProgress({ total, done: uploaded, currentFile: relPath, fileProgress: e.loaded / e.total });
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error(JSON.parse(xhr.responseText)?.error || xhr.statusText));
+        };
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(file);
+      });
       uploaded++;
     } catch (e: any) {
       store.addToast(proj.name, `Failed to upload ${relPath}: ${e.message}`, 'attention');
@@ -3009,6 +3255,7 @@ function destroyTerminal(termId: string) {
   try { inst.term?.dispose(); } catch {}
   window.removeEventListener('resize', inst.resizeHandler);
   try { inst.resizeObserver?.disconnect(); } catch {}
+  try { inst.cleanupPasteDrop?.(); } catch {}
   delete terminalInstances[termId];
 }
 

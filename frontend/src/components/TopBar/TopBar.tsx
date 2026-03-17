@@ -49,11 +49,16 @@ export function TopBar() {
   const { prompt: installPrompt, swReady, isStandalone } = usePwaInstallPrompt();
   const [showCertDialog, setShowCertDialog] = React.useState(false);
   const [containerRuntimes, setContainerRuntimes] = React.useState<Record<string, { installed: boolean; accessible: boolean; error?: string }> | null>(null);
+  const [updateAvailable, setUpdateAvailable] = React.useState(false);
 
   React.useEffect(() => {
     api('GET', '/api/containers/runtimes')
       .then(data => setContainerRuntimes(data))
       .catch(() => setContainerRuntimes(null));
+    // Auto-check for updates on startup
+    api('GET', '/api/check-update')
+      .then(data => { if (data.updateAvailable) setUpdateAvailable(true); })
+      .catch(() => {});
   }, []);
 
   const handleInstall = async () => {
@@ -87,7 +92,10 @@ export function TopBar() {
           )}
           <LayoutToggle />
           <button className="topbar-btn" onClick={() => (window as any).togglePreviewPanel()} title="Toggle app preview panel">⬒ Preview</button>
-          <button className="topbar-btn" onClick={() => setModal({ type: 'help' })} title="Help & keyboard shortcuts (F1)">? Help</button>
+          <button className="topbar-btn" onClick={() => setModal({ type: 'help' })} title="Help & keyboard shortcuts (F1)">
+            ? Help
+            {updateAvailable && <span className="topbar-update-dot" title="Update available" />}
+          </button>
           {!isStandalone && (
             <button className="topbar-btn" onClick={handleInstall} title="Install as desktop application">
               ⤓ Install App

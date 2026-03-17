@@ -540,6 +540,44 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
   app.use('/api', requireAuth);
 
   // List CLI environments (runtime) — no longer applicable without MITM proxy
+  // ── Terminal file attachment ──────────────────────────────────────────
+  // Receives a file (base64) from the browser, writes it to a temp dir,
+  // returns the path so the frontend can inject it into the PTY.
+  const ATTACHMENT_BASE = path.join(os.tmpdir(), 'atoo');
+  app.post('/api/terminal/attachment', requireAuth, (req, res) => {
+    try {
+      const { filename, data } = req.body as { filename: string; data: string };
+      if (!filename || !data) {
+        res.status(400).json({ error: 'filename and data (base64) are required' });
+        return;
+      }
+      // Sanitize filename: strip path separators, limit length
+      const safeName = path.basename(filename).slice(0, 200) || 'attachment';
+      const dirId = `attachment_${uuidv4()}`;
+      const dir = path.join(ATTACHMENT_BASE, dirId);
+      fs.mkdirSync(dir, { recursive: true });
+      const filePath = path.join(dir, safeName);
+      fs.writeFileSync(filePath, Buffer.from(data, 'base64'));
+      res.json({ path: filePath });
+    } catch (err: any) {
+      console.error('[attachment] Failed to write:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Cleanup old attachments on startup (older than 1 hour)
+  try {
+    if (fs.existsSync(ATTACHMENT_BASE)) {
+      const cutoff = Date.now() - 3600_000;
+      for (const entry of fs.readdirSync(ATTACHMENT_BASE)) {
+        const full = path.join(ATTACHMENT_BASE, entry);
+        try {
+          if (fs.statSync(full).mtimeMs < cutoff) fs.rmSync(full, { recursive: true, force: true });
+        } catch {}
+      }
+    }
+  } catch {}
+
   app.get('/api/cli-environments', (_req, res) => {
     res.json([]);
   });
@@ -975,6 +1013,91 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
 
     res.json({ platform, deps });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Update check & self-update
+  // ═══════════════════════════════════════════════════════
+
+  // Cache the update check so we don't hammer the registry
+  let updateCache: { currentVersion: string; latestVersion: string; updateAvailable: boolean; checkedAt: number } | null = null;
+  const UPDATE_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+  app.get('/api/check-update', async (_req, res) => {
+    try {
+      // Return cached result if fresh
+      if (updateCache && Date.now() - updateCache.checkedAt < UPDATE_CACHE_TTL) {
+        return res.json(updateCache);
+      }
+
+      const pkgPath = path.join(PROJECT_ROOT, 'package.json');
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      const currentVersion: string = pkg.version;
+
+      // Fetch latest version from npm registry
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const resp = await fetch('https://registry.npmjs.org/atoo-studio/latest', { signal: controller.signal });
+      clearTimeout(timeout);
+
+      if (!resp.ok) throw new Error(`npm registry returned ${resp.status}`);
+      const data = await resp.json() as { version: string };
+      const latestVersion = data.version;
+
+      // Simple semver comparison: split into parts and compare numerically
+      const parseSemver = (v: string) => v.replace(/^v/, '').split('.').map(Number);
+      const cur = parseSemver(currentVersion);
+      const lat = parseSemver(latestVersion);
+      const updateAvailable = lat[0] > cur[0]
+        || (lat[0] === cur[0] && lat[1] > cur[1])
+        || (lat[0] === cur[0] && lat[1] === cur[1] && lat[2] > cur[2]);
+
+      updateCache = { currentVersion, latestVersion, updateAvailable, checkedAt: Date.now() };
+      res.json(updateCache);
+    } catch (err: any) {
+      // Still return current version even if registry check fails
+      try {
+        const pkgPath = path.join(PROJECT_ROOT, 'package.json');
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        res.json({ currentVersion: pkg.version, latestVersion: null, updateAvailable: false, error: err.message });
+      } catch {
+        res.status(500).json({ error: 'Failed to check for updates' });
+      }
+    }
+  });
+
+  app.post('/api/update', async (_req, res) => {
+    try {
+      // Determine how atoo-studio was installed
+      const binPath = process.argv[1] || '';
+      const isGlobal = binPath.includes('/node_modules/.global') || binPath.includes('/lib/node_modules/');
+      const npmCmd = isGlobal ? 'npm install -g atoo-studio@latest' : 'npx atoo-studio@latest';
+
+      // Run the update
+      const { exec } = await import('child_process');
+      const child = exec('npm install -g atoo-studio@latest', { timeout: 120000 });
+
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', (d: string) => { stdout += d; });
+      child.stderr?.on('data', (d: string) => { stderr += d; });
+
+      child.on('close', (code) => {
+        // Invalidate cache
+        updateCache = null;
+        if (code === 0) {
+          res.json({ success: true, output: stdout.trim(), restartRequired: true });
+        } else {
+          res.status(500).json({ success: false, error: stderr.trim() || `Exit code ${code}` });
+        }
+      });
+
+      child.on('error', (err) => {
+        res.status(500).json({ success: false, error: err.message });
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
 

@@ -7,18 +7,19 @@ import type { FileNode, GitChange } from '../../types';
 function UploadOverlay() {
   const { uploadProgress } = useStore();
   if (!uploadProgress) return null;
-  const { total, done, currentFile } = uploadProgress;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const { total, done, currentFile, fileProgress } = uploadProgress;
+  const overallPct = total > 0 ? Math.round(((done + (fileProgress || 0)) / total) * 100) : 0;
+  const filePct = Math.round((fileProgress || 0) * 100);
   const fileName = currentFile.split('/').pop() || currentFile;
   return (
     <div className="upload-overlay">
       <div className="upload-overlay-icon">&#x21E7;</div>
       <div className="upload-overlay-title">Uploading files...</div>
       <div className="upload-overlay-progress-bar">
-        <div className="upload-overlay-progress-fill" style={{ width: `${pct}%` }} />
+        <div className="upload-overlay-progress-fill" style={{ width: `${overallPct}%` }} />
       </div>
       <div className="upload-overlay-stats">{done} / {total} files</div>
-      <div className="upload-overlay-file" title={currentFile}>{fileName}</div>
+      <div className="upload-overlay-file" title={currentFile}>{fileName}{fileProgress != null && fileProgress < 1 ? ` — ${filePct}%` : ''}</div>
     </div>
   );
 }

@@ -559,6 +559,20 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent-blue); }
 .topbar-btn:hover { background: var(--bg-surface-3); color: var(--text-primary); }
 .topbar-btn.primary { background: var(--accent-blue); color: #fff; }
 .topbar-btn.primary:hover { filter: brightness(1.1); }
+.topbar-update-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: topbar-dot-pulse 2s ease-in-out infinite;
+}
+@keyframes topbar-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 
 /* ── Certificate Trust Dialog ──────────────────────────── */
 .cert-dialog-overlay {
@@ -3662,6 +3676,12 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   flex: 1;
   overflow: hidden;
   background: #0a0b0f;
+}
+
+/* Drop target highlight for file paste/drop onto terminals */
+.terminal-drop-active {
+  outline: 2px solid var(--accent, #5b8af5);
+  outline-offset: -2px;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -9435,6 +9455,87 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.8;
+}
+
+/* About tab — version badge */
+.help-about-version-badge {
+  margin-left: auto;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* About tab — update section */
+.help-update-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+}
+.help-update-section.has-update {
+  border-color: var(--accent-cyan);
+  background: color-mix(in srgb, var(--accent-cyan) 6%, var(--bg-surface-2));
+}
+.help-update-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.help-update-uptodate {
+  color: var(--text-muted);
+}
+.help-update-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  flex-shrink: 0;
+}
+.help-update-current {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.help-update-btn {
+  margin-left: auto;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--bg-primary);
+  background: var(--accent-cyan);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.help-update-btn:hover { opacity: 0.85; }
+.help-update-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.help-update-result {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+}
+.help-update-result.success {
+  color: var(--accent-green, #4ade80);
+  background: color-mix(in srgb, var(--accent-green, #4ade80) 10%, transparent);
+}
+.help-update-result.error {
+  color: var(--accent-red, #f87171);
+  background: color-mix(in srgb, var(--accent-red, #f87171) 10%, transparent);
 }
 
 /* ═══════════════════════════════════════════════════════

@@ -77,7 +77,7 @@ export interface AppState {
   sessionLoading: string | null; // label or null
 
   // File upload progress
-  uploadProgress: { total: number; done: number; currentFile: string } | null;
+  uploadProgress: { total: number; done: number; currentFile: string; fileProgress?: number } | null;
 
   // Mobile layout
   isMobileLayout: boolean;

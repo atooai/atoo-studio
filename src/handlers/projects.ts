@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 import archiver from 'archiver';
 import { db } from '../state/db.js';
@@ -28,13 +29,13 @@ function getProjectContext(projectId: string): { cwd: string; connectionId?: str
 // ═══════════════════════════════════════════════════
 
 // Convenience: list all projects across all environments
-projectsRouter.get('/api/projects', (_req, res) => {
+projectsRouter.get('/api/projects', async (_req, res) => {
   const projects = db.listAllProjects();
-  const withGit = projects.map(p => {
+  const withGit = await Promise.all(projects.map(async p => {
     let isGit = false;
-    try { isGit = fs.existsSync(path.join(p.path, '.git')); } catch {}
+    try { await fsp.access(path.join(p.path, '.git')); isGit = true; } catch {}
     return { ...p, isGit };
-  });
+  }));
   res.json(withGit);
 });
 
@@ -342,6 +343,42 @@ projectsRouter.post('/api/files/binary', async (req, res) => {
     res.json({ success: true, path: filePath });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Streaming file upload — bypasses body-parser, handles files of any size
+projectsRouter.post('/api/files/upload', (req, res) => {
+  const filePath = req.query.path as string;
+  const sshConnectionId = req.query.ssh_connection_id as string | undefined;
+  if (!filePath) {
+    return res.status(400).json({ error: 'path query parameter is required' });
+  }
+  if (sshConnectionId) {
+    // For SSH: collect into buffer then write via SFTP
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', async () => {
+      try {
+        const buf = Buffer.concat(chunks);
+        await sshManager.sftpWriteFile(sshConnectionId, filePath, buf.toString('binary'));
+        res.json({ success: true, path: filePath });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+    req.on('error', (err) => res.status(500).json({ error: err.message }));
+  } else {
+    // Stream directly to disk
+    try {
+      const resolved = path.resolve(filePath);
+      fs.mkdirSync(path.dirname(resolved), { recursive: true });
+      const ws = fs.createWriteStream(resolved);
+      req.pipe(ws);
+      ws.on('finish', () => res.json({ success: true, path: filePath }));
+      ws.on('error', (err) => res.status(500).json({ error: err.message }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   }
 });
 

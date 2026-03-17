@@ -164,6 +164,39 @@ function trimVersion(raw: string): string {
 }
 
 function AboutTab() {
+  const [updateInfo, setUpdateInfo] = React.useState<{
+    currentVersion: string;
+    latestVersion: string | null;
+    updateAvailable: boolean;
+    error?: string;
+  } | null>(null);
+  const [updating, setUpdating] = React.useState(false);
+  const [updateResult, setUpdateResult] = React.useState<{ success: boolean; error?: string } | null>(null);
+
+  React.useEffect(() => {
+    api('GET', '/api/check-update')
+      .then(setUpdateInfo)
+      .catch(() => {});
+  }, []);
+
+  const handleUpdate = async () => {
+    setUpdating(true);
+    setUpdateResult(null);
+    try {
+      const result = await api('POST', '/api/update');
+      setUpdateResult(result);
+      if (result.success) {
+        // Re-check version after update
+        const info = await api('GET', '/api/check-update');
+        setUpdateInfo(info);
+      }
+    } catch (err: any) {
+      setUpdateResult({ success: false, error: err.message });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   return (
     <div className="help-about">
       <div className="help-about-logo">
@@ -172,7 +205,44 @@ function AboutTab() {
           <div className="help-about-title">Atoo Studio</div>
           <div className="help-about-subtitle">Agentic Development Environment</div>
         </div>
+        {updateInfo && (
+          <div className="help-about-version-badge">
+            v{updateInfo.currentVersion}
+          </div>
+        )}
       </div>
+
+      {updateInfo && (
+        <div className={`help-update-section ${updateInfo.updateAvailable ? 'has-update' : ''}`}>
+          {updateInfo.updateAvailable ? (
+            <>
+              <div className="help-update-info">
+                <span className="help-update-dot" />
+                Update available: <strong>v{updateInfo.latestVersion}</strong>
+                <span className="help-update-current">(current: v{updateInfo.currentVersion})</span>
+              </div>
+              <button
+                className="help-update-btn"
+                onClick={handleUpdate}
+                disabled={updating}
+              >
+                {updating ? 'Updating...' : 'Update now'}
+              </button>
+            </>
+          ) : (
+            <div className="help-update-info help-update-uptodate">
+              You're up to date — v{updateInfo.currentVersion}
+            </div>
+          )}
+          {updateResult && (
+            <div className={`help-update-result ${updateResult.success ? 'success' : 'error'}`}>
+              {updateResult.success
+                ? 'Update installed. Restart Atoo Studio to apply.'
+                : `Update failed: ${updateResult.error}`}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="help-about-section">
         <div className="help-about-label">Created by</div>

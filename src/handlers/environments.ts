@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 import { db } from '../state/db.js';
 import * as gitOps from '../services/git-ops.js';
@@ -106,7 +107,7 @@ environmentsRouter.delete('/api/environments/:id/shares/:userId', (req, res) => 
 // ═══════════════════════════════════════════════════
 
 // Get projects in an environment (with live isGit + pe_id)
-environmentsRouter.get('/api/environments/:id/projects', (req, res) => {
+environmentsRouter.get('/api/environments/:id/projects', async (req, res) => {
   if (isAuthEnabled() && req.user && !db.canAccessEnvironment(req.user.id, req.params.id)) {
     return res.status(403).json({ error: 'Access denied' });
   }
@@ -114,18 +115,25 @@ environmentsRouter.get('/api/environments/:id/projects', (req, res) => {
   if (!env) return res.status(404).json({ error: 'Environment not found' });
 
   const projects = db.getProjectsForEnvironment(req.params.id);
-  const withGit = projects.map(p => {
+  const withGit = await Promise.all(projects.map(async p => {
     if (p.ssh_connection_id) {
       // Remote project — skip local fs checks and watching
       return { ...p, isGit: false };
     }
     let isGit = false;
-    try { isGit = fs.existsSync(path.join(p.path, '.git')); } catch {}
-    // Start watching this project's directory
-    watchProject(p.id, p.path);
+    try { await fsp.access(path.join(p.path, '.git')); isGit = true; } catch {}
     return { ...p, isGit };
-  });
+  }));
   res.json(withGit);
+  // Start watchers in the background, yielding between each so the event loop can serve other requests
+  const localProjects = projects.filter(p => !p.ssh_connection_id);
+  (function watchNext(i: number) {
+    if (i >= localProjects.length) return;
+    setImmediate(() => {
+      watchProject(localProjects[i].id, localProjects[i].path);
+      watchNext(i + 1);
+    });
+  })(0);
 });
 
 // Create project + link to environment
