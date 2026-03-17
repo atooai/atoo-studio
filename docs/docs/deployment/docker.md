@@ -12,7 +12,6 @@ Run Atoo Studio as a Docker container with all dependencies pre-installed.
 docker run -d \
   --name atoo-studio \
   -p 3010:3010 \
-  -p 8081:8081 \
   ghcr.io/atooai/atoo-studio:latest
 ```
 
@@ -25,7 +24,6 @@ The Docker image supports both `linux/amd64` and `linux/arm64` architectures.
 | Port | Purpose |
 |------|---------|
 | 3010 | HTTPS web server |
-| 8081 | Additional service port |
 
 ## Tags
 

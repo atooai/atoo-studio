@@ -3,7 +3,7 @@ import fs from 'fs';
 import net from 'net';
 import path from 'path';
 import os from 'os';
-import { CA_CERT_PATH, PROXY_PORT } from '../config.js';
+import { CA_CERT_PATH } from '../config.js';
 import { deobfuscate } from './obfuscation.js';
 import type { SshConnection } from '../state/db.js';
 
@@ -78,8 +78,6 @@ class SshManager {
         try {
           // Setup reverse tunnels so remote claude can reach our proxy
           await this.setupReverseTunnel(config.id, 3000, 3010);
-          await this.setupReverseTunnel(config.id, PROXY_PORT, PROXY_PORT);
-
           // Upload CA cert to remote
           await this.uploadCaCert(config.id);
 

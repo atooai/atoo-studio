@@ -14,6 +14,12 @@ npx atoo-studio
 
 Then open `https://localhost:3010` in your browser.
 
+To use a different port:
+
+```bash
+ATOO_PORT=4000 npx atoo-studio
+```
+
 ## Install Globally
 
 ```bash

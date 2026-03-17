@@ -7,8 +7,7 @@ export const PROJECT_ROOT = __config_dirname.includes('/dist/src')
   ? path.resolve(__config_dirname, '../..')   // dist/src/ → project root
   : path.resolve(__config_dirname, '..');     // src/ → project root
 
-export const PROXY_PORT = 8081;
-export const WEB_PORT = 3010;
+export const WEB_PORT = parseInt(process.env.ATOO_PORT || '3010', 10);
 export const CERTS_DIR = path.join(PROJECT_ROOT, 'certs') + '/';
 export const CA_CERT_PATH = `${CERTS_DIR}ca.pem`;
 export const CA_KEY_PATH = `${CERTS_DIR}ca-key.pem`;

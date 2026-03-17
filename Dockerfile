@@ -97,6 +97,6 @@ USER atoo
 
 VOLUME /home/atoo/.atoo-studio
 
-EXPOSE 3010 8081
+EXPOSE 3010
 
 CMD ["node", "bin/atoo-studio.js"]

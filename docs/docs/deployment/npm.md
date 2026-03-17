@@ -52,3 +52,9 @@ This installs required system libraries for headless Chrome (used for app previe
 Atoo Studio starts an HTTPS server on port **3010** by default. The server generates a self-signed CA certificate on first run.
 
 Access the workspace at: `https://localhost:3010`
+
+To use a different port, set the `ATOO_PORT` environment variable:
+
+```bash
+ATOO_PORT=4000 npx atoo-studio
+```

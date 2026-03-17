@@ -165,6 +165,12 @@ npx atoo-studio
 
 Then open `https://localhost:3010` in your browser.
 
+To use a different port, set the `ATOO_PORT` environment variable:
+
+```bash
+ATOO_PORT=4000 npx atoo-studio
+```
+
 ### Docker
 
 ```bash
