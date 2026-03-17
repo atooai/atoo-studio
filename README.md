@@ -292,10 +292,13 @@ Bug reports and feedback are welcome.
 
 ## Roadmap
 
-- [ ] More agent adapters (Gemini CLI and others)
-- [ ] Service topology visualization
-- [ ] Session migration between environments
-- [ ] Configurable trust levels per tool
+- [ ] Add Gemini CLI as a third supported agent
+- [ ] Standalone Electron app with real browser sessions for preview (in addition to headless CDP streaming)
+- [ ] Refine mobile layout and bring all recently added features to the mobile view
+- [ ] Self-hosted Git platform support: Gitea, GitLab, and Azure DevOps Server
+- [ ] Evaluate cloud platforms for native management (containers, databases, infrastructure)
+- [ ] Experiment with alternative workspace layouts
+- [ ] Replace xterm.js with atoo-term (currently in development)
 
 ## Feedback
 
