@@ -92,9 +92,31 @@ export async function gitStatus(cwd: string) {
   return entries;
 }
 
+export function parseRefs(decorate: string) {
+  if (!decorate.trim()) return [];
+  const refs: { type: 'head' | 'branch' | 'tag' | 'remote'; label: string }[] = [];
+  for (const part of decorate.split(',')) {
+    const token = part.trim();
+    if (!token) continue;
+    if (token === 'HEAD') {
+      refs.push({ type: 'head', label: 'HEAD' });
+    } else if (token.startsWith('HEAD -> ')) {
+      refs.push({ type: 'head', label: 'HEAD' });
+      refs.push({ type: 'branch', label: token.slice(8) });
+    } else if (token.startsWith('tag: ')) {
+      refs.push({ type: 'tag', label: token.slice(5) });
+    } else if (token.includes('/')) {
+      refs.push({ type: 'remote', label: token });
+    } else {
+      refs.push({ type: 'branch', label: token });
+    }
+  }
+  return refs;
+}
+
 export async function gitLog(cwd: string, branch?: string, count: number = 30) {
   const SEP = '---GIT-LOG-SEP---';
-  const args = ['log', `--format=${SEP}%n%H%n%h%n%an%n%ar%n%s%n%B`, '-n', String(count)];
+  const args = ['log', `--format=${SEP}%n%H%n%h%n%an%n%ar%n%D%n%s%n%B`, '-n', String(count)];
   if (branch) args.push(branch);
   const output = await git(args, cwd);
   const entries = output.split(SEP).filter(e => e.trim());
@@ -105,11 +127,13 @@ export async function gitLog(cwd: string, branch?: string, count: number = 30) {
     const hash = lines[1] || '';
     const author = lines[2] || '';
     const date = lines[3] || '';
-    const msg = lines[4] || '';
-    const fullMessage = lines.slice(5).join('\n').trim() || msg;
+    const decorate = lines[4] || '';
+    const msg = lines[5] || '';
+    const fullMessage = lines.slice(6).join('\n').trim() || msg;
     const isMerge = msg.toLowerCase().startsWith('merge');
+    const refs = parseRefs(decorate);
 
-    return { hash, fullHash, msg, fullMessage, author, date, files: [], merge: isMerge };
+    return { hash, fullHash, msg, fullMessage, author, date, files: [], merge: isMerge, refs };
   });
 }
 

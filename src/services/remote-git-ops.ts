@@ -1,4 +1,5 @@
 import { sshManager } from './ssh-manager.js';
+import { parseRefs } from './git-ops.js';
 
 function shellEscape(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
@@ -40,7 +41,7 @@ export async function gitStatus(connId: string, cwd: string) {
 
 export async function gitLog(connId: string, cwd: string, branch?: string, count: number = 30) {
   const SEP = '---GIT-LOG-SEP---';
-  const args = ['log', `--format=${SEP}%n%H%n%h%n%an%n%ar%n%s%n%B`, '-n', String(count)];
+  const args = ['log', `--format=${SEP}%n%H%n%h%n%an%n%ar%n%D%n%s%n%B`, '-n', String(count)];
   if (branch) args.push(branch);
   const output = await git(connId, args, cwd);
   const entries = output.split(SEP).filter(e => e.trim());
@@ -51,10 +52,12 @@ export async function gitLog(connId: string, cwd: string, branch?: string, count
     const hash = lines[1] || '';
     const author = lines[2] || '';
     const date = lines[3] || '';
-    const msg = lines[4] || '';
-    const fullMessage = lines.slice(5).join('\n').trim() || msg;
+    const decorate = lines[4] || '';
+    const msg = lines[5] || '';
+    const fullMessage = lines.slice(6).join('\n').trim() || msg;
     const isMerge = msg.toLowerCase().startsWith('merge');
-    return { hash, fullHash, msg, fullMessage, author, date, files: [], merge: isMerge };
+    const refs = parseRefs(decorate);
+    return { hash, fullHash, msg, fullMessage, author, date, files: [], merge: isMerge, refs };
   });
 }
 

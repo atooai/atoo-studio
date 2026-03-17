@@ -375,7 +375,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
         const log = await api('GET', `/api/projects/${proj.id}/git/log${cwdParam}`);
         commits = log.map((c: any, i: number) => ({
           ...c,
-          refs: i === 0 ? [{ type: 'head', label: 'HEAD' }, { type: 'branch', label: branches.currentBranch }] : [],
+          refs: c.refs || [],
         }));
       } catch {}
 
@@ -2269,7 +2269,7 @@ async function refreshGitData(projectId: string) {
         currentBranch: branches.currentBranch,
         commits: log.map((c: any, i: number) => ({
           ...c,
-          refs: i === 0 ? [{ type: 'head', label: 'HEAD' }, { type: 'branch', label: branches.currentBranch }] : [],
+          refs: c.refs || [],
         })),
       },
       stashes,
