@@ -20,7 +20,7 @@ COPY bin/ bin/
 
 # Build native modules + backend + frontend
 RUN make -C preload && \
-    cd src/serial/native && node-gyp rebuild && cd ../../.. && \
+    cd src/serial/native && npx node-gyp rebuild && cd ../../.. && \
     npx tsc && \
     cd frontend && npm install && npm run build
 
@@ -55,7 +55,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 libcairo2 libpango-1.0-0 \
     $(apt-cache show libasound2t64 >/dev/null 2>&1 && echo libasound2t64 || echo libasound2) \
     # Tools
-    git ffmpeg procps curl gpg \
+    git ffmpeg procps curl gpg ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install gh (GitHub CLI)
