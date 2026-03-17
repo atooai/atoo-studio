@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/status-early%20alpha-orange" alt="Early Alpha">
+</p>
+
+<p align="center">
   <a href="https://atoo.ai">Website</a> ·
   <a href="#demo">Demo</a> ·
   <a href="#getting-started">Getting Started</a> ·
@@ -282,7 +286,7 @@ Commercial support and consulting are available via [IT Trail GmbH](https://www.
 
 ## Status
 
-Atoo Studio is used for real day-to-day development across multiple projects and worktrees. It is moving fast and still has rough edges.
+Atoo Studio is in **early alpha**. It is used for real day-to-day development across multiple projects and worktrees, but APIs, configuration, and UI may change without notice.
 
 Bug reports, feedback, and focused contributions are welcome.
 
