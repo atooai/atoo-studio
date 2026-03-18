@@ -39,6 +39,14 @@ initMonaco();
 // Expose save for global Ctrl+S handler
 (window as any).saveCurrentFile = saveCurrentFile;
 
+// Expose reveal line for search results navigation
+(window as any).revealEditorLine = (line: number, column?: number) => {
+  if (!monacoEditor) return;
+  monacoEditor.revealLineInCenter(line);
+  monacoEditor.setPosition({ lineNumber: line, column: (column || 0) + 1 });
+  monacoEditor.focus();
+};
+
 function disposeEditors() {
   if (monacoEditor) { monacoEditor.dispose(); monacoEditor = null; }
   if (monacoDiffEditor) { monacoDiffEditor.dispose(); monacoDiffEditor = null; }

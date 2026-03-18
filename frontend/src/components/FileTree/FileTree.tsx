@@ -3,6 +3,7 @@ import { useStore } from '../../state/store';
 import { api } from '../../api';
 import { getFileIconSvg, FOLDER_ARROW_CLOSED, FOLDER_ARROW_OPEN } from '../../icons';
 import type { FileNode, GitChange } from '../../types';
+import { SearchPanel } from './SearchPanel';
 
 function UploadOverlay() {
   const { uploadProgress } = useStore();
@@ -130,7 +131,7 @@ function isDirectory(nodes: FileNode[], path: string): boolean {
 const GIT_CHANGE_LIMIT = 1000;
 
 export function FileTree() {
-  const { activeProjectId, projects, fileFilter, fileView, stashOpen, explorerRoot } = useStore();
+  const { activeProjectId, projects, fileFilter, fileView, stashOpen, explorerRoot, showHidden, searchOpen } = useStore();
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [systemFiles, setSystemFiles] = useState<FileNode[]>([]);
   const proj = projects.find(p => p.id === activeProjectId);
@@ -158,9 +159,10 @@ export function FileTree() {
   // Fetch system root files when in system mode (shallow — 1 level only)
   useEffect(() => {
     if (!isSystem || !proj) return;
-    const params = new URLSearchParams({ rootPath: '/', showHidden: 'true', maxDepth: '1' });
+    const params = new URLSearchParams({ rootPath: '/', maxDepth: '1' });
+    if (showHidden) params.set('showHidden', 'true');
     api('GET', `/api/projects/${proj.id}/files?${params}`).then(setSystemFiles).catch(() => setSystemFiles([]));
-  }, [isSystem, proj?.id]);
+  }, [isSystem, proj?.id, showHidden]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Delete' && selectedPath) {
@@ -175,7 +177,7 @@ export function FileTree() {
   return (
     <>
       <FileToolbar proj={proj} changeCount={changeCount} />
-      <div className="panel-content" id="files-panel" tabIndex={0} onKeyDown={handleKeyDown}
+      {searchOpen ? <SearchPanel /> : <div className="panel-content" id="files-panel" tabIndex={0} onKeyDown={handleKeyDown}
         onContextMenu={(e) => {
           // Only trigger on empty area (not on file/folder items which have their own handler)
           if ((e.target as HTMLElement).closest('.file-tree-item, .file-flat-item')) return;
@@ -215,7 +217,7 @@ export function FileTree() {
             ? <FlatList nodes={displayFiles} parentPath="" gitMap={isSystem ? {} : gitMap} gitStaged={isSystem ? {} : gitStaged} gitOldPaths={isSystem ? {} : gitOldPaths} selectedPath={selectedPath} onSelect={setSelectedPath} pathPrefix={isSystem ? '/' : undefined} />
             : <TreeNodes nodes={displayFiles} parentPath="" gitMap={isSystem ? {} : gitMap} gitStaged={isSystem ? {} : gitStaged} gitOldPaths={isSystem ? {} : gitOldPaths} dirtyDirs={isSystem ? new Set() : dirtyDirs} depth={0} selectedPath={selectedPath} onSelect={setSelectedPath} pathPrefix={isSystem ? '/' : undefined} />
         }
-      </div>
+      </div>}
       {stashOpen && proj.stashes && proj.stashes.length > 0 && (
         <StashPanel stashes={proj.stashes} projectId={proj.id} />
       )}
@@ -224,7 +226,7 @@ export function FileTree() {
 }
 
 function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) {
-  const { fileFilter, setFileFilter, fileView, setFileView, showHidden, setShowHidden, explorerRoot, setExplorerRoot, stashOpen, setStashOpen } = useStore();
+  const { fileFilter, setFileFilter, fileView, setFileView, showHidden, setShowHidden, explorerRoot, setExplorerRoot, stashOpen, setStashOpen, searchOpen, setSearchOpen } = useStore();
 
   const toggleHidden = () => {
     const next = !showHidden;
@@ -257,6 +259,7 @@ function FileToolbar({ proj, changeCount }: { proj: any; changeCount: number }) 
         </div>
         <div className="lp-toolbar-sep"></div>
         <div className="lp-toolbar-group">
+          <button className={`lp-tb-btn ${searchOpen ? 'active' : ''}`} onClick={() => setSearchOpen(!searchOpen)} title="Search in files">⌕</button>
           <button className={`lp-tb-btn ${explorerRoot === 'system' ? 'active' : ''}`} onClick={toggleRoot} title={explorerRoot === 'workspace' ? 'Switch to system root (/)' : 'Switch to workspace root'}>⌂</button>
           <button className={`lp-tb-btn ${showHidden ? 'active' : ''}`} onClick={toggleHidden} title="Show hidden directories (node_modules, .git, etc.)">⦿</button>
           <button className={`lp-tb-btn ${(!proj.stashes || proj.stashes.length === 0) ? 'disabled' : ''}`} onClick={() => setStashOpen(!stashOpen)} title="Stashes">⊟</button>
@@ -310,7 +313,7 @@ function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, de
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gitBadge = gitMap[fullPath];
   const isDirty = dirtyDirs.has(fullPath);
-  const { activeProjectId } = useStore();
+  const { activeProjectId, showHidden } = useStore();
 
   // Determine if children need lazy loading (undefined = not yet fetched from server)
   const needsLazyLoad = node.children === undefined;
@@ -322,7 +325,8 @@ function DirNode({ node, fullPath, gitMap, gitStaged, gitOldPaths, dirtyDirs, de
     if (next && needsLazyLoad && !lazyChildren && !loading && activeProjectId) {
       setLoading(true);
       const absPath = (pathPrefix || '') + fullPath;
-      const params = new URLSearchParams({ rootPath: absPath, showHidden: 'true', maxDepth: '1' });
+      const params = new URLSearchParams({ rootPath: absPath, maxDepth: '1' });
+      if (showHidden) params.set('showHidden', 'true');
       api('GET', `/api/projects/${activeProjectId}/files?${params}`)
         .then(setLazyChildren)
         .catch(() => setLazyChildren([]))

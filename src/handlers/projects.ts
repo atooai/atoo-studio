@@ -10,6 +10,7 @@ import * as gitOps from '../services/git-ops.js';
 import * as remoteGitOps from '../services/remote-git-ops.js';
 import { sshManager } from '../services/ssh-manager.js';
 import { store } from '../state/store.js';
+import { searchFiles, replaceInFiles, replaceInSingleFile } from '../services/file-search.js';
 import { watchProject, unwatchProject, reconcileWorktrees } from '../services/project-watcher.js';
 
 export const projectsRouter = Router();
@@ -70,7 +71,10 @@ projectsRouter.get('/api/projects/:id/files', async (req, res) => {
   if (!ctx) return res.status(404).json({ error: 'Project not found' });
 
   try {
-    const rootPath = (req.query.rootPath as string) || ctx.cwd;
+    const requestedRootPath = req.query.rootPath as string | undefined;
+    const rootPath = requestedRootPath
+      ? (path.isAbsolute(requestedRootPath) ? requestedRootPath : path.join(ctx.cwd, requestedRootPath))
+      : ctx.cwd;
     const showHidden = req.query.showHidden === 'true';
     const maxDepth = req.query.maxDepth != null ? parseInt(req.query.maxDepth as string, 10) : undefined;
     if (ctx.connectionId) {
@@ -80,7 +84,7 @@ projectsRouter.get('/api/projects/:id/files', async (req, res) => {
       const tree = await getFileTree(rootPath, 0, showHidden, maxDepth);
       res.json(tree);
       // Start watching when project root is first accessed (lazy — avoids watching all projects on startup)
-      if (!req.query.rootPath && !ctx.connectionId) {
+      if (!requestedRootPath && !ctx.connectionId) {
         setImmediate(() => watchProject(req.params.id, ctx.cwd));
       }
     }
@@ -224,6 +228,58 @@ projectsRouter.post('/api/files/raw/search', (req, res) => {
     fs.closeSync(fd);
     res.json({ matches, size: stat.size });
   } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Search in project files (content search)
+projectsRouter.post('/api/projects/:id/search', async (req, res) => {
+  const ctx = getProjectContext(req.params.id);
+  if (!ctx) return res.status(404).json({ error: 'Project not found' });
+  if (!req.body.query) return res.status(400).json({ error: 'query is required' });
+
+  try {
+    const result = await searchFiles(ctx.cwd, { ...req.body, showHidden: req.body.showHidden });
+    res.json(result);
+  } catch (err: any) {
+    if (err instanceof SyntaxError || err.message?.includes('Invalid regular expression')) {
+      return res.status(400).json({ error: `Invalid regex: ${err.message}` });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Replace in project files
+projectsRouter.post('/api/projects/:id/replace-all', async (req, res) => {
+  const ctx = getProjectContext(req.params.id);
+  if (!ctx) return res.status(404).json({ error: 'Project not found' });
+  if (!req.body.query || req.body.replacement == null) return res.status(400).json({ error: 'query and replacement are required' });
+
+  try {
+    const result = await replaceInFiles(ctx.cwd, { ...req.body, showHidden: req.body.showHidden });
+    res.json(result);
+  } catch (err: any) {
+    if (err instanceof SyntaxError || err.message?.includes('Invalid regular expression')) {
+      return res.status(400).json({ error: `Invalid regex: ${err.message}` });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Replace in a single file (optionally specific lines)
+projectsRouter.post('/api/projects/:id/replace-in-file', async (req, res) => {
+  const ctx = getProjectContext(req.params.id);
+  if (!ctx) return res.status(404).json({ error: 'Project not found' });
+  const { file, query, replacement, lines, ...opts } = req.body;
+  if (!file || !query || replacement == null) return res.status(400).json({ error: 'file, query and replacement are required' });
+
+  try {
+    const result = await replaceInSingleFile(ctx.cwd, file, { query, replacement, lines, ...opts });
+    res.json(result);
+  } catch (err: any) {
+    if (err.message?.includes('Invalid regular expression')) {
+      return res.status(400).json({ error: `Invalid regex: ${err.message}` });
+    }
     res.status(500).json({ error: err.message });
   }
 });

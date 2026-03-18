@@ -20,6 +20,7 @@ export interface AppState {
   showHidden: boolean;
   explorerRoot: 'workspace' | 'system';
   stashOpen: boolean;
+  searchOpen: boolean;
   activeTabType: 'session' | 'terminal';
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
@@ -102,6 +103,7 @@ export interface AppState {
   setShowHidden: (v: boolean) => void;
   setExplorerRoot: (v: 'workspace' | 'system') => void;
   setStashOpen: (v: boolean) => void;
+  setSearchOpen: (v: boolean) => void;
   setActiveTabType: (t: 'session' | 'terminal') => void;
   setSidebarCollapsed: (v: boolean) => void;
   setRightPanelCollapsed: (v: boolean) => void;
@@ -173,6 +175,7 @@ export const useStore = create<AppState>((set, get) => ({
   showHidden: false,
   explorerRoot: 'workspace',
   stashOpen: false,
+  searchOpen: false,
   activeTabType: 'session',
   sidebarCollapsed: false,
   rightPanelCollapsed: false,
@@ -243,6 +246,7 @@ export const useStore = create<AppState>((set, get) => ({
   setShowHidden: (v) => set({ showHidden: v }),
   setExplorerRoot: (v) => set({ explorerRoot: v }),
   setStashOpen: (v) => set({ stashOpen: v }),
+  setSearchOpen: (v) => set({ searchOpen: v }),
   setActiveTabType: (t) => set({ activeTabType: t }),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
   setRightPanelCollapsed: (v) => set({ rightPanelCollapsed: v }),
