@@ -171,7 +171,7 @@ To use a different port, set the `ATOO_PORT` environment variable:
 ATOO_PORT=4000 npx atoo-studio
 ```
 
-### Docker
+### Docker (untested)
 
 ```bash
 docker run -p 3010:3010 ghcr.io/atooai/atoo-studio
@@ -183,7 +183,7 @@ To persist data across container restarts:
 docker run -p 3010:3010 -v atoo-data:/home/atoo/.atoo-studio ghcr.io/atooai/atoo-studio
 ```
 
-### LXC / LXD
+### LXC / LXD (untested)
 
 Download the LXC image from the [latest release](https://github.com/atooai/atoo-studio/releases) and import it:
 
@@ -192,7 +192,7 @@ lxc image import atoo-studio-lxc-amd64.tar.gz --alias atoo-studio
 lxc launch atoo-studio my-atoo-studio
 ```
 
-### Proxmox (experimental)
+### Proxmox (experimental, untested)
 
 Run one of the setup scripts on your Proxmox host:
 
