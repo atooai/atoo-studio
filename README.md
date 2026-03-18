@@ -59,6 +59,8 @@
   </tr>
 </table>
 
+> **More demos and videos are available on the [Atoo Studio homepage](https://atoo.ai).**
+
 ## What is Atoo Studio?
 
 Atoo Studio is a browser-based control room for working with coding agents like **Claude Code** and **Codex CLI**.
