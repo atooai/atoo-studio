@@ -67,10 +67,30 @@ interface PendingOpenFile {
 }
 const pendingOpenFiles = new Map<string, PendingOpenFile>();
 
+// Pending ask-user requests (MCP tool blocks until user responds — no timeout)
+interface PendingAskUser {
+  resolve: (result: { status: 'answered' | 'cancelled'; answers?: Record<string, any> }) => void;
+  sessionId: string; // agent session ID, for cleanup on agent exit
+}
+const pendingAskUsers = new Map<string, PendingAskUser>();
+
+/** Clean up any pending ask-user requests for a given agent session ID. */
+export function cleanupPendingAskUsers(sessionId: string): void {
+  for (const [requestId, pending] of pendingAskUsers) {
+    if (pending.sessionId === sessionId) {
+      pending.resolve({ status: 'cancelled' });
+      pendingAskUsers.delete(requestId);
+    }
+  }
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createWebServer(tlsOptions?: { key: string; cert: string }): https.Server | http.Server {
   const app = express();
+
+  // Clean up pending ask-user requests when agents are destroyed
+  agentRegistry.onDestroy((sessionId) => cleanupPendingAskUsers(sessionId));
 
   // Port-proxy: intercept before body parsing so proxied requests stream through
   const portProxy = createPortProxy();
@@ -316,6 +336,60 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         pendingOpenFiles.set(requestId, { resolve, timeout });
       });
       res.json({ action: result.action });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // MCP callback: ask the user structured questions via wizard UI (blocks until user responds — no timeout)
+  app.post('/api/mcp/ask-user', async (req, res) => {
+    const { session_uuid, questions } = req.body;
+    if (!session_uuid || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: 'session_uuid and questions (non-empty array) are required' });
+    }
+
+    // Resolve CLI UUID to agent session ID
+    let agentSessionId: string | null = null;
+    for (const info of agentRegistry.listAgents()) {
+      const agent = agentRegistry.getAgent(info.sessionId);
+      if (agent) {
+        const cliId = agent.getCliSessionId?.();
+        if (cliId === session_uuid) {
+          agentSessionId = info.sessionId;
+          break;
+        }
+      }
+    }
+    if (!agentSessionId) {
+      return res.status(404).json({ error: 'No active agent session found for this session UUID' });
+    }
+
+    // Check if there's already a pending ask-user for this session
+    for (const pending of pendingAskUsers.values()) {
+      if (pending.sessionId === agentSessionId) {
+        return res.status(409).json({ error: 'Another ask_user request is already pending for this session' });
+      }
+    }
+
+    const requestId = uuidv4();
+
+    // Broadcast to all browsers
+    const msg = JSON.stringify({
+      type: 'ask_user_request',
+      requestId,
+      sessionId: agentSessionId,
+      questions,
+    });
+    for (const ws of store.statusClients) {
+      if (ws.readyState === 1) ws.send(msg);
+    }
+
+    // Block until user responds (no timeout)
+    try {
+      const result = await new Promise<{ status: 'answered' | 'cancelled'; answers?: Record<string, any> }>((resolve) => {
+        pendingAskUsers.set(requestId, { resolve, sessionId: agentSessionId! });
+      });
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -722,6 +796,25 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     clearTimeout(pending.timeout);
     pendingOpenFiles.delete(requestId);
     pending.resolve({ action });
+    broadcastDismissModal(requestId);
+    res.json({ success: true });
+  });
+
+  app.post('/api/respond-ask-user', (req, res) => {
+    const { requestId, answers, cancelled } = req.body;
+    if (!requestId) {
+      return res.status(400).json({ error: 'requestId is required' });
+    }
+    const pending = pendingAskUsers.get(requestId);
+    if (!pending) {
+      return res.status(404).json({ error: 'No pending ask-user request with this ID' });
+    }
+    pendingAskUsers.delete(requestId);
+    if (cancelled) {
+      pending.resolve({ status: 'cancelled' });
+    } else {
+      pending.resolve({ status: 'answered', answers: answers || {} });
+    }
     broadcastDismissModal(requestId);
     res.json({ success: true });
   });

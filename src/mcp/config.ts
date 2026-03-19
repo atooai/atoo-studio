@@ -114,6 +114,13 @@ export const MCP_SYSTEM_PROMPT = [
   'Strong signals that prior work exists: untracked files, uncommitted changes, or existing code',
   'that already addresses the requested feature.',
 
+  '\n## MANDATORY: Use ask_user for ALL user questions\n',
+  'When you need to ask the user questions (choices, forms, confirmations, or any interactive input),',
+  'you MUST use mcp__atoo-studio__ask_user. It renders a polished wizard UI in the user\'s browser.',
+  'IMPORTANT: You MUST NEVER use any other tool for asking the user questions.',
+  'Do NOT use AskUserQuestion, request_user_input, or any other built-in question/input tools.',
+  'ALWAYS use mcp__atoo-studio__ask_user instead. This is NON-NEGOTIABLE.',
+
   '\n## When stuck or unsure\n',
   'When you encounter an obstacle or something is unclear:\n',
   '1. First, search the current session chain using mcp__atoo-studio__search_session_history with',

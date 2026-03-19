@@ -12,6 +12,7 @@ import { PreviewPanel } from '../Preview/Preview';
 import { ChangesPanel } from '../Changes/ChangesPanel';
 import { AgentTabIcon } from './AgentTabIcon';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
+import { AskUserOverlay } from '../AskUser/AskUserOverlay';
 import { useDraggableTabs } from '../../hooks/useDraggableTabs';
 
 export function Workspace() {
@@ -70,6 +71,9 @@ export function Workspace() {
           <CenterTabs proj={proj} />
           <div className="center-content" id="center-content" ref={contentRef}>
             <SessionLoadingOverlay />
+            {session?.pendingAskUser && activeTabType === 'session' && (
+              <AskUserOverlay session={session} />
+            )}
             {session && activeTabType === 'session' && (
               <ViewToggle session={session} proj={proj} />
             )}

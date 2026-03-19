@@ -40,6 +40,10 @@ export interface Session {
   activeSessionIdx?: number;
   cliSessionId?: string;
   linkedIssue?: LinkedIssue;
+  pendingAskUser?: {
+    requestId: string;
+    questions: import('./components/AskUser/types').AskUserQuestion[];
+  } | null;
 }
 
 export interface ContextUsage {

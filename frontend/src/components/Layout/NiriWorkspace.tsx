@@ -11,6 +11,7 @@ import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel'
 import { ChangesPanel } from '../Changes/ChangesPanel';
 import { PreviewPanel } from '../Preview/Preview';
 import { Sidebar } from '../Sidebar/Sidebar';
+import { AskUserOverlay } from '../AskUser/AskUserOverlay';
 import { AgentTabIcon } from './AgentTabIcon';
 
 /* ══════════════════════════════════════════════════════
@@ -79,6 +80,18 @@ function NiriTerminalView({ terminalId }: { terminalId: string }) {
     }
   }, [terminal?.id]);
   return <div className="niri-terminal-view" ref={termRef} />;
+}
+
+/** Renders AskUserOverlay for Niri agent windows (tui/chat) if a question is pending. */
+function NiriAskUserOverlay({ win }: { win: NiriWindow }) {
+  const { activeProjectId, projects } = useStore();
+  if (win.type !== 'agent-tui' && win.type !== 'agent-chat') return null;
+  const sessionId = win.params?.sessionId;
+  if (!sessionId) return null;
+  const proj = projects.find((p) => p.id === activeProjectId);
+  const session = proj?.sessions.find((s) => s.id === sessionId);
+  if (!session?.pendingAskUser) return null;
+  return <AskUserOverlay session={session} />;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -636,6 +649,7 @@ export function NiriWorkspace() {
                           isFocused={isFocused}
                         />
                         <div className="niri-window-content">
+                          <NiriAskUserOverlay win={win} />
                           <DynamicPanel type={win.type} params={win.params} />
                         </div>
                       </div>

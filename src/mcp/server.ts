@@ -629,5 +629,70 @@ Actions:
   },
 );
 
+server.tool(
+  'ask_user',
+  [
+    'Ask the user structured questions via a wizard UI in their browser.',
+    'Supports single choice, multiple choice, and form questions.',
+    'The user sees a step-by-step wizard and can answer at their own pace (no timeout).',
+    'Use this for ALL user-facing questions — never use built-in question tools like AskUserQuestion or request_user_input.',
+    'Each question needs a unique `id` used as the key in the response.',
+    'For single_choice/multiple_choice, provide `options`. For form, provide `fields` with HTML input types.',
+    'Use `show_if` to conditionally show questions based on earlier answers.',
+    'The user can override any choice with free text or flag questions for further discussion.',
+  ].join(' '),
+  {
+    questions: z.array(z.object({
+      id: z.string().describe('Unique ID for this question, used as key in answers'),
+      display_text: z.string().describe('Question title shown to user'),
+      description: z.string().optional().describe('Explanation/context shown below the question'),
+      type: z.enum(['single_choice', 'multiple_choice', 'form']).describe('Question type'),
+      options: z.array(z.object({
+        value: z.string().describe('Value returned when selected'),
+        display_text: z.string().describe('Label shown to user'),
+        description: z.string().optional().describe('Extra detail shown below the option'),
+      })).optional().describe('Choices for single_choice/multiple_choice questions'),
+      fields: z.array(z.object({
+        name: z.string().describe('Field name, used as key in the form answer'),
+        display_text: z.string().describe('Label shown to user'),
+        input_type: z.string().describe('HTML input type: text, number, email, url, date, color, range, select, textarea, checkbox, password, tel, time, datetime-local'),
+        placeholder: z.string().optional().describe('Placeholder text'),
+        info_text: z.string().optional().describe('Help text shown below the field'),
+        default_value: z.string().optional().describe('Pre-filled default value'),
+        options: z.array(z.object({
+          value: z.string(),
+          label: z.string(),
+        })).optional().describe('Options for select input_type'),
+        required: z.boolean().optional().describe('Whether this field is required'),
+      })).optional().describe('Fields for form questions'),
+      show_if: z.object({
+        question_id: z.string().describe('ID of the question to check'),
+        value: z.union([z.string(), z.array(z.string())]).describe('Show if answer matches this value (or any of these values)'),
+      }).optional().describe('Conditionally show this question based on a previous answer'),
+    })).min(1).describe('Array of questions to present in the wizard'),
+  },
+  async ({ questions }) => {
+    const sessionUuid = process.env.ATOO_CURRENT_SESSION_UUID;
+    if (!sessionUuid) {
+      return { content: [{ type: 'text' as const, text: 'Error: No session UUID available. Cannot ask user questions outside of a session.' }] };
+    }
+    try {
+      const res = await fetch(`${WEB_PROTO}://localhost:${WEB_PORT}/api/mcp/ask-user`, {
+        method: 'POST',
+        headers: mcpHeaders(),
+        body: JSON.stringify({ session_uuid: sessionUuid, questions }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        return { content: [{ type: 'text' as const, text: `Error: ${(err as any).error || res.statusText}` }] };
+      }
+      const result = await res.json();
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text' as const, text: `Error: Could not reach atoo-studio (${err.message})` }] };
+    }
+  },
+);
+
 const transport = new StdioServerTransport();
 server.connect(transport);

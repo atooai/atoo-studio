@@ -439,6 +439,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
             _filteredMessages: existing._filteredMessages,
             contextUsage: existing.contextUsage,
             contextInProgress: existing.contextInProgress,
+            pendingAskUser: existing.pendingAskUser,
           } : {}),
         };
       });
@@ -479,6 +480,7 @@ async function selectProject(projectId: string, peId?: string, fromRouter = fals
               _filteredMessages: existing._filteredMessages,
               contextUsage: existing.contextUsage,
               contextInProgress: existing.contextInProgress,
+              pendingAskUser: existing.pendingAskUser,
             } : {
               showVerbose: bs.showVerbose,
             }),

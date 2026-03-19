@@ -29,6 +29,12 @@ interface AgentEntry {
 class AgentRegistry {
   private factories = new Map<string, AgentFactory>();
   private agents = new Map<string, AgentEntry>();
+  private destroyCallbacks: Array<(sessionId: string) => void> = [];
+
+  /** Register a callback to be called when an agent is destroyed. */
+  onDestroy(cb: (sessionId: string) => void): void {
+    this.destroyCallbacks.push(cb);
+  }
 
   registerFactory(factory: AgentFactory): void {
     this.factories.set(factory.agentType, factory);
@@ -105,6 +111,11 @@ class AgentRegistry {
 
     await entry.agent.destroy();
     this.agents.delete(sessionId);
+
+    // Notify listeners about agent destruction (used for cleanup, e.g. pending ask-user requests)
+    for (const cb of this.destroyCallbacks) {
+      try { cb(sessionId); } catch {}
+    }
 
     // Clean up status from the global store and broadcast removal
     store.removeAgentStatus(sessionId);

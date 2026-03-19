@@ -308,6 +308,18 @@ function handleStatusMessage(msg: any) {
         },
       },
     });
+  } else if (msg.type === 'ask_user_request') {
+    // Set pendingAskUser on the matching session
+    const projects = store.projects.map((proj) => {
+      const sessions = proj.sessions.map((s) => {
+        if (s.id === msg.sessionId) {
+          return { ...s, pendingAskUser: { requestId: msg.requestId, questions: msg.questions }, status: 'attention' as const };
+        }
+        return s;
+      });
+      return { ...proj, sessions };
+    });
+    useStore.setState({ projects });
   } else if (msg.type === 'dismiss_modal' && msg.requestId) {
     // Another browser already handled this popup — close it locally if it matches
     const currentModal = useStore.getState().modal;
@@ -316,6 +328,17 @@ function handleStatusMessage(msg: any) {
     }
     // Also clean up serial request state if applicable
     store.removeSerialRequest(msg.requestId);
+    // Clear any pending ask-user with this requestId
+    const projects = store.projects.map((proj) => {
+      const sessions = proj.sessions.map((s) => {
+        if (s.pendingAskUser?.requestId === msg.requestId) {
+          return { ...s, pendingAskUser: null };
+        }
+        return s;
+      });
+      return { ...proj, sessions };
+    });
+    useStore.setState({ projects });
   } else if (msg.type === 'serial_closed' && msg.requestId) {
     const req = store.serialRequests.find((r) => r.requestId === msg.requestId);
     if (req && req.status === 'connected') {

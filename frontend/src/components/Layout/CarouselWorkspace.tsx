@@ -9,6 +9,7 @@ import { IssuesPanel, PullsPanel, useGitHubStatus } from '../GitHub/GitHubPanel'
 import { ChangesPanel } from '../Changes/ChangesPanel';
 import { PreviewPanel } from '../Preview/Preview';
 import { SessionLoadingOverlay } from '../Modals/SessionLoadingOverlay';
+import { AskUserOverlay } from '../AskUser/AskUserOverlay';
 import { AgentTabIcon } from './AgentTabIcon';
 
 const HOVER_DELAY = 400; // ms before hover triggers scroll
@@ -312,7 +313,12 @@ function SessionsSlide({ proj }: { proj: any }) {
                 <span className="vcarousel-tab-title">{s.title || `Session ${i + 1}`}</span>
               </>
             )}
-            renderContent={(s) => <SessionTui session={s} />}
+            renderContent={(s) => (
+              <>
+                {s.pendingAskUser && <AskUserOverlay session={s} />}
+                <SessionTui session={s} />
+              </>
+            )}
           />
         )}
       </div>
