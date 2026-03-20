@@ -95,7 +95,7 @@ export interface Agent extends EventEmitter {
   destroy(): Promise<void>;
 
   // Messaging
-  sendMessage(text: string, attachments?: Attachment[]): void;
+  sendMessage(text: string, attachments?: Attachment[], meta?: Record<string, any>): void;
   approve(requestId: string, updatedInput?: any): void;
   deny(requestId: string): void;
   answerQuestion(requestId: string, answers: Record<string, string>): void;
@@ -176,7 +176,7 @@ export interface Attachment {
 // ═══════════════════════════════════════════════════════
 
 export type AgentCommand =
-  | { action: 'send_message'; text: string; attachments?: Attachment[] }
+  | { action: 'send_message'; text: string; attachments?: Attachment[]; agents?: string[] }
   | { action: 'approve'; requestId: string; updatedInput?: any }
   | { action: 'deny'; requestId: string }
   | { action: 'answer_question'; requestId: string; answers: Record<string, string> }

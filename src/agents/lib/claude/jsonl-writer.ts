@@ -268,6 +268,23 @@ export function writeForkedClaudeJsonl(
     }
   }
 
+  // When there are no events, write a minimal system init event so
+  // `claude --resume` can parse the file (an empty/whitespace-only file causes exit code 1).
+  if (lines.length === 0) {
+    const initUuid = uuidv4();
+    const initEvent: ClaudeJsonlEvent = {
+      type: 'system',
+      subtype: 'init',
+      uuid: initUuid,
+      sessionId: targetUuid,
+      parentUuid: null,
+      timestamp: new Date().toISOString(),
+      cwd: directory,
+      isSidechain: false,
+    };
+    lines.push(JSON.stringify(initEvent));
+  }
+
   fs.writeFileSync(jsonlPath, lines.join('\n') + '\n');
   console.log(`[claude-jsonl-writer] Reconstructed ${lines.length} events to ${jsonlPath}`);
   return jsonlPath;

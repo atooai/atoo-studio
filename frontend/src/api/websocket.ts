@@ -457,10 +457,15 @@ function handleAgentMessage(sessionId: string, msg: any) {
 
     console.log('[agent]', msg.type, JSON.stringify(msg).substring(0, 300));
 
-    // Extract sidechain metadata if present
+    // Extract sidechain/dispatch metadata if present
     const sidechainMeta: any = {};
     if (msg._sidechain) {
       sidechainMeta._sidechain = true;
+      sidechainMeta._parentToolUseId = msg._parentToolUseId;
+      if (msg._agentId) sidechainMeta._agentId = msg._agentId;
+    } else if (msg._parentToolUseId) {
+      // atoo-any dispatch metadata (not a sidechain but needs grouping)
+      sidechainMeta._sidechain = true; // reuse sidechain grouping in UI
       sidechainMeta._parentToolUseId = msg._parentToolUseId;
       if (msg._agentId) sidechainMeta._agentId = msg._agentId;
     }

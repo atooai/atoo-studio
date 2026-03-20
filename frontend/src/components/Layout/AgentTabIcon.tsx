@@ -11,6 +11,21 @@ const CODEX_PATH = 'M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-
 
 export function AgentTabIcon({ agentType, status }: { agentType?: string; status: string }) {
   const isCodex = agentType?.startsWith('codex');
+  const isAtooAny = agentType === 'atoo-any';
+
+  if (isAtooAny) {
+    return (
+      <img
+        className={`tab-agent-icon ${status}`}
+        src="/logo_64x64.png"
+        alt="A"
+        width="12"
+        height="12"
+        style={{ borderRadius: 2 }}
+      />
+    );
+  }
+
   const svgPath = isCodex ? CODEX_PATH : CLAUDE_PATH;
   const viewBox = isCodex ? '0 0 24 24' : '0 0 16 16';
 

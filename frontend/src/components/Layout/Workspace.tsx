@@ -270,7 +270,7 @@ function ViewToggle({ session, proj }: { session: any; proj: any }) {
   const hasChat = mode === 'chat' || mode === 'terminal+chat' || mode === 'terminal+chatRO';
   const hasTerminal = mode === 'terminal' || mode === 'terminal+chat' || mode === 'terminal+chatRO';
   const chatReadOnly = mode === 'terminal+chatRO';
-  const hasVerbose = mode === 'terminal+chat' || mode === 'terminal+chatRO';
+  const hasVerbose = mode === 'terminal+chat' || mode === 'terminal+chatRO' || mode === 'chat';
   const [showDesc, setShowDesc] = React.useState(false);
 
   return (

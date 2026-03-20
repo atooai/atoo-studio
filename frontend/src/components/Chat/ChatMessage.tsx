@@ -12,9 +12,11 @@ export function ChatMessageItem({ m, fi, session }: { m: FilteredMessage; fi: nu
   if (m.role === 'control_request') return <ControlRequest m={m} session={session} />;
 
   const isUser = m.role === 'user';
+  const avatarLabel = isUser ? 'Y' : (m._agentId === 'codex' ? 'X' : 'C');
+  const avatarClass = isUser ? 'you' : (m._agentId === 'codex' ? 'codex' : 'claude');
   return (
     <div className={`chat-msg ${m.role}`}>
-      <div className={`chat-avatar ${isUser ? 'you' : 'claude'}`}>{isUser ? 'Y' : 'C'}</div>
+      <div className={`chat-avatar ${avatarClass}`}>{avatarLabel}</div>
       <div className="chat-bubble">
         <AttachmentDisplay attachments={m._attachments} />
         {isUser ? (

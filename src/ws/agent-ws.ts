@@ -73,7 +73,7 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
 
   switch (cmd.action) {
     case 'send_message':
-      agent.sendMessage(cmd.text, cmd.attachments);
+      agent.sendMessage(cmd.text, cmd.attachments, cmd.agents ? { agents: cmd.agents } : undefined);
       break;
     case 'approve':
       agent.approve(cmd.requestId, cmd.updatedInput);
