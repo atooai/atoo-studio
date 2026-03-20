@@ -6,7 +6,6 @@
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import os from 'os';
-import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import type {
   Agent,
@@ -16,7 +15,7 @@ import type {
   AgentCapabilities,
   Attachment,
 } from '../types.js';
-import type { SessionEvent, UserEvent, AssistantEvent } from '../../events/types.js';
+import type { SessionEvent, UserEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
 import { toWireMessages } from '../../events/wire.js';
 import { writeForkedClaudeJsonl } from '../lib/claude/jsonl-writer.js';
@@ -323,13 +322,10 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
   private dispatchToAgent(family: 'claude' | 'codex', message: string, parentUserUuid: string): void {
     const dispatchId = `${parentUserUuid}:${family}`;
     const tempUuid = uuidv4();
-    console.log(`[atoo-any] dispatch ${family} tempUuid=${tempUuid} parentUser=${parentUserUuid}`);
 
-    // Build a clean conversation history for the CLI (exclude the current user message
-    // since it will be sent via -p flag to the CLI).
-    // Raw events have interleaved dispatch UUIDs from temp sessions — reconstruct a
-    // coherent user→assistant conversation so the CLI sees proper history.
+    // Build clean conversation history as SessionEvents for the CLI's session file.
     const cleanEvents = this.buildConversationHistory(family);
+
     let tempFilePath: string;
     try {
       if (family === 'claude') {
@@ -341,15 +337,12 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       console.error(`[atoo-any] Failed to write temp ${family} session:`, err.message);
       return;
     }
-    console.log(`[atoo-any] ${family} temp session file: ${tempFilePath}`);
-
     // Record initial byte offset to skip pre-written content
     let initialByteOffset = 0;
     try {
       const stat = fs.statSync(tempFilePath);
       initialByteOffset = stat.size;
     } catch {}
-    console.log(`[atoo-any] ${family} initialByteOffset=${initialByteOffset}`);
 
     // Spawn the CLI process
     let envId: string;
@@ -418,13 +411,12 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
           watcher.stop();
           dispatch.done = true;
 
-          // DEBUG: keep temp session file for inspection
-          // try {
-          //   if (fs.existsSync(tempFilePath)) {
-          //     fs.unlinkSync(tempFilePath);
-          //   }
-          // } catch {}
-          console.log(`[atoo-any] Kept temp ${family} session for debug: ${tempFilePath}`);
+          // Clean up temp session file
+          try {
+            if (fs.existsSync(tempFilePath)) {
+              fs.unlinkSync(tempFilePath);
+            }
+          } catch {}
 
           // Check if all dispatches are done
           const allDone = [...this.activeDispatches.values()].every(d => d.done);
@@ -505,97 +497,44 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
   }
 
   /**
-   * Build a clean conversation history from stored events.
-   * Groups user messages with their dispatch responses (preferring the given agent family)
-   * and produces a coherent user→assistant event chain with fresh UUIDs.
-   * Excludes the last event (current user message, sent via -p flag).
+   * Build conversation history for a dispatch by filtering real events.
+   * Includes user messages + only the preferred family's dispatch events.
+   * The session writers (writeForkedClaudeJsonl / writeForkedCodexJsonl) handle
+   * UUID remapping automatically, so broken parentUuid chains are fixed.
+   * Falls back to the other family's events if preferred has none for a turn.
    */
   private buildConversationHistory(preferFamily: 'claude' | 'codex'): SessionEvent[] {
-    const result: SessionEvent[] = [];
     const allEvents = this.events.slice(0, -1); // exclude current user message
+    if (allEvents.length === 0) return [];
 
-    console.log(`[atoo-any] buildConversationHistory for ${preferFamily}: ${allEvents.length} events`);
-    for (const ev of allEvents) {
-      const e = ev as any;
-      console.log(`  [${e.type}] _dispatchId=${e._dispatchId || 'none'} _source=${e._source || 'none'}`);
-    }
+    const otherFamily = preferFamily === 'claude' ? 'codex' : 'claude';
+    const result: SessionEvent[] = [];
 
-    // Walk through events: for each user event, collect dispatch assistant responses
-    let lastUuid: string | null = null;
+    // Walk through events: include user messages and preferred family's responses.
+    // For each user turn, if preferred family has no response, fall back to the other.
     for (let i = 0; i < allEvents.length; i++) {
       const ev = allEvents[i] as any;
 
       if (ev.type === 'user' && !ev._dispatchId) {
-        // User message — add with fresh UUID chain
-        const uuid = uuidv4();
-        const userEvent: UserEvent = {
-          type: 'user',
-          uuid,
-          sessionId: '',
-          parentUuid: lastUuid,
-          timestamp: ev.timestamp || new Date().toISOString(),
-          cwd: this.cwd,
-          message: { role: 'user', content: ev.message?.content || '' },
-        };
-        result.push(userEvent);
-        lastUuid = uuid;
+        result.push(ev);
 
-        // Collect assistant text responses that belong to this user message's dispatches.
-        // Prefer the target family's response, fall back to the other.
-        const userUuid = ev.uuid;
-        const preferredTexts: string[] = [];
-        const otherTexts: string[] = [];
-
+        // Collect dispatch events for this turn, grouped by family
+        const preferred: SessionEvent[] = [];
+        const fallback: SessionEvent[] = [];
         for (let j = i + 1; j < allEvents.length; j++) {
           const de = allEvents[j] as any;
-          if (de.type === 'user' && !de._dispatchId) break; // next user message
-
-          if (de.type === 'assistant' && de._dispatchId) {
-            const content = de.message?.content;
-            let text = '';
-            if (typeof content === 'string') {
-              text = content;
-            } else if (Array.isArray(content)) {
-              text = content
-                .filter((b: any) => b.type === 'text')
-                .map((b: any) => b.text)
-                .join('\n');
-            }
-            if (!text) continue;
-
-            if (de._source === preferFamily) {
-              preferredTexts.push(text);
-            } else {
-              otherTexts.push(text);
-            }
-          }
+          if (de.type === 'user' && !de._dispatchId) break;
+          if (!de._dispatchId) continue;
+          if (de._source === preferFamily) preferred.push(de);
+          else if (de._source === otherFamily) fallback.push(de);
         }
 
-        // Use preferred family's response, fall back to other
-        const responseTexts = preferredTexts.length > 0 ? preferredTexts : otherTexts;
-        if (responseTexts.length > 0) {
-          const aUuid = uuidv4();
-          const assistantEvent: AssistantEvent = {
-            type: 'assistant',
-            uuid: aUuid,
-            sessionId: '',
-            parentUuid: lastUuid,
-            timestamp: new Date().toISOString(),
-            message: {
-              role: 'assistant',
-              content: [{ type: 'text', text: responseTexts.join('\n') }],
-              model: 'claude-opus-4-6',
-              stop_reason: 'end_turn',
-            },
-          };
-          result.push(assistantEvent);
-          lastUuid = aUuid;
-        }
+        const chosen = preferred.length > 0 ? preferred : fallback;
+        result.push(...chosen);
       }
     }
 
-    console.log(`[atoo-any] buildConversationHistory result: ${result.length} events (${result.filter(e => e.type === 'user').length} user, ${result.filter(e => e.type === 'assistant').length} assistant)`);
-    return result;
+    return stripMeta(result);
   }
 
   private getCapabilities(): AgentCapabilities {

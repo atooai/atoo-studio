@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Local-first workspace for Claude Code, Codex CLI, and other coding agents.</strong><br>
-  Run multiple agents across projects and worktrees, fork and chain sessions, preview apps with real Chrome + DevTools, and manage Git, GitHub, databases, containers, and hardware from one browser UI.
+  Run multiple agents across projects and worktrees, send a single prompt to Claude and Codex simultaneously, fork and chain sessions, preview apps with real Chrome + DevTools, and manage Git, GitHub, databases, containers, and hardware from one browser UI.
 </p>
 
 <p align="center">
@@ -78,6 +78,10 @@ Once you work across multiple projects, worktrees, terminals, dev servers, brows
 Atoo Studio was built from that exact pain: creating a workspace that actually matches how agent-driven development works in practice.
 
 ## Core capabilities
+
+### Multi-agent mode
+
+Send a single message to Claude Code and Codex simultaneously. Both agents work on the same codebase in parallel, and their responses appear side by side in collapsible dispatch blocks. Conversation history is maintained per agent so each CLI sees a coherent session, with automatic cross-agent format conversion.
 
 ### Agent workflows
 
@@ -254,7 +258,7 @@ Browser (any device)
     ▼
 Atoo Studio Backend
     │
-    ├── Agent adapters (Claude Code, Codex)
+    ├── Agent adapters (Claude Code, Codex, multi-agent)
     ├── PTY session manager
     ├── Session chain & fork system
     ├── Project & worktree manager
