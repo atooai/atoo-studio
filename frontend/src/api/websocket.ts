@@ -457,6 +457,9 @@ function handleAgentMessage(sessionId: string, msg: any) {
 
     console.log('[agent]', msg.type, JSON.stringify(msg).substring(0, 300));
 
+    // Deduplicate replayed messages on reconnect — skip if this msg.id is already in the session
+    if (msg.id && sess.messages.some((m) => m._eventUuid === msg.id)) return proj;
+
     // Extract sidechain/dispatch metadata if present
     const sidechainMeta: any = {};
     if (msg._sidechain) {
@@ -479,7 +482,6 @@ function handleAgentMessage(sessionId: string, msg: any) {
     }
 
     if (msg.type === 'user_message') {
-      if (sess.messages.some((m) => m._eventUuid === msg.id)) return proj;
       sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _attachments: msg.attachments });
     } else if (msg.type === 'assistant_message') {
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
