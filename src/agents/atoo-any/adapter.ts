@@ -221,15 +221,10 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
 
     // Dispatch to each selected agent
     const multiAgent = agents.filter(a => a === 'claude' || a === 'codex').length > 1;
+    const MULTI_AGENT_CONTEXT = '[IMPORTANT CONTEXT: This message was sent to multiple agents simultaneously. All agents are working on this in parallel on the same codebase. Be aware of potential file conflicts. If the user addresses a specific agent with @claude or @codex, only the addressed agent should act on that part. Coordinate by making atomic, self-contained changes.]';
     for (const agentFamily of agents) {
       if (agentFamily === 'claude' || agentFamily === 'codex') {
-        // Build the message with parallel-awareness context
-        let dispatchMessage = text;
-        if (multiAgent) {
-          const otherAgent = agentFamily === 'claude' ? 'Codex' : 'Claude';
-          const contextNote = `[IMPORTANT CONTEXT: This message was sent to BOTH you and ${otherAgent} simultaneously. Both agents are working on this in parallel on the same codebase. Be aware of potential file conflicts. If the user addresses a specific agent with @claude or @codex, only the addressed agent should act on that part. Coordinate by making atomic, self-contained changes.]`;
-          dispatchMessage = `${contextNote}\n\n${text}`;
-        }
+        const dispatchMessage = multiAgent ? `${MULTI_AGENT_CONTEXT}\n\n${text}` : text;
         this.dispatchToAgent(agentFamily, dispatchMessage, userUuid);
       }
     }
