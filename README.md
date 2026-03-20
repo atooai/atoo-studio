@@ -62,9 +62,7 @@
 <table align="center">
   <tr>
     <td align="center">
-      <a href="https://github.com/atooai/atoo-studio/blob/main/demoassets/atoo-chat-view.mp4">
-        <img src="demoassets/atoo-chat-view-thumb.jpg" alt="Atoo Chat UI demo video — click to play" width="820">
-      </a>
+      <video src="https://atoo.ai/assets/atoo-chat-view.mp4" width="820" controls></video>
     </td>
   </tr>
   <tr>
