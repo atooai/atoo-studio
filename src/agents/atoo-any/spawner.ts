@@ -12,6 +12,8 @@ interface OneShotOptions {
   cwd: string;
   resumeUuid: string;
   message: string;
+  /** The parent atoo-any session UUID — used for MCP session identity */
+  parentSessionUuid: string;
 }
 
 interface SpawnResult {
@@ -27,7 +29,7 @@ interface SpawnResult {
 export function spawnClaudeOneShot(options: OneShotOptions): SpawnResult {
   ensureWorkspaceTrust(options.cwd);
 
-  const mcpConfigPath = getMcpConfigPath(options.resumeUuid);
+  const mcpConfigPath = getMcpConfigPath(options.parentSessionUuid);
   const args = [
     '-p', options.message,
     '--resume', options.resumeUuid,
@@ -63,7 +65,7 @@ export function spawnCodexOneShot(options: OneShotOptions): SpawnResult {
   const mcpEnv: Record<string, string> = {
     ...mcp.env,
     ATOO_MCP_TOKEN: mcpToken,
-    ATOO_CURRENT_SESSION_UUID: options.resumeUuid,
+    ATOO_CURRENT_SESSION_UUID: options.parentSessionUuid,
   };
 
   const mcpArgs: string[] = [];

@@ -348,9 +348,9 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     let envId: string;
     try {
       if (family === 'claude') {
-        ({ envId } = spawnClaudeOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message }));
+        ({ envId } = spawnClaudeOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid }));
       } else {
-        ({ envId } = spawnCodexOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message }));
+        ({ envId } = spawnCodexOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid }));
       }
     } catch (err: any) {
       console.error(`[atoo-any] Failed to spawn ${family}:`, err.message);
