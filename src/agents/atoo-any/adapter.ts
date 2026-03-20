@@ -498,10 +498,10 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
 
   /**
    * Build conversation history for a dispatch by filtering real events.
-   * Includes user messages + only the preferred family's dispatch events.
-   * The session writers (writeForkedClaudeJsonl / writeForkedCodexJsonl) handle
-   * UUID remapping automatically, so broken parentUuid chains are fixed.
-   * Falls back to the other family's events if preferred has none for a turn.
+   * Includes user messages + the preferred family's dispatch events first,
+   * then the other family's events so both agents see the full picture
+   * (e.g. ask_user results, tool calls). The session writers handle UUID
+   * remapping automatically, so broken parentUuid chains are fixed.
    */
   private buildConversationHistory(preferFamily: 'claude' | 'codex'): SessionEvent[] {
     const allEvents = this.events.slice(0, -1); // exclude current user message
@@ -510,8 +510,8 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     const otherFamily = preferFamily === 'claude' ? 'codex' : 'claude';
     const result: SessionEvent[] = [];
 
-    // Walk through events: include user messages and preferred family's responses.
-    // For each user turn, if preferred family has no response, fall back to the other.
+    // Walk through events: include user messages and both families' responses
+    // (preferred first, then other) so each agent sees the full conversation.
     for (let i = 0; i < allEvents.length; i++) {
       const ev = allEvents[i] as any;
 
@@ -520,17 +520,17 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
 
         // Collect dispatch events for this turn, grouped by family
         const preferred: SessionEvent[] = [];
-        const fallback: SessionEvent[] = [];
+        const other: SessionEvent[] = [];
         for (let j = i + 1; j < allEvents.length; j++) {
           const de = allEvents[j] as any;
           if (de.type === 'user' && !de._dispatchId) break;
           if (!de._dispatchId) continue;
           if (de._source === preferFamily) preferred.push(de);
-          else if (de._source === otherFamily) fallback.push(de);
+          else if (de._source === otherFamily) other.push(de);
         }
 
-        const chosen = preferred.length > 0 ? preferred : fallback;
-        result.push(...chosen);
+        // Include preferred family first, then other family
+        result.push(...preferred, ...other);
       }
     }
 
