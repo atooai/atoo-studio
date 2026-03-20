@@ -59,6 +59,17 @@
   </tr>
 </table>
 
+<table align="center">
+  <tr>
+    <td align="center">
+      <video src="demoassets/atoo-chat-view.mp4" width="820" controls></video>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>New Atoo Chat UI</strong> — cross-agent and parallel agent requests, session forking, and context extraction. Currently in development, release planned in a few days.</sub></td>
+  </tr>
+</table>
+
 > **More demos and videos are available on the [Atoo Studio homepage](https://atoo.ai).**
 
 ## What is Atoo Studio?
