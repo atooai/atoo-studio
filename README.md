@@ -6,7 +6,8 @@
 
 <p align="center">
   <strong>Local-first workspace for Claude Code, Codex CLI, and other coding agents.</strong><br>
-  Run multiple agents across projects and worktrees, send a single prompt to Claude and Codex simultaneously, fork and chain sessions, preview apps with real Chrome + DevTools, and manage Git, GitHub, databases, containers, and hardware from one browser UI.
+  Run multiple agents across projects and worktrees, send a single prompt to Claude and Codex simultaneously, fork and chain sessions, preview apps with real Chrome + DevTools, and manage Git, GitHub, databases, containers, and hardware from one browser UI.<br>
+  <strong>Installable as a PWA — standalone Electron app with native browser integration on the roadmap!</strong>
 </p>
 
 <p align="center">
