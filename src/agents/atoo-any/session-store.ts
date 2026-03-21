@@ -10,10 +10,39 @@ import type { HistoricalSession } from '../types.js';
 
 const SESSIONS_DIR_NAME = 'atoo-studio/atoo-any-sessions';
 
+export type AtooMessageStatus = 'visible' | 'removed' | 'compacted';
+
 export interface AtooEventMeta {
   _source?: 'claude' | 'codex';
   _parentUserUuid?: string;
   _dispatchId?: string;
+  // Branch-aware fields
+  _branchId?: string;
+  _msgStatus?: AtooMessageStatus;
+  _compactedSummary?: string;
+  _compactedBy?: string;
+  _contextDrift?: boolean;
+}
+
+/** Meta-event for branch structure changes (stored in JSONL) */
+export interface AtooBranchOperation {
+  type: 'branch_operation';
+  uuid: string;
+  timestamp: string;
+  operation: 'fork' | 'remove' | 'restore' | 'compact' | 'extract';
+  // Fork: where the branch diverges
+  forkPointEventUuid?: string;
+  branchId?: string;
+  branchLabel?: string;
+  // Remove/restore: which events are affected
+  targetEventUuids?: string[];
+  // Compact: summary info
+  compactedBy?: string;
+  compactedSummary?: string;
+  // Extract: extraction metadata
+  extractionId?: string;
+  extractionLabel?: string;
+  sourceRange?: [string, string]; // [startEventUuid, endEventUuid]
 }
 
 export type AtooSessionEvent = SessionEvent & AtooEventMeta;
@@ -47,7 +76,19 @@ export function appendEvent(filePath: string, event: SessionEvent, meta?: AtooEv
   if (meta?._source) line._source = meta._source;
   if (meta?._parentUserUuid) line._parentUserUuid = meta._parentUserUuid;
   if (meta?._dispatchId) line._dispatchId = meta._dispatchId;
+  if (meta?._branchId) line._branchId = meta._branchId;
+  if (meta?._msgStatus) line._msgStatus = meta._msgStatus;
+  if (meta?._compactedSummary) line._compactedSummary = meta._compactedSummary;
+  if (meta?._compactedBy) line._compactedBy = meta._compactedBy;
+  if (meta?._contextDrift != null) line._contextDrift = meta._contextDrift;
   fs.appendFileSync(filePath, JSON.stringify(line) + '\n');
+}
+
+/**
+ * Append a branch operation meta-event to the session JSONL.
+ */
+export function appendBranchOperation(filePath: string, op: AtooBranchOperation): void {
+  fs.appendFileSync(filePath, JSON.stringify(op) + '\n');
 }
 
 /**
@@ -73,7 +114,7 @@ export function readAllEvents(filePath: string): AtooSessionEvent[] {
  */
 export function stripMeta(events: AtooSessionEvent[]): SessionEvent[] {
   return events.map(e => {
-    const { _source, _parentUserUuid, _dispatchId, ...rest } = e;
+    const { _source, _parentUserUuid, _dispatchId, _branchId, _msgStatus, _compactedSummary, _compactedBy, _contextDrift, ...rest } = e;
     return rest as SessionEvent;
   });
 }

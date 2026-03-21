@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { filterMessages, classifyFile, getAttachIcon, escapeHtml } from '../../utils';
 import { ChatMessageItem } from './ChatMessage';
+import { AtooAnyChat } from './AtooAnyChat';
 import { api } from '../../api';
 import { sendAgentCommand } from '../../api/websocket';
 import type { Session, ChatAttachment, FilteredMessage } from '../../types';
@@ -32,14 +33,19 @@ export function ChatArea() {
 
   const chatReadOnly = session.agentMode === 'terminal+chatRO';
   const isAtooAny = session.agentType === 'atoo-any';
-  const showInput = !chatReadOnly || isAtooAny;
+
+  if (isAtooAny) {
+    return <AtooAnyChat session={session} proj={proj} />;
+  }
+
+  const showInput = !chatReadOnly;
 
   return (
     <>
       <ChatMessages session={session} />
       {showInput && <AttachmentsBar />}
       {showInput && <ChatInputBar session={session} proj={proj} />}
-      {!chatReadOnly && !isAtooAny && <ChatStatusBar session={session} />}
+      {!chatReadOnly && <ChatStatusBar session={session} />}
     </>
   );
 }

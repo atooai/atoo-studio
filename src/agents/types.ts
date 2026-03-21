@@ -183,4 +183,10 @@ export type AgentCommand =
   | { action: 'set_mode'; mode: string }
   | { action: 'set_model'; model: string }
   | { action: 'refresh_context' }
-  | { action: 'send_key'; key: string };
+  | { action: 'send_key'; key: string }
+  // Branch operations (atoo-any)
+  | { action: 'remove_messages'; eventUuids: string[] }
+  | { action: 'restore_message'; eventUuid: string }
+  | { action: 'compact_messages'; eventUuids: string[]; compactedBy: string }
+  | { action: 'fork_conversation'; afterIndex: number }
+  | { action: 'extract_range'; startIndex: number; endIndex: number; label?: string };

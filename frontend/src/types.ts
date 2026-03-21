@@ -44,6 +44,9 @@ export interface Session {
     requestId: string;
     questions: import('./components/AskUser/types').AskUserQuestion[];
   } | null;
+  // Atoo-any branching state
+  forks?: AtooFork[];
+  extractions?: AtooExtraction[];
 }
 
 export interface ContextUsage {
@@ -53,6 +56,8 @@ export interface ContextUsage {
   percent: number;
   freePercent: number;
 }
+
+export type MessageStatus = 'visible' | 'removed' | 'compacted';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'thinking' | 'tool' | 'control_request';
@@ -71,6 +76,12 @@ export interface ChatMessage {
   _sidechain?: boolean;
   _parentToolUseId?: string;
   _agentId?: string;
+  // Branch-aware fields (atoo-any)
+  _msgStatus?: MessageStatus;
+  _branchId?: string;
+  _compactedSummary?: string;
+  _compactedBy?: string;
+  _contextDrift?: boolean;
 }
 
 export interface FilteredMessage extends ChatMessage {
@@ -96,6 +107,30 @@ export interface ChatAttachment {
   data: string | null;
   text: string | null;
   kind: string | null;
+}
+
+// ─── Atoo-any branching types ───
+
+export interface AtooBranch {
+  id: string;
+  label: string;
+  messages: ChatMessage[];
+  isOriginal: boolean;
+}
+
+export interface AtooFork {
+  id: string;
+  forkPointIndex: number;
+  branches: AtooBranch[];
+  activeBranchIndex: number;
+}
+
+export interface AtooExtraction {
+  id: string;
+  label: string;
+  sourceConversation: string;
+  sourceRange: [number, number];
+  extractedMessages: ChatMessage[];
 }
 
 export interface GitChange {

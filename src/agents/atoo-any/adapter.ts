@@ -26,9 +26,11 @@ import {
   ensureSessionsDir,
   getSessionFilePath,
   appendEvent,
+  appendBranchOperation,
   readAllEvents,
   stripMeta,
   type AtooEventMeta,
+  type AtooBranchOperation,
 } from './session-store.js';
 
 import { mapCodexJsonlLine } from '../lib/codex/jsonl-mapper.js';
@@ -241,7 +243,80 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
   onBlurred(): void {}
 
   forkToResumable(_afterEventUuid: string, _fromEventUuid?: string, _targetDir?: string): string | null {
-    return null; // Forking not supported for atoo-any
+    return null; // Forking not supported for atoo-any (use in-session branches instead)
+  }
+
+  // ─── Branch Operations ────────────────────────────────
+
+  removeMessages(eventUuids: string[]): void {
+    const op: AtooBranchOperation = {
+      type: 'branch_operation',
+      uuid: uuidv4(),
+      timestamp: new Date().toISOString(),
+      operation: 'remove',
+      targetEventUuids: eventUuids,
+    };
+    appendBranchOperation(this.sessionFilePath, op);
+    // Emit status update to frontend
+    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'remove', eventUuids });
+  }
+
+  restoreMessage(eventUuid: string): void {
+    const op: AtooBranchOperation = {
+      type: 'branch_operation',
+      uuid: uuidv4(),
+      timestamp: new Date().toISOString(),
+      operation: 'restore',
+      targetEventUuids: [eventUuid],
+    };
+    appendBranchOperation(this.sessionFilePath, op);
+    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'restore', eventUuids: [eventUuid] });
+  }
+
+  compactMessages(eventUuids: string[], compactedBy: string): void {
+    // TODO: Actually call the agent to generate a summary. For now, placeholder.
+    const summary = `[Compacted ${eventUuids.length} events by ${compactedBy}]`;
+    const op: AtooBranchOperation = {
+      type: 'branch_operation',
+      uuid: uuidv4(),
+      timestamp: new Date().toISOString(),
+      operation: 'compact',
+      targetEventUuids: eventUuids,
+      compactedBy,
+      compactedSummary: summary,
+    };
+    appendBranchOperation(this.sessionFilePath, op);
+    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'compact', eventUuids, compactedBy, compactedSummary: summary });
+  }
+
+  forkConversation(afterIndex: number): void {
+    const op: AtooBranchOperation = {
+      type: 'branch_operation',
+      uuid: uuidv4(),
+      timestamp: new Date().toISOString(),
+      operation: 'fork',
+      forkPointEventUuid: this.events[afterIndex]?.uuid,
+      branchId: uuidv4(),
+      branchLabel: `Branch ${Date.now()}`,
+    };
+    appendBranchOperation(this.sessionFilePath, op);
+    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'fork', forkPointEventUuid: op.forkPointEventUuid, branchId: op.branchId, branchLabel: op.branchLabel });
+  }
+
+  extractRange(startIndex: number, endIndex: number, label?: string): void {
+    const startUuid = this.events[startIndex]?.uuid;
+    const endUuid = this.events[endIndex]?.uuid;
+    const op: AtooBranchOperation = {
+      type: 'branch_operation',
+      uuid: uuidv4(),
+      timestamp: new Date().toISOString(),
+      operation: 'extract',
+      extractionId: uuidv4(),
+      extractionLabel: label || `Extract ${Date.now()}`,
+      sourceRange: [startUuid, endUuid],
+    };
+    appendBranchOperation(this.sessionFilePath, op);
+    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'extract', extractionId: op.extractionId, extractionLabel: op.extractionLabel, sourceRange: op.sourceRange });
   }
 
   getInfo(): AgentSessionInfo {

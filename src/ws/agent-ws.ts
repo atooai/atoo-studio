@@ -96,6 +96,22 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
     case 'send_key':
       agent.sendKey(cmd.key);
       break;
+    // Branch operations (atoo-any)
+    case 'remove_messages':
+      if ('removeMessages' in agent) (agent as any).removeMessages(cmd.eventUuids);
+      break;
+    case 'restore_message':
+      if ('restoreMessage' in agent) (agent as any).restoreMessage(cmd.eventUuid);
+      break;
+    case 'compact_messages':
+      if ('compactMessages' in agent) (agent as any).compactMessages(cmd.eventUuids, cmd.compactedBy);
+      break;
+    case 'fork_conversation':
+      if ('forkConversation' in agent) (agent as any).forkConversation(cmd.afterIndex);
+      break;
+    case 'extract_range':
+      if ('extractRange' in agent) (agent as any).extractRange(cmd.startIndex, cmd.endIndex, cmd.label);
+      break;
     default: {
       // Legacy focus/blur commands — primarily handled via status WS now
       const action = (cmd as any).action;
