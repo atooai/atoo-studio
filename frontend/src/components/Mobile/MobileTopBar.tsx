@@ -3,9 +3,10 @@ import { useStore } from '../../state/store';
 import { useAuthStore } from '../../state/auth-store';
 
 export function MobileTopBar() {
-  const { mobileDrawerOpen, setMobileDrawerOpen, projects } = useStore();
+  const { mobileDrawerOpen, setMobileDrawerOpen, projects, reportedServices, serialRequests } = useStore();
 
   const attention = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'attention').length, 0);
+  const connectionCount = reportedServices.length + serialRequests.length;
 
   return (
     <div className="mobile-topbar">
@@ -27,8 +28,14 @@ export function MobileTopBar() {
         </div>
       </div>
       <div className="mobile-topbar-right">
-        <button className="mobile-topbar-btn" onClick={() => useStore.getState().setModal({ type: 'container-manager' })}>
-          <span>&#x229e;</span>
+        <button
+          className="mobile-topbar-btn"
+          style={{ position: 'relative' }}
+          onClick={() => useStore.getState().setModal({ type: 'forwarded-connections' })}
+          title="Connections"
+        >
+          <span>&#x1f310;</span>
+          {connectionCount > 0 && <span className="mobile-badge">{connectionCount}</span>}
         </button>
         <button className="mobile-topbar-btn" style={{ position: 'relative' }}>
           <span>&#x1f514;</span>

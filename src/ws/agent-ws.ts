@@ -40,10 +40,10 @@ export function handleAgentWsUpgrade(
     const info = agent.getInfo();
     ws.send(JSON.stringify({ type: 'agent_info', ...info }));
 
-    // Replay all existing messages
+    // Replay all existing messages as a single batch
     const messages = agent.getMessages();
-    for (const msg of messages) {
-      ws.send(JSON.stringify(msg));
+    if (messages.length > 0) {
+      ws.send(JSON.stringify({ type: 'history_batch', messages }));
     }
 
     // Handle incoming commands
@@ -73,7 +73,10 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
 
   switch (cmd.action) {
     case 'send_message':
-      agent.sendMessage(cmd.text, cmd.attachments, cmd.agents ? { agents: cmd.agents } : undefined);
+      agent.sendMessage(cmd.text, cmd.attachments, {
+        ...(cmd.agents ? { agents: cmd.agents } : {}),
+        ...(cmd.agentSelectorConfig ? { agentSelectorConfig: cmd.agentSelectorConfig } : {}),
+      });
       break;
     case 'approve':
       agent.approve(cmd.requestId, cmd.updatedInput);
@@ -111,6 +114,12 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
       break;
     case 'extract_range':
       if ('extractRange' in agent) (agent as any).extractRange(cmd.startIndex, cmd.endIndex, cmd.label);
+      break;
+    case 'kill_agent':
+      if ('killAgent' in agent) (agent as any).killAgent(cmd.agentFamily);
+      break;
+    case 'kill_all_agents':
+      if ('killAllAgents' in agent) (agent as any).killAllAgents();
       break;
     default: {
       // Legacy focus/blur commands — primarily handled via status WS now

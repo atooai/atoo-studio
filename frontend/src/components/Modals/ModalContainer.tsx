@@ -18,6 +18,7 @@ import { DatabaseExplorer } from '../Database/DatabaseExplorer';
 import { SessionSwitchModal } from './SessionSwitchModal';
 import { OpenFileModal } from './OpenFileModal';
 import { HelpModal } from './HelpModal';
+import { MobilePreviewModal } from './MobilePreviewModal';
 
 export function ModalContainer() {
   const { modal, setModal } = useStore();
@@ -42,6 +43,7 @@ export function ModalContainer() {
       {modal.type === 'forwarded-connections' && <ForwardedConnectionsModal onClose={close} />}
       {modal.type === 'container-manager' && <ContainerManager onClose={close} />}
       {modal.type === 'database-explorer' && <DatabaseExplorer onClose={close} />}
+      {modal.type === 'mobile-preview' && <MobilePreviewModal onClose={close} />}
       {modal.type === 'session-switch' && <SessionSwitchModal {...modal.props} onClose={close} />}
       {modal.type === 'open-file' && <OpenFileModal requestId={modal.props?.requestId} filePath={modal.props?.filePath} onClose={close} />}
       {modal.type === 'help' && <HelpModal onClose={close} />}

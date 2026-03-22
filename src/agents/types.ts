@@ -176,7 +176,7 @@ export interface Attachment {
 // ═══════════════════════════════════════════════════════
 
 export type AgentCommand =
-  | { action: 'send_message'; text: string; attachments?: Attachment[]; agents?: string[] }
+  | { action: 'send_message'; text: string; attachments?: Attachment[]; agents?: string[]; agentSelectorConfig?: any[] }
   | { action: 'approve'; requestId: string; updatedInput?: any }
   | { action: 'deny'; requestId: string }
   | { action: 'answer_question'; requestId: string; answers: Record<string, string> }
@@ -189,4 +189,6 @@ export type AgentCommand =
   | { action: 'restore_message'; eventUuid: string }
   | { action: 'compact_messages'; eventUuids: string[]; compactedBy: string }
   | { action: 'fork_conversation'; afterIndex: number }
-  | { action: 'extract_range'; startIndex: number; endIndex: number; label?: string };
+  | { action: 'extract_range'; startIndex: number; endIndex: number; label?: string }
+  | { action: 'kill_agent'; agentFamily: string }
+  | { action: 'kill_all_agents' };

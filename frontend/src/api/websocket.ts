@@ -431,7 +431,11 @@ export function connectAgentWs(sessionId: string) {
   ws.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
-      handleAgentMessage(sessionId, msg);
+      if (msg.type === 'history_batch' && Array.isArray(msg.messages)) {
+        handleAgentMessageBatch(sessionId, msg.messages);
+      } else {
+        handleAgentMessage(sessionId, msg);
+      }
     } catch {}
   };
   ws.onclose = () => {
@@ -448,6 +452,111 @@ export function sendAgentCommand(sessionId: string, command: any): boolean {
   return false;
 }
 
+/** Process a batch of replayed messages in a single store update */
+function handleAgentMessageBatch(sessionId: string, messages: any[]) {
+  const store = useStore.getState();
+  const projects = store.projects.map((proj) => {
+    const sessIdx = proj.sessions.findIndex((s) => s.id === sessionId);
+    if (sessIdx === -1) return proj;
+    const sess = { ...proj.sessions[sessIdx], messages: [...proj.sessions[sessIdx].messages] };
+
+    const existingCount = sess.messages.length;
+    let dupCount = 0;
+    let addCount = 0;
+    for (const msg of messages) {
+      // Deduplicate — check both msg.id and rawEventUuid since some messages store rawEventUuid as _eventUuid
+      const isDup = msg.id && sess.messages.some((m) => m._eventUuid === msg.id || (msg.rawEventUuid && m._eventUuid === msg.rawEventUuid));
+      if (isDup) { dupCount++; continue; }
+      addCount++;
+
+      const sidechainMeta: any = {};
+      if (msg._sidechain) {
+        sidechainMeta._sidechain = true;
+        sidechainMeta._parentToolUseId = msg._parentToolUseId;
+        if (msg._agentId) sidechainMeta._agentId = msg._agentId;
+      } else if (msg._parentToolUseId) {
+        sidechainMeta._sidechain = true;
+        sidechainMeta._parentToolUseId = msg._parentToolUseId;
+        if (msg._agentId) sidechainMeta._agentId = msg._agentId;
+      }
+
+      const prevLen = sess.messages.length;
+
+      if (msg.type === 'agent_info') {
+        sess._agentInfo = msg;
+        if (msg.mode) sess.permissionMode = msg.mode;
+        if (msg.model) sess.model = msg.model;
+        if (msg.capabilities) sess._capabilities = msg.capabilities;
+      } else if (msg.type === 'user_message') {
+        sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _attachments: msg.attachments, _agentSelectorConfig: msg.agentSelectorConfig });
+      } else if (msg.type === 'assistant_message') {
+        sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id, _rawJson: msg.rawJson });
+      } else if (msg.type === 'thinking') {
+        sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
+      } else if (msg.type === 'tool_result') {
+        if (msg.isPending) {
+          sess.messages.push({ role: 'tool', content: `${msg.toolName}: running...`, _eventUuid: msg.id, _toolName: msg.toolName, _toolInput: msg.input, _requestId: msg.requestId, _pending: true });
+        } else {
+          const pendingIdx = sess.messages.findIndex((m) => m._pending && m._requestId === msg.requestId);
+          if (pendingIdx >= 0) {
+            sess.messages[pendingIdx] = { ...sess.messages[pendingIdx], content: `${msg.toolName}: ${msg.output.substring(0, 100)}`, _toolOutput: msg.output, _toolInput: sess.messages[pendingIdx]._toolInput || msg.input, _isError: msg.isError, _pending: false };
+          } else {
+            sess.messages.push({ role: 'tool', content: `${msg.toolName}: ${msg.output.substring(0, 100)}`, _eventUuid: msg.id, _toolName: msg.toolName, _toolInput: msg.input, _toolOutput: msg.output, _isError: msg.isError });
+          }
+        }
+      } else if (msg.type === 'system_message') {
+        sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
+      } else if (msg.type === 'status_update') {
+        if (msg.mode) sess.permissionMode = msg.mode;
+        if (msg.model) sess.model = msg.model;
+        if (msg.status === 'active') sess.status = 'active';
+        else if (msg.status === 'attention') sess.status = 'attention';
+        else if (msg.status === 'open') sess.status = 'open';
+      } else if (msg.type === 'context_usage') {
+        sess.contextUsage = { model: msg.model, usedTokens: msg.usedTokens, totalTokens: msg.totalTokens, percent: msg.percent, freePercent: msg.freePercent };
+      } else if (msg.type === 'context_in_progress') {
+        sess.contextInProgress = !!msg.inProgress;
+      } else if (msg.type === 'result') {
+        sess.status = 'open';
+      } else if (msg.type === 'plan_approval') {
+        sess.status = 'attention';
+        sess._pendingControl = msg;
+        sess.messages.push({ role: 'control_request', content: { subtype: 'plan_approval', plan: msg.plan }, _eventUuid: msg.id, _requestId: msg.requestId, _responded: msg.responded });
+      } else if (msg.type === 'tool_request') {
+        if (msg.responded) continue;
+        sess.status = 'attention';
+        sess._pendingControl = msg;
+        sess.messages.push({ role: 'control_request', content: { subtype: msg.toolName === 'AskUserQuestion' ? 'ask_user_question' : 'tool_use', tool_use: { name: msg.toolName, input: msg.input } }, _eventUuid: msg.id, _requestId: msg.requestId, _responded: msg.responded });
+      } else if (msg.type === 'question') {
+        sess.status = 'attention';
+        sess._pendingControl = msg;
+        sess.messages.push({ role: 'control_request', content: { subtype: 'ask_user_question', tool_use: { name: 'AskUserQuestion', input: { questions: msg.questions } } }, _eventUuid: msg.id, _requestId: msg.requestId, _responded: msg.responded });
+      }
+
+      // Tag sidechain metadata
+      if (sidechainMeta._sidechain && sess.messages.length > prevLen) {
+        for (let mi = prevLen; mi < sess.messages.length; mi++) {
+          sess.messages[mi] = { ...sess.messages[mi], ...sidechainMeta };
+        }
+      }
+    }
+
+    console.log(`[history_batch] session=${sessionId} existing=${existingCount} batch=${messages.length} deduped=${dupCount} added=${addCount}`);
+
+    // Update title from first user message
+    if (!sess.title || sess.title === 'New session') {
+      const firstUser = sess.messages.find((m) => m.role === 'user');
+      if (firstUser) {
+        sess.title = firstUser.content.substring(0, 50);
+        api('PATCH', `/api/agent-sessions/${sess.id}/browser-state`, { title: sess.title }).catch(() => {});
+      }
+    }
+
+    return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
+  });
+  useStore.setState({ projects });
+}
+
 function handleAgentMessage(sessionId: string, msg: any) {
   const store = useStore.getState();
   const projects = store.projects.map((proj) => {
@@ -457,8 +566,8 @@ function handleAgentMessage(sessionId: string, msg: any) {
 
     console.log('[agent]', msg.type, JSON.stringify(msg).substring(0, 300));
 
-    // Deduplicate replayed messages on reconnect — skip if this msg.id is already in the session
-    if (msg.id && sess.messages.some((m) => m._eventUuid === msg.id)) return proj;
+    // Deduplicate replayed messages on reconnect — check both msg.id and rawEventUuid
+    if (msg.id && sess.messages.some((m) => m._eventUuid === msg.id || (msg.rawEventUuid && m._eventUuid === msg.rawEventUuid))) return proj;
 
     // Extract sidechain/dispatch metadata if present
     const sidechainMeta: any = {};
@@ -482,9 +591,9 @@ function handleAgentMessage(sessionId: string, msg: any) {
     }
 
     if (msg.type === 'user_message') {
-      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _attachments: msg.attachments });
+      sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _attachments: msg.attachments, _agentSelectorConfig: msg.agentSelectorConfig });
     } else if (msg.type === 'assistant_message') {
-      sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
+      sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id, _rawJson: msg.rawJson });
     } else if (msg.type === 'thinking') {
       sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
     } else if (msg.type === 'plan_approval') {

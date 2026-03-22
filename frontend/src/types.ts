@@ -73,6 +73,8 @@ export interface ChatMessage {
   _responded?: boolean;
   _response?: string;
   _attachments?: Attachment[];
+  _agentSelectorConfig?: any[];
+  _rawJson?: string;
   _sidechain?: boolean;
   _parentToolUseId?: string;
   _agentId?: string;
@@ -107,6 +109,11 @@ export interface ChatAttachment {
   data: string | null;
   text: string | null;
   kind: string | null;
+}
+
+export interface ChatDraft {
+  text: string;
+  selectedAgents?: string[];
 }
 
 // ─── Atoo-any branching types ───

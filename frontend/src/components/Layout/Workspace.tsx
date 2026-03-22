@@ -270,7 +270,7 @@ function ViewToggle({ session, proj }: { session: any; proj: any }) {
   const hasChat = mode === 'chat' || mode === 'terminal+chat' || mode === 'terminal+chatRO';
   const hasTerminal = mode === 'terminal' || mode === 'terminal+chat' || mode === 'terminal+chatRO';
   const chatReadOnly = mode === 'terminal+chatRO';
-  const hasVerbose = mode === 'terminal+chat' || mode === 'terminal+chatRO' || mode === 'chat';
+  const hasVerbose = (mode === 'terminal+chat' || mode === 'terminal+chatRO' || mode === 'chat') && session.agentType !== 'atoo-any';
   const [showDesc, setShowDesc] = React.useState(false);
 
   return (
@@ -311,13 +311,23 @@ function ViewToggle({ session, proj }: { session: any; proj: any }) {
             <span className="svt-filter-icon">📋</span> Description
           </button>
         )}
-        <button
-          className="svt-filter-btn"
-          onClick={() => (window as any).chainSession(session.id)}
-          title="Continue in a new chain link (preserves full context via search)"
-        >
-          <span className="svt-filter-icon">⛓</span> Chain
-        </button>
+        {session.agentType === 'atoo-any' ? (
+          <button
+            className="svt-filter-btn"
+            onClick={() => (window as any).toggleAtooAnyTree?.()}
+            title="Toggle conversation tree minimap"
+          >
+            <span className="svt-filter-icon">🌳</span> Tree
+          </button>
+        ) : (
+          <button
+            className="svt-filter-btn"
+            onClick={() => (window as any).chainSession(session.id)}
+            title="Continue in a new chain link (preserves full context via search)"
+          >
+            <span className="svt-filter-icon">⛓</span> Chain
+          </button>
+        )}
       </div>
       {showDesc && session.metaDescription && (
         <div className="svt-description-panel">

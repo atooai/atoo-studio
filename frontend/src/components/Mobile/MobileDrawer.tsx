@@ -7,6 +7,15 @@ export function MobileDrawer() {
   const { user, logout } = useAuthStore();
 
   const initial = user ? (user.display_name || user.username).charAt(0).toUpperCase() : 'U';
+  const openMobilePreview = () => {
+    const store = useStore.getState();
+    store.setPreviewVisible(true);
+    if (store.previewTabs.length === 0) {
+      store.setPreviewTabs([{ id: 'pv-' + Date.now(), label: 'New tab' }]);
+      store.setPreviewActiveIdx(0);
+    }
+    store.setModal({ type: 'mobile-preview' });
+  };
 
   return (
     <>
@@ -77,12 +86,18 @@ export function MobileDrawer() {
           <div className="mobile-drawer-item" onClick={() => { setMobileDrawerOpen(false); setModal({ type: 'forwarded-connections' }); }}>
             <span className="mobile-drawer-item-icon">&#x1f310;</span> Connections
           </div>
+          <div className="mobile-drawer-item" onClick={() => { setMobileDrawerOpen(false); setModal({ type: 'database-explorer' }); }}>
+            <span className="mobile-drawer-item-icon">&#x1f5c4;</span> Databases
+          </div>
         </div>
 
         {/* Quick actions */}
         <div className="mobile-drawer-section">
           <div className="mobile-drawer-section-title">Quick Actions</div>
-          <div className="mobile-drawer-item" onClick={() => { setMobileDrawerOpen(false); (window as any).togglePreviewPanel?.(); }}>
+          <div className="mobile-drawer-item" onClick={() => {
+            setMobileDrawerOpen(false);
+            openMobilePreview();
+          }}>
             <span className="mobile-drawer-item-icon">&#x2B12;</span> Preview
           </div>
           <div className="mobile-drawer-item mobile-drawer-danger" onClick={() => { setMobileDrawerOpen(false); logout(); }}>

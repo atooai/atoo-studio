@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment, SerialRequest, ReportedService, NiriLayoutState, NiriColumn, NiriWidthMode } from '../types';
+import type { Environment, Project, EditorFile, PreviewTab, ChatAttachment, SerialRequest, ReportedService, NiriLayoutState, NiriColumn, NiriWidthMode, ChatDraft } from '../types';
 import { DEVICE_PRESETS } from '../data/device-presets';
 
 export interface AppState {
@@ -53,6 +53,7 @@ export interface AppState {
 
   // Chat attachments
   chatAttachments: ChatAttachment[];
+  chatDrafts: Record<string, ChatDraft>;
 
   // Per-message view mode toggle: 'md' | 'txt' | 'raw'
   mdToggleState: Record<string, string>;
@@ -140,6 +141,8 @@ export interface AppState {
   addChatAttachment: (a: ChatAttachment) => void;
   removeChatAttachment: (id: string) => void;
   clearChatAttachments: () => void;
+  setChatDraft: (sessionId: string, draft: ChatDraft) => void;
+  clearChatDraft: (sessionId: string) => void;
   setMdToggle: (uuid: string, mode: string) => void;
   setQuestionAnswer: (uuid: string, question: string, value: string) => void;
   setQuestionAnswers: (uuid: string, answers: Record<string, string>) => void;
@@ -215,6 +218,7 @@ export const useStore = create<AppState>((set, get) => ({
   previewIsMobile: false,
   previewHasTouch: false,
   chatAttachments: [],
+  chatDrafts: {},
   mdToggleState: {},
   questionAnswers: {},
   projectViewStates: {},
@@ -372,6 +376,14 @@ export const useStore = create<AppState>((set, get) => ({
     chatAttachments: s.chatAttachments.filter((a) => a.id !== id),
   })),
   clearChatAttachments: () => set({ chatAttachments: [] }),
+  setChatDraft: (sessionId, draft) => set((s) => ({
+    chatDrafts: { ...s.chatDrafts, [sessionId]: draft },
+  })),
+  clearChatDraft: (sessionId) => set((s) => {
+    const next = { ...s.chatDrafts };
+    delete next[sessionId];
+    return { chatDrafts: next };
+  }),
   setMdToggle: (uuid, mode) => set((s) => ({
     mdToggleState: { ...s.mdToggleState, [uuid]: mode },
   })),

@@ -5,6 +5,7 @@
  */
 import { EventEmitter } from 'events';
 import fs from 'fs';
+import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import type {
@@ -193,14 +194,51 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     this.emit('exit');
   }
 
+  /** Kill a specific agent's dispatch process by agent family (e.g. 'claude', 'codex') */
+  killAgent(agentFamily: string): void {
+    for (const [id, dispatch] of this.activeDispatches) {
+      if (dispatch.agentFamily === agentFamily && !dispatch.done) {
+        try {
+          dispatch.watcher.stop();
+          killCliProcess(dispatch.envId);
+        } catch {}
+        dispatch.done = true;
+      }
+    }
+    const allDone = [...this.activeDispatches.values()].every(d => d.done);
+    if (allDone) this.setStatus('open');
+  }
+
+  /** Kill all running agent dispatch processes */
+  killAllAgents(): void {
+    for (const dispatch of this.activeDispatches.values()) {
+      if (!dispatch.done) {
+        try {
+          dispatch.watcher.stop();
+          killCliProcess(dispatch.envId);
+        } catch {}
+        dispatch.done = true;
+      }
+    }
+    this.setStatus('open');
+  }
+
   sendMessage(text: string, attachments?: Attachment[], meta?: Record<string, any>): void {
     if (!text || this.destroyed) return;
 
     const agents: string[] = meta?.agents || ['claude', 'codex'];
 
-    // Create user event
+    // Normalize attachments for storage (base64 + filename)
+    const storedAttachments = attachments?.filter(a => a.data || a.text).map(a => ({
+      media_type: a.media_type,
+      data: a.data || '',
+      name: a.name,
+      text: a.text,
+    }));
+
+    // Create user event (with attachments in our custom format)
     const userUuid = uuidv4();
-    const userEvent: UserEvent = {
+    const userEvent: any = {
       type: 'user',
       uuid: userUuid,
       sessionId: this.sessionUuid,
@@ -209,16 +247,42 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       cwd: this.cwd,
       message: { role: 'user', content: text },
     };
+    if (storedAttachments && storedAttachments.length > 0) {
+      userEvent._attachments = storedAttachments;
+    }
+    if (meta?.agentSelectorConfig) {
+      userEvent._agentSelectorConfig = meta.agentSelectorConfig;
+    }
 
     // Store and persist
     this.events.push(userEvent);
     appendEvent(this.sessionFilePath, userEvent);
 
-    // Emit user message to UI
+    // Emit user message to UI (include attachments and agent config for rendering)
     const userWireMsgs = toWireMessages(this.sessionId, userEvent, this.pendingToolUses);
     for (const msg of userWireMsgs) {
+      if (msg.type === 'user_message') {
+        if (userEvent._attachments) (msg as any).attachments = userEvent._attachments;
+        if (userEvent._agentSelectorConfig) (msg as any).agentSelectorConfig = userEvent._agentSelectorConfig;
+      }
       this.wireMessages.push(msg);
       this.emit('message', msg);
+    }
+
+    // Write attachment files to temp dir for agent dispatch
+    const attachmentPaths = this.writeAttachmentTempFiles(userUuid, storedAttachments);
+
+    // Build per-agent model config from selector
+    const agentModelConfigs: Record<string, { model?: string; reasoning?: string }> = {};
+    if (meta?.agentSelectorConfig) {
+      for (const entry of meta.agentSelectorConfig) {
+        if (entry.enabled && entry.provider) {
+          agentModelConfigs[entry.provider] = {
+            model: entry.model?.id,
+            reasoning: entry.model?.reasoning?.level || undefined,
+          };
+        }
+      }
     }
 
     // Dispatch to each selected agent
@@ -226,8 +290,12 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     const MULTI_AGENT_CONTEXT = '[IMPORTANT CONTEXT: This message was sent to multiple agents simultaneously. All agents are working on this in parallel on the same codebase. Be aware of potential file conflicts. If the user addresses a specific agent with @claude or @codex, only the addressed agent should act on that part. Coordinate by making atomic, self-contained changes.]';
     for (const agentFamily of agents) {
       if (agentFamily === 'claude' || agentFamily === 'codex') {
-        const dispatchMessage = multiAgent ? `${MULTI_AGENT_CONTEXT}\n\n${text}` : text;
-        this.dispatchToAgent(agentFamily, dispatchMessage, userUuid);
+        let dispatchMessage = multiAgent ? `${MULTI_AGENT_CONTEXT}\n\n${text}` : text;
+        if (attachmentPaths.length > 0) {
+          const pathList = attachmentPaths.map(p => `"${p}"`).join(';');
+          dispatchMessage = `You MUST read the following user attachments: ${pathList}\nThe actual user prompt follows from the next line.\n${dispatchMessage}`;
+        }
+        this.dispatchToAgent(agentFamily, dispatchMessage, userUuid, agentModelConfigs[agentFamily]);
       }
     }
   }
@@ -374,6 +442,11 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
           if (event._source) {
             msg._agentId = event._source;
           }
+          // Restore attachments and agent config on user messages
+          if (msg.type === 'user_message') {
+            if ((event as any)._attachments) (msg as any).attachments = (event as any)._attachments;
+            if ((event as any)._agentSelectorConfig) (msg as any).agentSelectorConfig = (event as any)._agentSelectorConfig;
+          }
           this.wireMessages.push(msg);
         }
       }
@@ -389,12 +462,15 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     }
   }
 
-  private dispatchToAgent(family: 'claude' | 'codex', message: string, parentUserUuid: string): void {
+  private dispatchToAgent(family: 'claude' | 'codex', message: string, parentUserUuid: string, modelConfig?: { model?: string; reasoning?: string }): void {
     const dispatchId = `${parentUserUuid}:${family}`;
     const tempUuid = uuidv4();
 
     // Build clean conversation history as SessionEvents for the CLI's session file.
     const cleanEvents = this.buildConversationHistory(family);
+
+    // Inject attachment file paths into historical user messages
+    this.injectHistoryAttachments(cleanEvents);
 
     let tempFilePath: string;
     try {
@@ -418,9 +494,9 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     let envId: string;
     try {
       if (family === 'claude') {
-        ({ envId } = spawnClaudeOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid }));
+        ({ envId } = spawnClaudeOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning }));
       } else {
-        ({ envId } = spawnCodexOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid }));
+        ({ envId } = spawnCodexOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning }));
       }
     } catch (err: any) {
       console.error(`[atoo-any] Failed to spawn ${family}:`, err.message);
@@ -564,6 +640,58 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
         this.emit('message', msg);
       }
     }
+  }
+
+  /**
+   * Walk through history events and inject attachment file paths into user messages.
+   * For each historical user event that had attachments, write temp files and
+   * prepend the user message content with file path instructions.
+   */
+  private injectHistoryAttachments(events: SessionEvent[]): void {
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i] as any;
+      if (ev.type !== 'user' || !ev._attachments?.length) continue;
+
+      const paths = this.writeAttachmentTempFiles(ev.uuid, ev._attachments);
+      if (paths.length === 0) continue;
+
+      const pathList = paths.map((p: string) => `"${p}"`).join(';');
+      const prefix = `You MUST read the following user attachments: ${pathList}\nThe actual user prompt follows from the next line.\n`;
+      const content = ev.message?.content;
+      if (typeof content === 'string') {
+        ev.message.content = prefix + content;
+      }
+    }
+  }
+
+  /**
+   * Write attachment data to temporary files and return their absolute paths.
+   * Files are written to a session-specific temp directory so agents can read them.
+   */
+  private writeAttachmentTempFiles(userUuid: string, attachments?: Array<{ media_type: string; data: string; name?: string; text?: string }>): string[] {
+    if (!attachments || attachments.length === 0) return [];
+
+    const tmpDir = path.join(os.tmpdir(), 'atoo-any-attachments', this.sessionUuid!, userUuid);
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    const paths: string[] = [];
+    for (const att of attachments) {
+      const filename = att.name || `attachment-${paths.length + 1}`;
+      const filePath = path.join(tmpDir, filename);
+
+      if (att.text) {
+        // Text-based file (text, office extract)
+        fs.writeFileSync(filePath, att.text, 'utf-8');
+      } else if (att.data) {
+        // Binary file (image, pdf) — strip data URI prefix if present
+        const base64 = att.data.includes(',') ? att.data.split(',')[1] : att.data;
+        fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+      }
+
+      paths.push(filePath);
+    }
+
+    return paths;
   }
 
   /**

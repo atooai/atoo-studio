@@ -36,6 +36,7 @@ export interface WireAssistantMessage extends WireBase {
   type: 'assistant_message';
   text: string;
   isPartial?: boolean;
+  rawJson?: string;
 }
 
 export interface WireThinking extends WireBase {
@@ -175,6 +176,10 @@ export function toWireMessages(
     const msg = (event as AssistantEvent).message;
     // Skip synthetic messages
     if (msg.model === '<synthetic>') return messages;
+    // Serialize raw event once for RAW mode display
+    let rawJson: string | undefined;
+    try { rawJson = JSON.stringify(event); } catch {}
+    let rawAttached = false;
     if (Array.isArray(msg.content)) {
       for (const block of msg.content) {
         if (block.type === 'thinking' && 'thinking' in block) {
@@ -187,13 +192,15 @@ export function toWireMessages(
           });
         } else if (block.type === 'text') {
           if (hasAnsi(block.text)) continue;
-          messages.push({
+          const wireMsg: WireAssistantMessage = {
             id: uuidv4(),
             sessionId: uiSessionId,
             timestamp: now,
             type: 'assistant_message',
             text: block.text,
-          });
+          };
+          if (!rawAttached && rawJson) { wireMsg.rawJson = rawJson; rawAttached = true; }
+          messages.push(wireMsg);
         } else if (block.type === 'tool_use' && 'id' in block && 'name' in block) {
           pendingToolUses.set(block.id, {
             name: block.name,
@@ -215,13 +222,15 @@ export function toWireMessages(
       }
     } else if (typeof msg.content === 'string') {
       if (!hasAnsi(msg.content)) {
-        messages.push({
+        const wireMsg: WireAssistantMessage = {
           id: uuidv4(),
           sessionId: uiSessionId,
           timestamp: now,
           type: 'assistant_message',
           text: msg.content,
-        });
+        };
+        if (rawJson) wireMsg.rawJson = rawJson;
+        messages.push(wireMsg);
       }
     }
   } else if (event.type === 'control_request') {

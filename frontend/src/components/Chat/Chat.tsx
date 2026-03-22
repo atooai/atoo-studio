@@ -431,13 +431,13 @@ function AttachmentsBar() {
 }
 
 function ChatInputBar({ session, proj }: { session: Session; proj: any }) {
-  const { chatAttachments, clearChatAttachments, addChatAttachment, addToast, updateProject } = useStore();
+  const { chatAttachments, clearChatAttachments, addChatAttachment, addToast, updateProject, isMobileLayout } = useStore();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [historyDraft, setHistoryDraft] = useState('');
   const isAtooAny = session.agentType === 'atoo-any';
-  const [selectedAgents, setSelectedAgents] = useState<string[]>(['claude', 'codex']);
+  const [selectedAgents, setSelectedAgents] = useState<string[]>(['claude']);
   const disabled = !isAtooAny && !!session.contextInProgress;
 
   const sendMessage = async () => {
@@ -467,6 +467,10 @@ function ChatInputBar({ session, proj }: { session: Session; proj: any }) {
   };
 
   const handleKey = (e: React.KeyboardEvent) => {
+    // On mobile: Enter inserts newline, send via button only
+    if (e.key === 'Enter' && isMobileLayout && !e.shiftKey && !e.altKey && !e.ctrlKey) {
+      return; // let default newline behavior happen
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey) {
       e.preventDefault();
       if (!disabled) sendMessage();

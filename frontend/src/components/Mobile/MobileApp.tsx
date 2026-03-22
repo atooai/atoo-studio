@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useStore } from '../../state/store';
 import { MobileTopBar } from './MobileTopBar';
 import { MobileBottomNav } from './MobileBottomNav';
@@ -9,9 +9,21 @@ import { MobileFiles } from './MobileFiles';
 import { MobileGit } from './MobileGit';
 import { MobileAgents } from './MobileAgents';
 import { MobileTerminal } from './MobileTerminal';
+import { PreviewPanel } from '../Preview/Preview';
+import { AskUserOverlay } from '../AskUser/AskUserOverlay';
 
 export function MobileApp() {
-  const { mobileView, mobileDrawerOpen, mobileSheetOpen } = useStore();
+  const { mobileView, mobileDrawerOpen, mobileSheetOpen, projects } = useStore();
+
+  // Find first session with a pending ask_user question
+  const askUserSession = useMemo(() => {
+    for (const p of projects) {
+      for (const s of p.sessions) {
+        if (s.pendingAskUser) return s;
+      }
+    }
+    return null;
+  }, [projects]);
 
   // Swipe gesture: right from left edge opens drawer, left closes it
   useEffect(() => {
@@ -45,10 +57,12 @@ export function MobileApp() {
         <MobileView name="git" active={mobileView === 'git'}><MobileGit /></MobileView>
         <MobileView name="agents" active={mobileView === 'agents'}><MobileAgents /></MobileView>
         <MobileView name="terminal" active={mobileView === 'terminal'}><MobileTerminal /></MobileView>
+        <MobileView name="preview" active={mobileView === 'preview'}><MobilePreview /></MobileView>
       </div>
       <MobileBottomNav />
       <MobileDrawer />
       <MobileSheet />
+      {askUserSession && <AskUserOverlay session={askUserSession} />}
     </div>
   );
 }
@@ -74,6 +88,26 @@ function MobileContextBar() {
           {p.name}
         </div>
       ))}
+    </div>
+  );
+}
+
+function MobilePreview() {
+  const { previewVisible } = useStore();
+
+  if (!previewVisible) {
+    return (
+      <div className="mobile-empty-state" style={{ padding: '40px 20px' }}>
+        <div className="mobile-empty-icon">&#x2B12;</div>
+        <div className="mobile-empty-title">No preview active</div>
+        <div className="mobile-empty-desc">Open a preview from the side menu</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mobile-preview-wrapper">
+      <PreviewPanel />
     </div>
   );
 }

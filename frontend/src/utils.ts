@@ -169,6 +169,22 @@ mdRenderer.code = function({ text, lang }: { text: string; lang?: string }) {
 };
 marked.setOptions({ breaks: true, gfm: true, renderer: mdRenderer });
 
+// Global delegated click handler for code-copy-btn inside rendered markdown
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest?.('.code-copy-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const pre = btn.closest('pre');
+    const code = pre?.querySelector('code')?.textContent || '';
+    navigator.clipboard.writeText(code).then(() => {
+      btn.classList.add('copied');
+      btn.innerHTML = svgCheck;
+      setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = svgCopy; }, 1500);
+    });
+  });
+}
+
 export function renderMd(text: string): string {
   mermaidCounter = 0;
   return marked.parse(text) as string;

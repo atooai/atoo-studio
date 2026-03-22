@@ -14,7 +14,26 @@ interface OneShotOptions {
   message: string;
   /** The parent atoo-any session UUID — used for MCP session identity */
   parentSessionUuid: string;
+  /** Model ID from agent selector (e.g. 'opus-4.6', 'gpt-5.4') */
+  model?: string;
+  /** Reasoning effort level (e.g. 'low', 'medium', 'high') */
+  reasoning?: string;
 }
+
+// Map frontend model IDs to CLI model names
+const CLAUDE_MODEL_MAP: Record<string, string> = {
+  'opus-4.6': 'claude-opus-4-6',
+  'sonnet-4.6': 'claude-sonnet-4-6',
+  'sonnet-4.5': 'claude-sonnet-4-5-20241022',
+  'haiku-4.5': 'claude-haiku-4-5-20251001',
+};
+
+const CODEX_MODEL_MAP: Record<string, string> = {
+  'gpt-5.4': 'gpt-5.4',
+  'gpt-5.4-mini': 'gpt-5.4-mini',
+  'gpt-5.3-codex': 'codex-5.3',
+  'gpt-5.3-codex-spark': 'codex-spark-5.3',
+};
 
 interface SpawnResult {
   envId: string;
@@ -37,6 +56,15 @@ export function spawnClaudeOneShot(options: OneShotOptions): SpawnResult {
     '--append-system-prompt', MCP_SYSTEM_PROMPT,
     '--mcp-config', mcpConfigPath,
   ];
+
+  // Add model and effort if specified
+  if (options.model) {
+    const cliModel = CLAUDE_MODEL_MAP[options.model] || options.model;
+    args.push('--model', cliModel);
+  }
+  if (options.reasoning) {
+    args.push('--effort', options.reasoning);
+  }
 
   const env: Record<string, string | undefined> = { ...process.env };
   delete env.CLAUDECODE; // Prevent nested Claude detection
@@ -83,6 +111,15 @@ export function spawnCodexOneShot(options: OneShotOptions): SpawnResult {
     '--full-auto',
     ...mcpArgs,
   ];
+
+  // Add model and reasoning effort if specified
+  if (options.model) {
+    const cliModel = CODEX_MODEL_MAP[options.model] || options.model;
+    args.push('-m', cliModel);
+  }
+  if (options.reasoning) {
+    args.push('-c', `model_reasoning_effort="${options.reasoning}"`);
+  }
 
   const env: Record<string, string | undefined> = { ...process.env };
 

@@ -1,14 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useStore } from '../../state/store';
-import { api } from '../../api';
+import type { Project, Session } from '../../types';
 
 export function MobileDashboard() {
-  const { activeProjectId, projects, reportedServices } = useStore();
-  const proj = projects.find(p => p.id === activeProjectId);
+  const { projects, reportedServices } = useStore();
 
   const attention = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'attention').length, 0);
   const running = projects.reduce((n, p) => n + p.sessions.filter(s => s.status === 'active').length, 0);
   const alive = projects.reduce((n, p) => n + p.sessions.filter(s => s.status !== 'ended').length, 0);
+
+  // Gather projects that have running (non-ended) agents
+  const projectsWithAgents = projects.filter(p => p.sessions.some(s => s.status !== 'ended'));
 
   return (
     <div className="mobile-dashboard">
@@ -28,8 +30,18 @@ export function MobileDashboard() {
         </div>
       </div>
 
-      {/* Containers */}
-      <ContainerSummary />
+      {/* Running agents grouped by project */}
+      {projectsWithAgents.length > 0 ? (
+        projectsWithAgents.map(p => (
+          <ProjectAgentGroup key={p.id} project={p} />
+        ))
+      ) : (
+        <div className="mobile-empty-state" style={{ padding: '40px 20px' }}>
+          <div className="mobile-empty-icon">&#x1f916;</div>
+          <div className="mobile-empty-title">No running agents</div>
+          <div className="mobile-empty-desc">Launch a new session to get started</div>
+        </div>
+      )}
 
       {/* Services / Proxy Routes */}
       {reportedServices.length > 0 && (
@@ -47,84 +59,52 @@ export function MobileDashboard() {
           ))}
         </>
       )}
-
-      {/* Quick actions */}
-      <div className="mobile-section-hdr">
-        <span className="mobile-section-title">Quick Actions</span>
-      </div>
-      <div className="mobile-quick-actions">
-        <button className="mobile-quick-btn" onClick={() => (window as any).newSession?.()}>
-          + New Agent
-        </button>
-        <button className="mobile-quick-btn" onClick={() => useStore.getState().setModal({ type: 'container-manager' })}>
-          Containers
-        </button>
-        <button className="mobile-quick-btn" onClick={() => useStore.getState().setMobileView('agents')}>
-          View Agents
-        </button>
-      </div>
     </div>
   );
 }
 
-function ContainerSummary() {
-  const [containers, setContainers] = useState<any[]>([]);
-  const [runtimes, setRuntimes] = useState<any>(null);
+function ProjectAgentGroup({ project }: { project: Project }) {
+  const activeSessions = project.sessions.filter(s => s.status !== 'ended');
+  const projectName = project.name || project.path.split('/').pop() || 'Project';
 
-  useEffect(() => {
-    api('GET', '/api/containers/runtimes')
-      .then(data => {
-        setRuntimes(data);
-        const promises: Promise<any>[] = [];
-        if (data.docker?.accessible) promises.push(api('GET', '/api/containers/docker/containers').catch(() => []));
-        if (data.podman?.accessible) promises.push(api('GET', '/api/containers/podman/containers').catch(() => []));
-        if (data.lxc?.accessible) promises.push(api('GET', '/api/containers/lxc/containers').catch(() => []));
-        return Promise.all(promises);
-      })
-      .then(results => {
-        setContainers(results.flat());
-      })
-      .catch(() => {});
-  }, []);
-
-  if (!runtimes || containers.length === 0) return null;
+  const openAgent = (session: Session, idx: number) => {
+    const store = useStore.getState();
+    store.setActiveProjectId(project.id);
+    (window as any).switchToSession?.(project.id, idx);
+    store.setMobileView('agents');
+  };
 
   return (
     <>
       <div className="mobile-section-hdr">
-        <span className="mobile-section-title">Containers</span>
-        <button className="mobile-section-action" onClick={() => useStore.getState().setModal({ type: 'container-manager' })}>View All &#x2192;</button>
+        <span className="mobile-section-title">{projectName}</span>
+        <span className="mobile-section-count">{activeSessions.length}</span>
       </div>
-      {containers.slice(0, 5).map((c: any, i: number) => {
-        const name = c.name || c.Names?.[0]?.replace(/^\//, '') || c.Id?.substring(0, 12) || `container-${i}`;
-        const status = c.status || c.Status || c.State || '';
-        const isRunning = status.toLowerCase().includes('running') || status.toLowerCase().includes('up');
-        const image = c.image || c.Image || '';
-
-        return (
-          <div
-            key={c.Id || c.name || i}
-            className="mobile-list-item"
-            onClick={() => useStore.getState().openMobileSheet('container', {
-              runtime: c._runtime || 'docker',
-              containerId: c.Id || c.name,
-              containerName: name,
-              image,
-              status,
-            })}
-          >
-            <div className="mobile-li-icon" style={{ background: isRunning ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)' }}>
-              &#x1f433;
-            </div>
-            <div className="mobile-li-body">
-              <div className="mobile-li-title">
-                {name} <span className={`mobile-status-dot ${isRunning ? 'green' : 'red'}`}></span>
+      {activeSessions.map((s, i) => (
+        <div
+          key={s.id}
+          className="mobile-agent-card"
+          onClick={() => openAgent(s, i)}
+        >
+          <div className="mobile-agent-card-row">
+            <div className="mobile-agent-card-icon" style={{
+              background: s.status === 'attention' ? 'var(--accent-amber-dim)' : 'var(--accent-green-dim)',
+            }}>&#x1f916;</div>
+            <div className="mobile-agent-card-body">
+              <div className="mobile-agent-card-title">
+                {s.metaName || s.title || 'Session'} <span className={`mobile-status-dot ${s.status === 'active' ? 'green' : s.status === 'attention' ? 'amber' : 'blue'}`}></span>
               </div>
-              <div className="mobile-li-sub">{image} &middot; {status}</div>
+              <div className="mobile-agent-card-desc">{s.lastMessage || 'No messages yet'}</div>
             </div>
+            <span className="mobile-agent-card-chevron">&#x203A;</span>
           </div>
-        );
-      })}
+          <div className="mobile-agent-card-meta">
+            <span className={`mobile-tag tag-${s.status === 'active' ? 'green' : s.status === 'attention' ? 'amber' : 'muted'}`}>{s.status}</span>
+            {s.tags?.map(t => <span key={t} className="mobile-tag tag-blue">{t}</span>)}
+            {s.model && <span className="mobile-tag tag-purple">{s.model}</span>}
+          </div>
+        </div>
+      ))}
     </>
   );
 }

@@ -11,6 +11,8 @@ import { ChatMessageItem } from './ChatMessage';
 import { api } from '../../api';
 import { sendAgentCommand } from '../../api/websocket';
 import type { Session, ChatAttachment, FilteredMessage, AtooFork, AtooBranch, AtooExtraction, MessageStatus } from '../../types';
+import AgentSelectorRaw from './AgentSelector';
+const AgentSelector = AgentSelectorRaw as any;
 
 // ═══════════════════════════════════════════════════════════════
 // AGENT CONFIG
@@ -21,6 +23,7 @@ const AGENT_CONFIG: Record<string, { name: string; color: string; cssClass: stri
   codex: { name: 'Codex', color: '#6B8F71', cssClass: 'codex', enabled: true },
   gemini: { name: 'Gemini', color: '#5B8DEF', cssClass: 'gemini', enabled: false },
 };
+const DEFAULT_SELECTED_AGENTS = ['claude'];
 
 const BRANCH_COLORS = ['#a78bfa', '#f59e0b', '#34d399', '#f472b6', '#60a5fa'];
 const COLUMN_BREAKPOINT = 900;
@@ -49,6 +52,17 @@ const TrashIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="no
 const MapIcon = () => <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="3.5" r="2" stroke="currentColor" strokeWidth="1.2" /><circle cx="4" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.2" /><circle cx="12" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.2" /><circle cx="8" cy="13.5" r="1.5" stroke="currentColor" strokeWidth="1.2" /><path d="M8 5.5V7M6.5 7.5L4.8 8.8M9.5 7.5l1.7 1.3M4.5 11.3L7.2 12.5M11.5 11.3L8.8 12.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity="0.5" /></svg>;
 const AttachIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>;
 
+const StopIcon = () => <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="2" /></svg>;
+
+// Agent provider logos for bubble headers
+const ClaudeLogo = () => <svg width="14" height="14" viewBox="0 0 16 16" fill="#D97757"><path d="m3.127 10.604 3.135-1.76.053-.153-.053-.085H6.11l-.525-.032-1.791-.048-1.554-.065-1.505-.08-.38-.081L0 7.832l.036-.234.32-.214.455.04 1.009.069 1.513.105 1.097.064 1.626.17h.259l.036-.105-.089-.065-.068-.064-1.566-1.062-1.695-1.121-.887-.646-.48-.327-.243-.306-.104-.67.435-.48.585.04.15.04.593.456 1.267.981 1.654 1.218.242.202.097-.068.012-.049-.109-.181-.9-1.626-.96-1.655-.428-.686-.113-.411a2 2 0 0 1-.068-.484l.496-.674L4.446 0l.662.089.279.242.411.94.666 1.48 1.033 2.014.302.597.162.553.06.17h.105v-.097l.085-1.134.157-1.392.154-1.792.052-.504.25-.605.497-.327.387.186.319.456-.045.294-.19 1.23-.37 1.93-.243 1.29h.142l.161-.16.654-.868 1.097-1.372.484-.545.565-.601.363-.287h.686l.505.751-.226.775-.707.895-.585.759-.839 1.13-.524.904.048.072.125-.012 1.897-.403 1.024-.186 1.223-.21.553.258.06.263-.218.536-1.307.323-1.533.307-2.284.54-.028.02.032.04 1.029.098.44.024h1.077l2.005.15.525.346.315.424-.053.323-.807.411-3.631-.863-.872-.218h-.12v.073l.726.71 1.331 1.202 1.667 1.55.084.383-.214.302-.226-.032-1.464-1.101-.565-.497-1.28-1.077h-.084v.113l.295.432 1.557 2.34.08.718-.112.234-.404.141-.444-.08-.911-1.28-.94-1.44-.759-1.291-.093.053-.448 4.821-.21.246-.484.186-.403-.307-.214-.496.214-.98.258-1.28.21-1.016.19-1.263.112-.42-.008-.028-.092.012-.953 1.307-1.448 1.957-1.146 1.227-.274.109-.477-.247.045-.44.266-.39 1.586-2.018.956-1.25.617-.723-.004-.105h-.036l-4.212 2.736-.75.096-.324-.302.04-.496.154-.162 1.267-.871z" /></svg>;
+const CodexLogo = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="#10a37f"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" /></svg>;
+const GeminiLogo = () => <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M16 8.016A8.522 8.522 0 008.016 16h-.032A8.521 8.521 0 000 8.016v-.032A8.521 8.521 0 007.984 0h.032A8.522 8.522 0 0016 7.984v.032z" fill="url(#glogo)" /><defs><radialGradient id="glogo" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(16.1326 5.4553 -43.70045 129.2322 1.588 6.503)"><stop offset=".067" stopColor="#9168C0" /><stop offset=".343" stopColor="#5684D1" /><stop offset=".672" stopColor="#1BA1E3" /></radialGradient></defs></svg>;
+const AGENT_LOGOS: Record<string, () => JSX.Element> = { claude: ClaudeLogo, codex: CodexLogo, gemini: GeminiLogo };
+
+// Reasoning label names per provider
+const REASONING_NAMES: Record<string, string> = { claude: 'Effort', codex: 'Reasoning', gemini: 'Thinking' };
+
 // ═══════════════════════════════════════════════════════════════
 // DATA MODEL — transforms flat FilteredMessage[] to MsgBlocks
 // ═══════════════════════════════════════════════════════════════
@@ -68,11 +82,19 @@ interface AgentMessage {
   _original?: FilteredMessage;
 }
 
+interface AgentSelectorEntry {
+  provider: string;
+  providerLabel: string;
+  enabled: boolean;
+  model: { id: string; name: string; contextWindow: string; reasoning: { level: string; index: number; available: string[] } | null };
+}
+
 interface AgentResponse {
   agentName: string;
   agentColor: string;
   agentClass: string;
   messages: AgentMessage[];
+  selectorConfig?: AgentSelectorEntry;
 }
 
 interface MsgBlock {
@@ -105,6 +127,14 @@ function buildMsgBlocks(filtered: FilteredMessage[]): MsgBlock[] {
     const responses: Record<string, AgentResponse> = {};
     const triggeredAgents: string[] = [];
 
+    // Build a lookup of agent selector configs by provider
+    const selectorConfigs: Record<string, AgentSelectorEntry> = {};
+    if (userMsg._agentSelectorConfig) {
+      for (const entry of userMsg._agentSelectorConfig) {
+        if (entry.enabled) selectorConfigs[entry.provider] = entry;
+      }
+    }
+
     for (const [dispatchId, msgs] of dispatchGroups) {
       if (!dispatchId.startsWith(userUuid + ':')) continue;
       const agentKey = dispatchId.split(':').pop() || 'claude';
@@ -117,7 +147,24 @@ function buildMsgBlocks(filtered: FilteredMessage[]): MsgBlock[] {
         agentColor: cfg.color,
         agentClass: cfg.cssClass,
         messages: msgs.map(m => mapToAgentMessage(m)),
+        selectorConfig: selectorConfigs[agentKey],
       };
+    }
+
+    // Pre-create placeholders for agents from selector config that have no responses yet
+    for (const [provider, entry] of Object.entries(selectorConfigs)) {
+      if (!responses[provider]) {
+        const cfg = AGENT_CONFIG[provider];
+        if (!cfg) continue;
+        triggeredAgents.push(provider);
+        responses[provider] = {
+          agentName: cfg.name,
+          agentColor: cfg.color,
+          agentClass: cfg.cssClass,
+          messages: [],
+          selectorConfig: entry,
+        };
+      }
     }
 
     // Sort agent keys: claude, codex, gemini
@@ -160,6 +207,7 @@ function mapToAgentMessage(m: FilteredMessage): AgentMessage {
     id: m._eventUuid || '',
     type: 'assistant',
     content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+    rawContent: m._rawJson || null,
     _original: m,
   };
 }
@@ -251,7 +299,7 @@ function AsstMsg({ msg }: { msg: AgentMessage }) {
   );
 }
 
-function AgentGroup({ agent, isCol }: { agent: AgentResponse; isCol: boolean }) {
+function AgentGroup({ agent, isCol, isActive, sessionId }: { agent: AgentResponse; isCol: boolean; isActive?: boolean; sessionId?: string }) {
   const [verbose, setVerbose] = useState(false);
   const agentKey = Object.entries(AGENT_CONFIG).find(([, c]) => c.name === agent.agentName)?.[0] || '';
 
@@ -268,20 +316,51 @@ function AgentGroup({ agent, isCol }: { agent: AgentResponse; isCol: boolean }) 
   }
   if (meta.length) segs.push({ t: 'm', items: meta });
 
+  const Logo = AGENT_LOGOS[agentKey];
+  const cfg = agent.selectorConfig;
+  const reasoningLabel = cfg?.model?.reasoning
+    ? `${REASONING_NAMES[agentKey] || 'Reasoning'}: ${cfg.model.reasoning.level}`
+    : null;
+
+  const handleStop = useCallback(() => {
+    if (sessionId && agentKey) {
+      sendAgentCommand(sessionId, { action: 'kill_agent', agentFamily: agentKey });
+    }
+  }, [sessionId, agentKey]);
+
   return (
     <div className={`aa-agent-group ${agent.agentClass}`}>
       <div className="aa-agent-group-header">
-        <div className="aa-agent-group-label">
-          <div className="aa-agent-dot" style={{ background: agent.agentColor }} />
-          <span className="aa-agent-name" style={{ color: agent.agentColor }}>{agent.agentName}</span>
+        <div className="aa-agent-group-pill" style={{ borderColor: agent.agentColor + '40' }}>
+          {Logo && <Logo />}
+          <span className="aa-agent-pill-model" style={{ color: agent.agentColor }}>
+            {cfg?.model?.name || agent.agentName}
+          </span>
+          {reasoningLabel && (
+            <span className="aa-agent-pill-reasoning" title={reasoningLabel} style={{ background: agent.agentColor + '18', color: agent.agentColor }}>
+              {cfg!.model!.reasoning!.level}
+            </span>
+          )}
         </div>
-        <button
-          onClick={() => setVerbose(!verbose)}
-          className={`aa-verbose-btn ${verbose ? 'active' : ''}`}
-          style={verbose ? { borderColor: agent.agentColor + '40', background: agent.agentColor + '12', color: agent.agentColor } : undefined}
-        >
-          {verbose ? 'verbose' : 'compact'}
-        </button>
+        <div className="aa-agent-header-actions">
+          {isActive && (
+            <button
+              onClick={handleStop}
+              className="aa-stop-btn"
+              title="Stop this agent"
+              style={{ color: agent.agentColor }}
+            >
+              <StopIcon /> Stop
+            </button>
+          )}
+          <button
+            onClick={() => setVerbose(!verbose)}
+            className={`aa-verbose-btn ${verbose ? 'active' : ''}`}
+            style={verbose ? { borderColor: agent.agentColor + '40', background: agent.agentColor + '12', color: agent.agentColor } : undefined}
+          >
+            {verbose ? 'verbose' : 'compact'}
+          </button>
+        </div>
       </div>
       {segs.map((s, i) => {
         if (s.t === 'm') {
@@ -312,8 +391,12 @@ function AgentGroup({ agent, isCol }: { agent: AgentResponse; isCol: boolean }) 
         if (s.t === 'a') return <AsstMsg key={i} msg={s.msg} />;
         return null;
       })}
-      {agent.messages.length === 0 && (
-        <div style={{ padding: '8px 0', color: 'var(--text-muted)', fontSize: 12 }}>Working...</div>
+      {isActive && (
+        <div className="aa-agent-working" style={{ '--agent-color': agent.agentColor } as React.CSSProperties}>
+          <span className="aa-working-dot" />
+          <span className="aa-working-dot" />
+          <span className="aa-working-dot" />
+        </div>
       )}
     </div>
   );
@@ -588,10 +671,29 @@ function TreeMinimap({ blocks, forks, extractions, open, onToggle, onSwitchBranc
 
 function UserMessage({ msg }: { msg: FilteredMessage }) {
   const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+  const attachments = msg._attachments;
   return (
     <div className="aa-user-msg">
       <div className="aa-user-msg-bubble">
         {content}
+        {attachments && attachments.length > 0 && (
+          <div className="aa-user-attachments">
+            {attachments.map((att, i) => {
+              const isImage = att.media_type?.startsWith('image/');
+              if (isImage && att.data) {
+                const src = att.data.includes(',') ? att.data : `data:${att.media_type};base64,${att.data}`;
+                return <img key={i} className="aa-user-attach-img" src={src} alt={att.name || 'attachment'} />;
+              }
+              const icon = getAttachIcon(att.kind || 'text');
+              return (
+                <div key={i} className="aa-user-attach-chip">
+                  <span className="aa-user-attach-icon">{icon}</span>
+                  <span className="aa-user-attach-name">{att.name || 'file'}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -601,7 +703,7 @@ function UserMessage({ msg }: { msg: FilteredMessage }) {
 // MESSAGE BLOCK (user msg + responses)
 // ═══════════════════════════════════════════════════════════════
 
-function MsgBlockView({ block, vw }: { block: MsgBlock; vw: number }) {
+function MsgBlockView({ block, vw, isActive, sessionId }: { block: MsgBlock; vw: number; isActive?: boolean; sessionId?: string }) {
   const [layouts, setLayouts] = useState<Record<string, string>>({});
   const re = Object.entries(block.responses);
   const multi = re.length > 1;
@@ -611,17 +713,13 @@ function MsgBlockView({ block, vw }: { block: MsgBlock; vw: number }) {
   return (
     <div className="aa-msg-block">
       <UserMessage msg={block.userMessage} />
-      <div className="aa-msg-agents-bar">
-        <div className="aa-msg-agents-tags">
-          {block.triggeredAgents.map(a => {
-            const c = AGENT_CONFIG[a];
-            return c ? <span key={a} className={`aa-agent-tag ${c.cssClass}`}>{c.name}</span> : null;
-          })}
+      {multi && (
+        <div className="aa-msg-agents-bar">
+          <LayoutToggle layout={layout} onChange={l => setLayouts(p => ({ ...p, [block.id]: l }))} />
         </div>
-        {multi && <LayoutToggle layout={layout} onChange={l => setLayouts(p => ({ ...p, [block.id]: l }))} />}
-      </div>
+      )}
       <div className={`aa-responses ${isCol ? 'column' : 'row'}`}>
-        {re.map(([k, a]) => <AgentGroup key={k} agent={a} isCol={isCol} />)}
+        {re.map(([k, a]) => <AgentGroup key={k} agent={a} isCol={isCol} isActive={isActive} sessionId={sessionId} />)}
       </div>
     </div>
   );
@@ -632,19 +730,41 @@ function MsgBlockView({ block, vw }: { block: MsgBlock; vw: number }) {
 // ═══════════════════════════════════════════════════════════════
 
 function AtooAnyInputBar({ session, proj }: { session: Session; proj: any }) {
-  const { chatAttachments, clearChatAttachments, addChatAttachment, addToast } = useStore();
+  const {
+    chatAttachments, clearChatAttachments, addChatAttachment, addToast, isMobileLayout,
+    chatDrafts, setChatDraft, clearChatDraft,
+  } = useStore();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const agentSelectorRef = useRef<any>(null);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [historyDraft, setHistoryDraft] = useState('');
-  const [selectedAgents, setSelectedAgents] = useState<string[]>(['claude', 'codex']);
+  const enabledAgents = Object.keys(AGENT_CONFIG).filter(k => AGENT_CONFIG[k].enabled);
+  const defaultSelectedAgents = DEFAULT_SELECTED_AGENTS.filter(agent => enabledAgents.includes(agent));
+  const draft = chatDrafts[session.id] || { text: '', selectedAgents: defaultSelectedAgents };
+  const selectedAgents = draft.selectedAgents?.length ? draft.selectedAgents : defaultSelectedAgents;
+
+  const handleAgentSelectorChange = useCallback((config: any[]) => {
+    const agents = config
+      .filter((c: any) => c.enabled && c.provider !== 'gemini')
+      .map((c: any) => c.provider);
+    const deduped = [...new Set(agents)];
+    setChatDraft(session.id, { text: draft.text, selectedAgents: deduped.length ? deduped : defaultSelectedAgents });
+  }, [session.id, draft.text, defaultSelectedAgents, setChatDraft]);
+
+  useEffect(() => {
+    if (inputRef.current && inputRef.current.value !== draft.text) {
+      inputRef.current.value = draft.text;
+    }
+  }, [draft.text]);
 
   const sendMessage = async () => {
-    const text = inputRef.current?.value.trim();
+    const text = (inputRef.current?.value ?? draft.text).trim();
     if (!text || !proj) return;
-    inputRef.current!.value = '';
+    if (inputRef.current) inputRef.current.value = '';
     setHistoryIndex(-1);
     setHistoryDraft('');
+    clearChatDraft(session.id);
 
     const attachments = chatAttachments
       .filter(a => a.data || a.text)
@@ -656,12 +776,19 @@ function AtooAnyInputBar({ session, proj }: { session: Session; proj: any }) {
       });
     clearChatAttachments();
 
+    // Capture full agent selector config for pre-rendering bubbles
+    const agentSelectorConfig = agentSelectorRef.current?.getConfig?.() || null;
     const cmd: any = { action: 'send_message', text, attachments: attachments.length ? attachments : undefined };
     if (selectedAgents.length > 0) cmd.agents = selectedAgents;
+    if (agentSelectorConfig) cmd.agentSelectorConfig = agentSelectorConfig;
     sendAgentCommand(session.id, cmd);
   };
 
   const handleKey = (e: React.KeyboardEvent) => {
+    // On mobile: Enter inserts newline, send via button only
+    if (e.key === 'Enter' && isMobileLayout && !e.shiftKey && !e.altKey && !e.ctrlKey) {
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey) {
       e.preventDefault();
       sendMessage();
@@ -675,17 +802,22 @@ function AtooAnyInputBar({ session, proj }: { session: Session; proj: any }) {
       const newIdx = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
       if (historyIndex === -1) setHistoryDraft(input.value);
       setHistoryIndex(newIdx);
-      input.value = history[newIdx]?.content || '';
+      const nextText = history[newIdx]?.content || '';
+      input.value = nextText;
+      setChatDraft(session.id, { text: nextText, selectedAgents });
       input.setSelectionRange(0, 0);
     } else if (e.key === 'ArrowDown' && !e.shiftKey && historyIndex !== -1 && input.selectionStart === input.value.length) {
       e.preventDefault();
       if (historyIndex < history.length - 1) {
         const newIdx = historyIndex + 1;
         setHistoryIndex(newIdx);
-        input.value = history[newIdx]?.content || '';
+        const nextText = history[newIdx]?.content || '';
+        input.value = nextText;
+        setChatDraft(session.id, { text: nextText, selectedAgents });
       } else {
         setHistoryIndex(-1);
         input.value = historyDraft;
+        setChatDraft(session.id, { text: historyDraft, selectedAgents });
       }
       input.setSelectionRange(input.value.length, input.value.length);
     }
@@ -752,58 +884,40 @@ function AtooAnyInputBar({ session, proj }: { session: Session; proj: any }) {
     }
   };
 
-  const toggleAgent = (agent: string) => {
-    setSelectedAgents(prev => {
-      if (prev.includes(agent)) {
-        if (prev.length <= 1) return prev;
-        return prev.filter(a => a !== agent);
-      }
-      return [...prev, agent];
-    });
-  };
-
-  const allSelected = selectedAgents.length === Object.keys(AGENT_CONFIG).filter(k => AGENT_CONFIG[k].enabled).length;
-
   return (
     <div className="aa-input-bar-wrapper">
       <AttachmentsBar />
       <div className="aa-input-bar-inner">
-        <button className="aa-attach-btn" onClick={() => fileInputRef.current?.click()} title="Attach file"><AttachIcon /></button>
-        <input type="file" ref={fileInputRef} multiple style={{ display: 'none' }} onChange={(e) => handleFileAttach(e.target.files)} />
-        <textarea
-          className="aa-input-field"
-          ref={inputRef}
-          placeholder="Message your agents..."
-          onKeyDown={handleKey}
-          onPaste={handlePaste}
-          rows={1}
-          autoComplete="off"
-          data-lpignore="true"
-          data-1p-ignore="true"
-          data-bwignore="true"
-          data-form-type="other"
-        />
+        <div className="aa-input-row">
+          <button className="aa-attach-btn" onClick={() => fileInputRef.current?.click()} title="Attach file"><AttachIcon /></button>
+          <input type="file" ref={fileInputRef} multiple style={{ display: 'none' }} onChange={(e) => handleFileAttach(e.target.files)} />
+          <textarea
+            className="aa-input-field"
+            ref={inputRef}
+            placeholder="Message your agents..."
+            defaultValue={draft.text}
+            onChange={(e) => setChatDraft(session.id, { text: e.target.value, selectedAgents })}
+            onKeyDown={handleKey}
+            onPaste={handlePaste}
+            rows={1}
+            autoComplete="off"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+          />
+          <button className="aa-send-btn" onClick={sendMessage} title="Send message">↑</button>
+        </div>
         <div className="aa-input-send-btns">
-          {Object.entries(AGENT_CONFIG).map(([k, cfg]) => (
-            <button
-              key={k}
-              className={`aa-input-agent-btn ${cfg.cssClass} ${selectedAgents.includes(k) ? 'active' : ''}`}
-              onClick={() => cfg.enabled ? toggleAgent(k) : undefined}
-              disabled={!cfg.enabled}
-              title={cfg.enabled ? `Send to ${cfg.name}` : `${cfg.name} (coming soon)`}
-            >
-              {cfg.name}
-            </button>
-          ))}
-          <button
-            className={`aa-input-agent-btn all ${allSelected ? 'active' : ''}`}
-            onClick={() => {
-              const enabled = Object.keys(AGENT_CONFIG).filter(k => AGENT_CONFIG[k].enabled);
-              setSelectedAgents(allSelected ? [enabled[0]] : enabled);
-            }}
-          >
-            All
-          </button>
+          <AgentSelector
+            ref={agentSelectorRef}
+            dark={true}
+            initialConfig={[
+              { provider: 'claude', removable: false, enabled: true, selectedModel: 'opus-4.6', reasoningIndex: 0 },
+              { provider: 'codex', removable: false, enabled: false, selectedModel: 'gpt-5.4', reasoningIndex: 0 },
+            ]}
+            onChange={handleAgentSelectorChange}
+          />
         </div>
       </div>
     </div>
@@ -842,7 +956,32 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
   const [rangeStart, setRangeStart] = useState<number | null>(null);
   const [rangeEnd, setRangeEnd] = useState<number | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // Expose tree toggle for the toolbar
+  useEffect(() => {
+    (window as any).toggleAtooAnyTree = () => setMapOpen(o => !o);
+    return () => { delete (window as any).toggleAtooAnyTree; };
+  }, []);
+
+  // ESC kills all running agents
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && session.status === 'active') {
+        sendAgentCommand(session.id, { action: 'kill_all_agents' });
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [session.id, session.status]);
+
+  // Scroll to bottom when switching to this session
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'auto' });
+    });
+  }, [session.id]);
 
   useEffect(() => {
     const h = () => setVw(window.innerWidth);
@@ -970,31 +1109,6 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
 
   return (
     <div className="aa-chat">
-      {/* Header */}
-      <div className="aa-header">
-        <div className="aa-header-left">
-          <div className="aa-header-logo">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2L14 6v4l-6 4-6-4V6l6-4z" stroke="white" strokeWidth="1.3" fill="none" /><circle cx="8" cy="8" r="2" fill="white" opacity="0.8" /></svg>
-          </div>
-          <div>
-            <div className="aa-header-title">Agent Chat</div>
-            <div className="aa-header-agents">
-              {Object.entries(AGENT_CONFIG).map(([k, c]) => (
-                <span key={k} className="aa-header-agent-dot">
-                  <span className="aa-header-agent-dot-circle" style={{ background: c.color, opacity: c.enabled ? 1 : 0.3 }} />
-                  {c.name}{!c.enabled && ' (soon)'}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="aa-header-right">
-          {forks.length > 0 && <span className="aa-header-stat"><ForkIconSvg /> {forks.length}</span>}
-          {extractions.length > 0 && <span className="aa-header-stat dim"><ExtractIcon /> {extractions.length}</span>}
-          <button className={`aa-tree-btn ${mapOpen ? 'active' : ''}`} onClick={() => setMapOpen(o => !o)}><MapIcon /> Tree</button>
-        </div>
-      </div>
-
       {/* Tree minimap */}
       <TreeMinimap
         blocks={blocks}
@@ -1010,10 +1124,13 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
       <Virtuoso
         ref={virtuosoRef}
         className="aa-chat-area"
-        style={{ paddingBottom: 80 }}
         totalCount={blocks.length}
         overscan={10}
-        followOutput="smooth"
+        initialTopMostItemIndex={blocks.length > 0 ? blocks.length - 1 : 0}
+        followOutput={(isAtBottom) => isAtBottom ? 'smooth' : false}
+        atBottomStateChange={setIsAtBottom}
+        alignToBottom
+        components={{ Footer: () => <div style={{ height: 140 }} /> }}
         itemContent={(index) => {
           const block = blocks[index];
           const fork = forkMap[index + 1];
@@ -1041,7 +1158,7 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
               {block.status === 'visible' && (
                 <>
                   {block.contextDrift && <ContextDriftBadge />}
-                  <MsgBlockView block={block} vw={vw} />
+                  <MsgBlockView block={block} vw={vw} isActive={session.status === 'active' && index === blocks.length - 1} sessionId={session.id} />
                 </>
               )}
 
