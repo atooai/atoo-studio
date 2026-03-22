@@ -21,7 +21,7 @@ const AgentSelector = AgentSelectorRaw as any;
 const AGENT_CONFIG: Record<string, { name: string; color: string; cssClass: string; enabled: boolean }> = {
   claude: { name: 'Claude', color: '#D4845A', cssClass: 'claude', enabled: true },
   codex: { name: 'Codex', color: '#6B8F71', cssClass: 'codex', enabled: true },
-  gemini: { name: 'Gemini', color: '#5B8DEF', cssClass: 'gemini', enabled: false },
+  gemini: { name: 'Gemini', color: '#5B8DEF', cssClass: 'gemini', enabled: true },
 };
 const DEFAULT_SELECTED_AGENTS = ['claude'];
 
@@ -127,38 +127,54 @@ function buildMsgBlocks(filtered: FilteredMessage[]): MsgBlock[] {
     const responses: Record<string, AgentResponse> = {};
     const triggeredAgents: string[] = [];
 
-    // Build a lookup of agent selector configs by provider
+    // Build a lookup of agent selector configs — keyed by compound key (family:modelId)
+    // when there are multiple enabled entries of the same family, otherwise by family.
     const selectorConfigs: Record<string, AgentSelectorEntry> = {};
     if (userMsg._agentSelectorConfig) {
+      const familyCounts: Record<string, number> = {};
       for (const entry of userMsg._agentSelectorConfig) {
-        if (entry.enabled) selectorConfigs[entry.provider] = entry;
+        if (entry.enabled) familyCounts[entry.provider] = (familyCounts[entry.provider] || 0) + 1;
+      }
+      for (const entry of userMsg._agentSelectorConfig) {
+        if (!entry.enabled) continue;
+        const key = familyCounts[entry.provider] > 1 && entry.model?.id
+          ? `${entry.provider}:${entry.model.id}`
+          : entry.provider;
+        selectorConfigs[key] = entry;
       }
     }
 
     for (const [dispatchId, msgs] of dispatchGroups) {
       if (!dispatchId.startsWith(userUuid + ':')) continue;
-      const agentKey = dispatchId.split(':').pop() || 'claude';
-      const cfg = AGENT_CONFIG[agentKey];
+      // Extract agent key: everything after the UUID prefix (supports "claude" and "claude:haiku-4.5")
+      const agentKey = dispatchId.slice(userUuid.length + 1);
+      // Resolve family from the key (first segment before ':' if compound)
+      const family = agentKey.includes(':') ? agentKey.split(':')[0] : agentKey;
+      const cfg = AGENT_CONFIG[family];
       if (!cfg) continue;
+
+      // Use selector config to get display name for compound keys
+      const selCfg = selectorConfigs[agentKey] || selectorConfigs[family];
 
       triggeredAgents.push(agentKey);
       responses[agentKey] = {
-        agentName: cfg.name,
+        agentName: selCfg?.model?.name || cfg.name,
         agentColor: cfg.color,
         agentClass: cfg.cssClass,
         messages: msgs.map(m => mapToAgentMessage(m)),
-        selectorConfig: selectorConfigs[agentKey],
+        selectorConfig: selCfg,
       };
     }
 
     // Pre-create placeholders for agents from selector config that have no responses yet
-    for (const [provider, entry] of Object.entries(selectorConfigs)) {
-      if (!responses[provider]) {
-        const cfg = AGENT_CONFIG[provider];
+    for (const [key, entry] of Object.entries(selectorConfigs)) {
+      if (!responses[key]) {
+        const family = key.includes(':') ? key.split(':')[0] : key;
+        const cfg = AGENT_CONFIG[family];
         if (!cfg) continue;
-        triggeredAgents.push(provider);
-        responses[provider] = {
-          agentName: cfg.name,
+        triggeredAgents.push(key);
+        responses[key] = {
+          agentName: entry.model?.name || cfg.name,
           agentColor: cfg.color,
           agentClass: cfg.cssClass,
           messages: [],
@@ -167,8 +183,26 @@ function buildMsgBlocks(filtered: FilteredMessage[]): MsgBlock[] {
       }
     }
 
-    // Sort agent keys: claude, codex, gemini
-    triggeredAgents.sort();
+    // Sort agent keys by agent selector config order (preserves user's chosen ordering)
+    if (userMsg._agentSelectorConfig) {
+      // Build ordered keys matching selectorConfigs key generation
+      const familyCounts: Record<string, number> = {};
+      for (const c of userMsg._agentSelectorConfig) {
+        if (c.enabled) familyCounts[c.provider] = (familyCounts[c.provider] || 0) + 1;
+      }
+      const configOrder = userMsg._agentSelectorConfig
+        .filter((c: any) => c.enabled)
+        .map((c: any) => familyCounts[c.provider] > 1 && c.model?.id
+          ? `${c.provider}:${c.model.id}`
+          : c.provider);
+      triggeredAgents.sort((a: string, b: string) => {
+        const ai = configOrder.indexOf(a);
+        const bi = configOrder.indexOf(b);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      });
+    } else {
+      triggeredAgents.sort();
+    }
 
     return {
       id: userMsg._eventUuid || `msg-${Math.random()}`,
@@ -316,10 +350,11 @@ function AgentGroup({ agent, isCol, isActive, sessionId }: { agent: AgentRespons
   }
   if (meta.length) segs.push({ t: 'm', items: meta });
 
-  const Logo = AGENT_LOGOS[agentKey];
+  const agentFamily = agentKey.includes(':') ? agentKey.split(':')[0] : agentKey;
+  const Logo = AGENT_LOGOS[agentFamily];
   const cfg = agent.selectorConfig;
   const reasoningLabel = cfg?.model?.reasoning
-    ? `${REASONING_NAMES[agentKey] || 'Reasoning'}: ${cfg.model.reasoning.level}`
+    ? `${REASONING_NAMES[agentFamily] || 'Reasoning'}: ${cfg.model.reasoning.level}`
     : null;
 
   const handleStop = useCallback(() => {
@@ -419,7 +454,7 @@ function RemovedBlock({ block, onRestore }: { block: MsgBlock; onRestore: (id: s
       {exp && (
         <div className="aa-removed-body">
           <div className="aa-removed-content">"{block.userMessage.content}"</div>
-          <div className="aa-removed-agents">{block.triggeredAgents.map(a => AGENT_CONFIG[a]?.name).filter(Boolean).join(', ')} responded</div>
+          <div className="aa-removed-agents">{block.triggeredAgents.map(a => { const f = a.includes(':') ? a.split(':')[0] : a; return AGENT_CONFIG[f]?.name; }).filter(Boolean).join(', ')} responded</div>
         </div>
       )}
     </div>
@@ -703,7 +738,7 @@ function UserMessage({ msg }: { msg: FilteredMessage }) {
 // MESSAGE BLOCK (user msg + responses)
 // ═══════════════════════════════════════════════════════════════
 
-function MsgBlockView({ block, vw, isActive, sessionId }: { block: MsgBlock; vw: number; isActive?: boolean; sessionId?: string }) {
+function MsgBlockView({ block, vw, sessionId, runningDispatches }: { block: MsgBlock; vw: number; sessionId?: string; runningDispatches?: string[] }) {
   const [layouts, setLayouts] = useState<Record<string, string>>({});
   const re = Object.entries(block.responses);
   const multi = re.length > 1;
@@ -719,7 +754,12 @@ function MsgBlockView({ block, vw, isActive, sessionId }: { block: MsgBlock; vw:
         </div>
       )}
       <div className={`aa-responses ${isCol ? 'column' : 'row'}`}>
-        {re.map(([k, a]) => <AgentGroup key={k} agent={a} isCol={isCol} isActive={isActive} sessionId={sessionId} />)}
+        {re.map(([k, a]) => {
+          // Simple: is this agent's process still running?
+          const dispatchId = `${block.userMessage._eventUuid}:${k}`;
+          const isRunning = runningDispatches?.includes(dispatchId) ?? false;
+          return <AgentGroup key={k} agent={a} isCol={isCol} isActive={isRunning} sessionId={sessionId} />;
+        })}
       </div>
     </div>
   );
@@ -746,7 +786,7 @@ function AtooAnyInputBar({ session, proj }: { session: Session; proj: any }) {
 
   const handleAgentSelectorChange = useCallback((config: any[]) => {
     const agents = config
-      .filter((c: any) => c.enabled && c.provider !== 'gemini')
+      .filter((c: any) => c.enabled)
       .map((c: any) => c.provider);
     const deduped = [...new Set(agents)];
     setChatDraft(session.id, { text: draft.text, selectedAgents: deduped.length ? deduped : defaultSelectedAgents });
@@ -764,7 +804,8 @@ function AtooAnyInputBar({ session, proj }: { session: Session; proj: any }) {
     if (inputRef.current) inputRef.current.value = '';
     setHistoryIndex(-1);
     setHistoryDraft('');
-    clearChatDraft(session.id);
+    // Clear the text but preserve selectedAgents so agent selection persists between messages
+    setChatDraft(session.id, { text: '', selectedAgents: draft.selectedAgents });
 
     const attachments = chatAttachments
       .filter(a => a.data || a.text)
@@ -915,6 +956,7 @@ function AtooAnyInputBar({ session, proj }: { session: Session; proj: any }) {
             initialConfig={[
               { provider: 'claude', removable: false, enabled: true, selectedModel: 'opus-4.6', reasoningIndex: 0 },
               { provider: 'codex', removable: false, enabled: false, selectedModel: 'gpt-5.4', reasoningIndex: 0 },
+              { provider: 'gemini', removable: false, enabled: false, selectedModel: 'gemini-3.1-pro', reasoningIndex: 0 },
             ]}
             onChange={handleAgentSelectorChange}
           />
@@ -1158,7 +1200,7 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
               {block.status === 'visible' && (
                 <>
                   {block.contextDrift && <ContextDriftBadge />}
-                  <MsgBlockView block={block} vw={vw} isActive={session.status === 'active' && index === blocks.length - 1} sessionId={session.id} />
+                  <MsgBlockView block={block} vw={vw} sessionId={session.id} runningDispatches={session._runningDispatches} />
                 </>
               )}
 

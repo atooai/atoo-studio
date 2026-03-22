@@ -37,6 +37,7 @@ export interface Session {
   tags?: string[];
   contextUsage?: ContextUsage;
   contextInProgress?: boolean;
+  _runningDispatches?: string[];
   activeSessionIdx?: number;
   cliSessionId?: string;
   linkedIssue?: LinkedIssue;

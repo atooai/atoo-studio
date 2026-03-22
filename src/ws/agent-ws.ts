@@ -46,6 +46,14 @@ export function handleAgentWsUpgrade(
       ws.send(JSON.stringify({ type: 'history_batch', messages }));
     }
 
+    // Send running dispatches for atoo-any (survives reconnect/project switch)
+    if ('getRunningDispatches' in agent) {
+      const running = (agent as any).getRunningDispatches();
+      if (running.length > 0) {
+        ws.send(JSON.stringify({ type: 'running_dispatches', dispatches: running }));
+      }
+    }
+
     // Handle incoming commands
     ws.on('message', (data) => {
       try {

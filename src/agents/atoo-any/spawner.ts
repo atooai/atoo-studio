@@ -1,12 +1,16 @@
 /**
  * CLI spawning helpers for atoo-any agent.
- * Spawns Claude and Codex in one-shot non-interactive mode with
+ * Spawns Claude, Codex, and Gemini in one-shot non-interactive mode with
  * MCP tools and system prompt extensions (matching terminal agents).
  */
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { spawnProcess, type ITerminal } from '../../spawner.js';
 import { ensureWorkspaceTrust } from '../lib/claude/workspace-trust.js';
 import { getMcpConfigPath, getMcpServerDef, MCP_SYSTEM_PROMPT, registerMcpToken } from '../../mcp/config.js';
+import { buildGeminiInstance, GEMINI_MODEL_MAP } from '../lib/gemini/settings-builder.js';
 
 interface OneShotOptions {
   cwd: string;
@@ -35,9 +39,14 @@ const CODEX_MODEL_MAP: Record<string, string> = {
   'gpt-5.3-codex-spark': 'codex-spark-5.3',
 };
 
-interface SpawnResult {
+export interface SpawnResult {
   envId: string;
   term: ITerminal;
+}
+
+export interface GeminiSpawnResult extends SpawnResult {
+  cleanupInstance: () => void;
+  sessionFilePath: string;
 }
 
 /**
@@ -132,4 +141,68 @@ export function spawnCodexOneShot(options: OneShotOptions): SpawnResult {
   });
 
   return { envId, term };
+}
+
+/**
+ * Spawn Gemini CLI in non-interactive mode (-p) with --resume.
+ * Uses GEMINI_CLI_HOME per-instance isolation for MCP and system prompt.
+ * Returns the session file path for the JSON watcher.
+ */
+export function spawnGeminiOneShot(options: OneShotOptions): GeminiSpawnResult {
+  // Build isolated instance with MCP, system prompt, and optional reasoning config
+  const instance = buildGeminiInstance({
+    sessionUuid: options.resumeUuid,
+    parentSessionUuid: options.parentSessionUuid,
+    model: options.model,
+    reasoningLevel: options.reasoning,
+  });
+
+  const args = [
+    '-p', options.message,
+    '--resume', options.resumeUuid,
+    '--yolo',
+  ];
+
+  // Use the model arg from instance builder (may be custom alias for reasoning)
+  if (instance.modelArg) {
+    args.push('--model', instance.modelArg);
+  }
+
+  const env: Record<string, string | undefined> = { ...process.env };
+  env.GEMINI_CLI_HOME = instance.geminiHome;
+
+  const { envId, term } = spawnProcess({
+    command: 'gemini',
+    args,
+    cwd: options.cwd,
+    env,
+    logPrefix: 'atoo-any-gemini',
+  });
+
+  // Determine the session file path for the JSON watcher.
+  // Gemini writes to ~/.gemini/tmp/{projectId}/chats/session-*-{shortId}.json
+  // Since we set GEMINI_CLI_HOME, tmp/ is symlinked to real ~/.gemini/tmp/
+  // The session file will contain the resumeUuid as sessionId.
+  // We need to find it by scanning for the shortId in the filename.
+  const shortId = options.resumeUuid.slice(0, 8);
+  let sessionFilePath = '';
+
+  // The file was just written by writeForkedGeminiJson, so it should exist
+  const geminiTmpBase = path.join(os.homedir(), '.gemini', 'tmp');
+  try {
+    const projectDirs = fs.readdirSync(geminiTmpBase, { withFileTypes: true });
+    for (const dir of projectDirs) {
+      if (!dir.isDirectory()) continue;
+      const chatsDir = path.join(geminiTmpBase, dir.name, 'chats');
+      if (!fs.existsSync(chatsDir)) continue;
+      const files = fs.readdirSync(chatsDir);
+      const match = files.find(f => f.includes(shortId) && f.endsWith('.json'));
+      if (match) {
+        sessionFilePath = path.join(chatsDir, match);
+        break;
+      }
+    }
+  } catch {}
+
+  return { envId, term, cleanupInstance: instance.cleanup, sessionFilePath };
 }

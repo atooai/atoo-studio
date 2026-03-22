@@ -53,7 +53,7 @@ export class AtooAnyAgentFactory implements AgentFactory {
   async readSessionEvents(uuid: string): Promise<SessionEvent[]> {
     const cwds = this.getProjectCwds();
     for (const cwd of cwds) {
-      const filePath = `${cwd}/atoo-studio/atoo-any-sessions/${uuid}.jsonl`;
+      const filePath = `${cwd}/.atoo-studio/atoo-any-sessions/${uuid}.jsonl`;
       const events = readAllEvents(filePath);
       if (events.length > 0) {
         return stripMeta(events);

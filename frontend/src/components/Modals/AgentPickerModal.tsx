@@ -5,9 +5,18 @@ import type { AgentDescriptor } from '../../types';
 interface AgentPickerModalProps {
   onSelect: (agent: AgentDescriptor) => void;
   onClose: () => void;
+  /** When resuming a session, pass its original agentType so we can auto-resume or filter */
+  resumeAgentType?: string;
 }
 
-export function AgentPickerModal({ onSelect, onClose }: AgentPickerModalProps) {
+// Agent types that use the atoo-any chat UI
+const ATOO_CHAT_TYPES = new Set(['atoo-any']);
+// Terminal-only agent types
+const TERMINAL_TYPES = new Set(['claude-code-terminal', 'codex-terminal', 'gemini-terminal']);
+// Agent types to hide from the picker (terminal+chat variants)
+const HIDDEN_TYPES = new Set(['claude-code-terminal-chatro', 'gemini-cli']);
+
+export function AgentPickerModal({ onSelect, onClose, resumeAgentType }: AgentPickerModalProps) {
   const [agents, setAgents] = useState<AgentDescriptor[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -20,23 +29,28 @@ export function AgentPickerModal({ onSelect, onClose }: AgentPickerModalProps) {
       .catch(() => setLoading(false));
   }, []);
 
-  const modeLabel = (mode: string) => {
-    switch (mode) {
-      case 'terminal': return 'Terminal';
-      case 'chat': return 'Chat';
-      case 'terminal+chat': return 'Terminal + Chat';
-      case 'terminal+chatRO': return 'Terminal + Chat RO';
-      default: return mode;
+  // Auto-resume: if resuming an atoo-any session, select it automatically
+  useEffect(() => {
+    if (!loading && resumeAgentType && ATOO_CHAT_TYPES.has(resumeAgentType)) {
+      const atooAgent = agents.find(a => a.agentType === resumeAgentType);
+      if (atooAgent) {
+        onSelect(atooAgent);
+        return;
+      }
     }
-  };
+  }, [loading, agents, resumeAgentType, onSelect]);
 
-  // Hardcoded coming-soon agents
-  const comingSoonAgents = [
-    { name: 'Gemini CLI', iconUrl: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72CB"/><stop offset="100%" stop-color="#D96570"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="#1a1a2e"/><path d="M16 4 C16 4 24 10 24 16 C24 22 16 28 16 28 C16 28 8 22 8 16 C8 10 16 4 16 4Z" fill="url(#g)" opacity="0.9"/></svg>') },
-  ];
+  // If auto-resuming atoo-any, don't render the modal at all
+  if (!loading && resumeAgentType && ATOO_CHAT_TYPES.has(resumeAgentType)) {
+    return null;
+  }
 
-  // If auto-selected (single agent) and no coming-soon agents, don't render anything
-  if (!loading && agents.length <= 1 && comingSoonAgents.length === 0) return null;
+  // Is this a resume of a terminal session? Hide Atoo Chat section
+  const isTerminalResume = resumeAgentType && !ATOO_CHAT_TYPES.has(resumeAgentType);
+
+  // Filter agents into categories
+  const atooAgent = agents.find(a => ATOO_CHAT_TYPES.has(a.agentType));
+  const terminalAgents = agents.filter(a => TERMINAL_TYPES.has(a.agentType));
 
   return (
     <div className="modal-card agent-picker-modal">
@@ -44,33 +58,44 @@ export function AgentPickerModal({ onSelect, onClose }: AgentPickerModalProps) {
         <span>Select Agent</span>
         <button className="modal-close" onClick={onClose}>&times;</button>
       </div>
-      <div className="agent-picker-grid">
+      <div className="agent-picker-content">
         {loading ? (
           <div className="agent-picker-loading">Loading agents...</div>
         ) : (
           <>
-            {agents.map((agent) => (
-              <button
-                key={agent.agentType}
-                className="agent-picker-btn"
-                onClick={() => onSelect(agent)}
-              >
-                <img src={agent.iconUrl} alt={agent.name} className="agent-picker-icon" />
-                <span className="agent-picker-name">{agent.name}</span>
-                <span className="agent-picker-mode">{modeLabel(agent.mode)}</span>
-              </button>
-            ))}
-            {comingSoonAgents.map((agent) => (
-              <button
-                key={agent.name}
-                className="agent-picker-btn agent-picker-btn-disabled"
-                disabled
-              >
-                <img src={agent.iconUrl} alt={agent.name} className="agent-picker-icon" />
-                <span className="agent-picker-name">{agent.name}</span>
-                <span className="agent-picker-coming-soon">Coming soon</span>
-              </button>
-            ))}
+            {/* Atoo Chat — primary, shown only for new sessions (not terminal resumes) */}
+            {!isTerminalResume && atooAgent && (
+              <>
+                <div className="agent-picker-row agent-picker-primary">
+                  <button
+                    className="agent-picker-btn agent-picker-btn-large"
+                    onClick={() => onSelect(atooAgent)}
+                  >
+                    <img src={atooAgent.iconUrl} alt={atooAgent.name} className="agent-picker-icon agent-picker-icon-large" />
+                    <span className="agent-picker-name">Atoo Chat</span>
+                    <span className="agent-picker-mode">Multi-Agent Chat</span>
+                  </button>
+                </div>
+                <div className="agent-picker-separator">
+                  <span>Terminal Agents</span>
+                </div>
+              </>
+            )}
+
+            {/* Terminal agents row */}
+            <div className="agent-picker-row agent-picker-terminals">
+              {terminalAgents.map((agent) => (
+                <button
+                  key={agent.agentType}
+                  className="agent-picker-btn agent-picker-btn-small"
+                  onClick={() => onSelect(agent)}
+                >
+                  <img src={agent.iconUrl} alt={agent.name} className="agent-picker-icon" />
+                  <span className="agent-picker-name">{agent.name}</span>
+                  <span className="agent-picker-mode">Terminal</span>
+                </button>
+              ))}
+            </div>
           </>
         )}
       </div>

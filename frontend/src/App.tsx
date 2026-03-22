@@ -1967,6 +1967,7 @@ function registerGlobalFunctions() {
     store.setModal({
       type: 'agent-picker',
       props: {
+        resumeAgentType: session.agentType,
         onSelect: async (agent: any) => {
           store.setModal(null);
           await doResume(agent.agentType);
@@ -1979,6 +1980,7 @@ function registerGlobalFunctions() {
     const store = useStore.getState();
     const proj = store.projects.find(p => p.id === projId);
     if (!proj) return;
+    const histEntry = (proj.historicalSessions || []).find(h => h.id === sessionUuid);
 
     const doResume = async (agentType?: string) => {
       try {
@@ -1989,7 +1991,6 @@ function registerGlobalFunctions() {
         });
         setPendingAgentCreation(false);
         const sessionId = result.sessionId;
-        const histEntry = (proj.historicalSessions || []).find(h => h.id === sessionUuid);
         const defaultViewMode = (result.agentMode === 'terminal') ? 'tui' : 'chat';
         const session = {
           id: sessionId, title: histEntry?.title || result.title || 'Resumed session', status: 'open' as const,
@@ -2020,6 +2021,7 @@ function registerGlobalFunctions() {
     store.setModal({
       type: 'agent-picker',
       props: {
+        resumeAgentType: histEntry?.agentType,
         onSelect: async (agent: any) => {
           store.setModal(null);
           await doResume(agent.agentType);

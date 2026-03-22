@@ -492,7 +492,7 @@ function handleAgentMessageBatch(sessionId: string, messages: any[]) {
       } else if (msg.type === 'assistant_message') {
         sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id, _rawJson: msg.rawJson });
       } else if (msg.type === 'thinking') {
-        sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
+        sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.id });
       } else if (msg.type === 'tool_result') {
         if (msg.isPending) {
           sess.messages.push({ role: 'tool', content: `${msg.toolName}: running...`, _eventUuid: msg.id, _toolName: msg.toolName, _toolInput: msg.input, _requestId: msg.requestId, _pending: true });
@@ -590,12 +590,21 @@ function handleAgentMessage(sessionId: string, msg: any) {
       return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
     }
 
+    if (msg.type === 'running_dispatches') {
+      // Restore running dispatch state on reconnect/reload
+      sess._runningDispatches = msg.dispatches || [];
+      return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
+    }
+
     if (msg.type === 'user_message') {
       sess.messages.push({ role: 'user', content: msg.text, _eventUuid: msg.id, _attachments: msg.attachments, _agentSelectorConfig: msg.agentSelectorConfig });
     } else if (msg.type === 'assistant_message') {
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id, _rawJson: msg.rawJson });
     } else if (msg.type === 'thinking') {
-      sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.rawEventUuid || msg.id });
+      // Use msg.id (unique per wire message), NOT rawEventUuid — thinking and
+      // assistant_message from the same event share rawEventUuid, which causes
+      // the dedup check to drop the second message.
+      sess.messages.push({ role: 'thinking', content: msg.text, _eventUuid: msg.id });
     } else if (msg.type === 'plan_approval') {
       sess.status = 'attention';
       sess._pendingControl = msg;
@@ -692,6 +701,19 @@ function handleAgentMessage(sessionId: string, msg: any) {
       return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
     } else if (msg.type === 'result') {
       sess.status = 'open';
+    } else if (msg.type === 'dispatch_started') {
+      // Process started running — add to running list
+      if (!sess._runningDispatches) sess._runningDispatches = [];
+      if (!sess._runningDispatches.includes(msg.dispatchId)) {
+        sess._runningDispatches.push(msg.dispatchId);
+      }
+      return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
+    } else if (msg.type === 'dispatch_done') {
+      // Process finished — remove from running list
+      if (sess._runningDispatches) {
+        sess._runningDispatches = sess._runningDispatches.filter((d: string) => d !== msg.dispatchId);
+      }
+      return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
     } else if (msg.type === 'system_message') {
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
     } else if (msg.type === 'file_change') {

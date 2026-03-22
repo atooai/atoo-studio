@@ -1,4 +1,6 @@
 .atoo-studio/
+atoo-studio/
+.agent_selector_component/
 node_modules/
 dist/
 certs/

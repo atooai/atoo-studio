@@ -6353,11 +6353,12 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   line-height: 1;
 }
 .agent-picker-modal .modal-close:hover { color: var(--text-primary); }
-.agent-picker-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+.agent-picker-content {
   padding: 16px;
+}
+.agent-picker-row {
+  display: flex;
+  gap: 12px;
   justify-content: center;
 }
 .agent-picker-btn {
@@ -6365,25 +6366,36 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 90px;
-  height: 90px;
   background: var(--bg-surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--transition-fast);
-  padding: 8px 4px;
   gap: 6px;
 }
 .agent-picker-btn:hover {
   border-color: var(--accent-blue);
   background: rgba(91, 138, 245, 0.08);
 }
+.agent-picker-btn-large {
+  width: 140px;
+  height: 110px;
+  padding: 12px 8px;
+}
+.agent-picker-btn-small {
+  width: 90px;
+  height: 80px;
+  padding: 8px 4px;
+}
 .agent-picker-icon {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
   border-radius: 4px;
+}
+.agent-picker-icon-large {
+  width: 38px;
+  height: 38px;
 }
 .agent-picker-name {
   font-size: 10px;
@@ -6398,17 +6410,23 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   text-align: center;
   line-height: 1.2;
 }
-.agent-picker-btn-disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-.agent-picker-coming-soon {
-  font-size: 8px;
+.agent-picker-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
   color: var(--text-muted);
-  text-align: center;
-  line-height: 1.2;
-  font-style: italic;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.agent-picker-separator::before,
+.agent-picker-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 .agent-picker-loading {
   padding: 20px;
@@ -11383,12 +11401,76 @@ pre:hover .code-copy-btn { opacity: 0.7; }
 }
 .aa-subagent-body { padding: 4px 0 4px 4px; }
 
-/* ─── Content renderer ─── */
+/* ─── Content renderer (markdown body) ─── */
 .aa-content {
   font-size: 13.5px;
   line-height: 1.7;
   color: var(--text-primary);
 }
+.aa-content p { margin: 6px 0; }
+.aa-content p:first-child { margin-top: 0; }
+.aa-content p:last-child { margin-bottom: 0; }
+.aa-content h1, .aa-content h2, .aa-content h3,
+.aa-content h4, .aa-content h5, .aa-content h6 {
+  margin: 16px 0 6px;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.aa-content h1 { font-size: 1.4em; }
+.aa-content h2 { font-size: 1.2em; }
+.aa-content h3 { font-size: 1.05em; }
+.aa-content ul, .aa-content ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+.aa-content li { margin: 3px 0; }
+.aa-content li > ul, .aa-content li > ol { margin: 2px 0; }
+.aa-content blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 12px;
+  color: var(--text-secondary);
+  margin: 8px 0;
+}
+.aa-content a { color: var(--accent-blue); text-decoration: none; }
+.aa-content a:hover { text-decoration: underline; }
+.aa-content img { max-width: 100%; border-radius: var(--radius-sm); }
+.aa-content code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.aa-content pre code {
+  background: none;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  font-size: inherit;
+}
+.aa-content table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  width: 100%;
+  font-size: 12.5px;
+}
+.aa-content th, .aa-content td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+}
+.aa-content th {
+  background: var(--bg-surface-2);
+  font-weight: 600;
+}
+.aa-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+.aa-content strong { font-weight: 600; }
+.aa-content em { font-style: italic; }
 .aa-content pre {
   margin: 10px 0;
   font-family: var(--font-mono);

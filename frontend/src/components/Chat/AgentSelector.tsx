@@ -24,10 +24,13 @@ const PROVIDERS = {
   },
   gemini: {
     models: [
-      { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", ctx: "1M", reasoning: ["minimal", "low", "medium", "high"] },
-      { id: "gemini-3-flash", name: "Gemini 3 Flash", ctx: "200K", reasoning: ["minimal", "low", "medium", "high"] },
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", ctx: "1M", reasoning: null },
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", ctx: "1M", reasoning: null },
+      // Gemini 3.x: thinkingLevel (Pro min=LOW, Flash supports MINIMAL)
+      { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", ctx: "1M", reasoning: ["low", "medium", "high"] },
+      { id: "gemini-3-flash", name: "Gemini 3 Flash", ctx: "1M", reasoning: ["minimal", "low", "medium", "high"] },
+      // Gemini 2.5.x: thinkingBudget (0=off, -1=dynamic)
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", ctx: "1M", reasoning: ["low", "medium", "high"] },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", ctx: "1M", reasoning: ["low", "medium", "high"] },
+      { id: "gemini-2.5-flash-lite", name: "Flash Lite", ctx: "128K", reasoning: null },
     ],
     label: "Gemini",
     reasoningName: "Thinking",

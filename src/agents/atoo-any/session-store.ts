@@ -8,12 +8,12 @@ import { v4 as uuidv4 } from 'uuid';
 import type { SessionEvent } from '../../events/types.js';
 import type { HistoricalSession } from '../types.js';
 
-const SESSIONS_DIR_NAME = 'atoo-studio/atoo-any-sessions';
+const SESSIONS_DIR_NAME = '.atoo-studio/atoo-any-sessions';
 
 export type AtooMessageStatus = 'visible' | 'removed' | 'compacted';
 
 export interface AtooEventMeta {
-  _source?: 'claude' | 'codex';
+  _source?: 'claude' | 'codex' | 'gemini';
   _parentUserUuid?: string;
   _dispatchId?: string;
   // Branch-aware fields
