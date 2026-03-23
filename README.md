@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A local-first control room for real coding-agent workflows.</strong><br>
-  Run multiple PTY-backed agents across projects and worktrees, fork and chain sessions, and keep code, preview, DevTools, GitHub, databases, containers, and hardware in one place.<br>
+  Run multiple PTY-backed agent sessions across projects and worktrees, fork and chain sessions, and keep code, preview, DevTools, GitHub, databases, containers, and hardware in one place.<br>
   <em>Familiar where it helps. Different where it matters: the agent workflow is the product, not a sidebar.</em>
 </p>
 
@@ -33,7 +33,9 @@
 
 > **Early alpha, already used daily for real client work.**
 >
-> **Not another chat wrapper or editor skin.** Atoo Studio replaces the fragmented VS Code + browser + terminal workflow around coding agents with one local workspace.
+> **Not a chat wrapper. Not just an editor skin.** Atoo Studio replaces the fragmented VS Code + browser + terminal workflow around coding agents with one local workspace.
+>
+> **The default layout is intentionally familiar. The workflow model is not.**
 
 ---
 
@@ -46,7 +48,7 @@
     </td>
   </tr>
   <tr>
-    <td align="center"><sub><strong>Atoo Chat</strong> — cross-agent and parallel agent requests, session forking, and context extraction. Send one prompt to Claude and Codex simultaneously and compare results side by side.</sub></td>
+    <td align="center"><sub><strong>New orchestration UI (in progress)</strong> — a newer cross-agent workflow currently on the main branch, but not part of the latest release yet. Parallel agent requests, session forking, and context extraction. Send one prompt to Claude and Codex simultaneously and compare results side by side.</sub></td>
   </tr>
 </table>
 
@@ -97,7 +99,7 @@
 
 Atoo Studio is a local-first workspace for running and managing real coding-agent workflows.
 
-At first glance the default layout looks familiar — on purpose. Files, panes, and text editing should not require relearning. The difference is the orchestration layer around agent-driven development: real PTY-backed sessions, multi-project and multi-worktree workflows, session fork and continuation across agents, live app preview, DevTools, GitHub, databases, containers, and hardware access — all in one place.
+At first glance the default layout looks familiar — on purpose. Files, panes, and text editing should not require relearning. The difference is the orchestration layer around agent-driven development. Real PTY-backed sessions, multi-project and multi-worktree workflows, session fork and continuation across agents, live app preview, DevTools, GitHub, databases, containers, and hardware access all live in one place.
 
 It does not replace the agents themselves. It replaces the fragmented environment around them.
 
