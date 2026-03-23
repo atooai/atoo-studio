@@ -11,6 +11,7 @@ import { spawnProcess, type ITerminal } from '../../spawner.js';
 import { ensureWorkspaceTrust } from '../lib/claude/workspace-trust.js';
 import { getMcpConfigPath, getMcpServerDef, MCP_SYSTEM_PROMPT, registerMcpToken } from '../../mcp/config.js';
 import { buildGeminiInstance, GEMINI_MODEL_MAP } from '../lib/gemini/settings-builder.js';
+import { addPreloadEnv } from '../lib/fs-tracking.js';
 
 interface OneShotOptions {
   cwd: string;
@@ -22,6 +23,8 @@ interface OneShotOptions {
   model?: string;
   /** Reasoning effort level (e.g. 'low', 'medium', 'high') */
   reasoning?: string;
+  /** LD_PRELOAD tracking session ID for file change detection */
+  preloadSessionId?: string;
 }
 
 // Map frontend model IDs to CLI model names
@@ -42,6 +45,7 @@ const CODEX_MODEL_MAP: Record<string, string> = {
 export interface SpawnResult {
   envId: string;
   term: ITerminal;
+  pid: number;
 }
 
 export interface GeminiSpawnResult extends SpawnResult {
@@ -77,8 +81,9 @@ export function spawnClaudeOneShot(options: OneShotOptions): SpawnResult {
 
   const env: Record<string, string | undefined> = { ...process.env };
   delete env.CLAUDECODE; // Prevent nested Claude detection
+  if (options.preloadSessionId) addPreloadEnv(env, options.preloadSessionId);
 
-  const { envId, term } = spawnProcess({
+  const { envId, term, pid } = spawnProcess({
     command: 'claude',
     args,
     cwd: options.cwd,
@@ -86,7 +91,7 @@ export function spawnClaudeOneShot(options: OneShotOptions): SpawnResult {
     logPrefix: 'atoo-any-claude',
   });
 
-  return { envId, term };
+  return { envId, term, pid };
 }
 
 /**
@@ -131,8 +136,9 @@ export function spawnCodexOneShot(options: OneShotOptions): SpawnResult {
   }
 
   const env: Record<string, string | undefined> = { ...process.env };
+  if (options.preloadSessionId) addPreloadEnv(env, options.preloadSessionId);
 
-  const { envId, term } = spawnProcess({
+  const { envId, term, pid } = spawnProcess({
     command: 'codex',
     args,
     cwd: options.cwd,
@@ -140,7 +146,7 @@ export function spawnCodexOneShot(options: OneShotOptions): SpawnResult {
     logPrefix: 'atoo-any-codex',
   });
 
-  return { envId, term };
+  return { envId, term, pid };
 }
 
 /**
@@ -170,8 +176,9 @@ export function spawnGeminiOneShot(options: OneShotOptions): GeminiSpawnResult {
 
   const env: Record<string, string | undefined> = { ...process.env };
   env.GEMINI_CLI_HOME = instance.geminiHome;
+  if (options.preloadSessionId) addPreloadEnv(env, options.preloadSessionId);
 
-  const { envId, term } = spawnProcess({
+  const { envId, term, pid } = spawnProcess({
     command: 'gemini',
     args,
     cwd: options.cwd,
@@ -204,5 +211,5 @@ export function spawnGeminiOneShot(options: OneShotOptions): GeminiSpawnResult {
     }
   } catch {}
 
-  return { envId, term, cleanupInstance: instance.cleanup, sessionFilePath };
+  return { envId, term, pid, cleanupInstance: instance.cleanup, sessionFilePath };
 }

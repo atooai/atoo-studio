@@ -102,6 +102,39 @@ function consolidateChanges(changes: FileChange[]): FileChange[] {
   return result.filter((_, i) => !toRemove.has(i));
 }
 
+// GET /api/dispatches/:id/changes — list file changes for a dispatch (atoo-any per-agent-per-prompt)
+changesRouter.get('/api/dispatches/:id/changes', async (req, res) => {
+  const dispatchId = req.params.id;
+  const from = req.query.from ? parseFloat(req.query.from as string) : undefined;
+  const to = req.query.to ? parseFloat(req.query.to as string) : undefined;
+
+  const changes = consolidateChanges(fsMonitor.getChangesInRange(dispatchId, from, to));
+
+  // Materialize after_hash lazily for non-delete changes
+  for (const c of changes) {
+    if (c.afterHash === null && c.operation !== 'delete') {
+      await fsMonitor.materializeAfterHash(c);
+    }
+  }
+
+  res.json({
+    available: fsMonitor.isAvailable(),
+    changes: changes.map(c => ({
+      change_id: c.changeId,
+      session_id: c.sessionId,
+      timestamp: c.timestamp,
+      pid: c.pid,
+      operation: c.operation,
+      path: c.path,
+      old_path: c.oldPath || null,
+      before_hash: c.beforeHash,
+      after_hash: c.afterHash,
+      file_size: c.fileSize,
+      is_binary: c.isBinary,
+    })),
+  });
+});
+
 // GET /api/sessions/:id/changes — list file changes for a session
 changesRouter.get('/api/sessions/:id/changes', async (req, res) => {
   const sessionId = req.params.id;

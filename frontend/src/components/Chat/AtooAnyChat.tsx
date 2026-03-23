@@ -333,7 +333,237 @@ function AsstMsg({ msg }: { msg: AgentMessage }) {
   );
 }
 
-function AgentGroup({ agent, isCol, isActive, sessionId }: { agent: AgentResponse; isCol: boolean; isActive?: boolean; sessionId?: string }) {
+// ═══════════════════════════════════════════════════════════════
+// FILE CHANGES (per-dispatch diff viewer)
+// ═══════════════════════════════════════════════════════════════
+
+const FileIcon = () => <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5.5L13 5v9.5a1 1 0 01-1 1H4a1 1 0 01-1-1v-13a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.2" /><path d="M9.5 1.5V5H13" stroke="currentColor" strokeWidth="1.2" /></svg>;
+
+interface FileChangeEntry {
+  change_id: string;
+  operation: string;
+  path: string;
+  old_path?: string | null;
+  before_hash?: string | null;
+  after_hash?: string | null;
+  is_binary: boolean;
+}
+
+interface DiffData {
+  operation: string;
+  path: string;
+  before: string | null;
+  after: string | null;
+  is_binary: boolean;
+}
+
+function DispatchFileChanges({ dispatchId, fileChangeCount, agentColor }: { dispatchId: string; fileChangeCount: number; agentColor: string }) {
+  const [open, setOpen] = useState(false);
+  const [changes, setChanges] = useState<FileChangeEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [expandedDiff, setExpandedDiff] = useState<string | null>(null);
+  const [diffData, setDiffData] = useState<Record<string, DiffData>>({});
+  const [diffLoading, setDiffLoading] = useState<string | null>(null);
+
+  const fetchChanges = useCallback(async () => {
+    if (changes !== null) return;
+    setLoading(true);
+    try {
+      const data = await api('GET', `/api/dispatches/${encodeURIComponent(dispatchId)}/changes`);
+      setChanges(data.changes || []);
+    } catch (err) {
+      console.error('[file-changes] Failed to fetch:', err);
+      setChanges([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [dispatchId, changes]);
+
+  const handleToggle = useCallback(() => {
+    if (!open) fetchChanges();
+    setOpen(o => !o);
+  }, [open, fetchChanges]);
+
+  const fetchDiff = useCallback(async (changeId: string) => {
+    if (diffData[changeId]) {
+      setExpandedDiff(expandedDiff === changeId ? null : changeId);
+      return;
+    }
+    setExpandedDiff(changeId);
+    setDiffLoading(changeId);
+    try {
+      const data = await api('GET', `/api/sessions/_/changes/${encodeURIComponent(changeId)}/diff`);
+      setDiffData(prev => ({ ...prev, [changeId]: data }));
+    } catch (err) {
+      console.error('[file-changes] Failed to fetch diff:', err);
+    } finally {
+      setDiffLoading(null);
+    }
+  }, [diffData, expandedDiff]);
+
+  if (fileChangeCount === 0) return null;
+
+  const opColor = (op: string) => {
+    switch (op) {
+      case 'create': return '#4ade80';
+      case 'modify': return '#facc15';
+      case 'delete': return '#f87171';
+      case 'rename': return '#60a5fa';
+      default: return '#888';
+    }
+  };
+
+  const opLabel = (op: string) => {
+    switch (op) {
+      case 'create': return 'A';
+      case 'modify': return 'M';
+      case 'delete': return 'D';
+      case 'rename': return 'R';
+      default: return '?';
+    }
+  };
+
+  return (
+    <div className="aa-file-changes">
+      <button className="aa-file-changes-toggle" onClick={handleToggle} style={{ borderColor: agentColor + '30' }}>
+        <FileIcon />
+        <span className="aa-file-changes-count">{fileChangeCount} file{fileChangeCount !== 1 ? 's' : ''} changed</span>
+        <ChevronIcon open={open} size={12} />
+      </button>
+      {open && (
+        <div className="aa-file-changes-list">
+          {loading && <div className="aa-file-changes-loading">Loading...</div>}
+          {changes && changes.length === 0 && <div className="aa-file-changes-empty">No changes found</div>}
+          {changes && changes.map(c => {
+            const fileName = c.path.split('/').pop() || c.path;
+            const dirPath = c.path.split('/').slice(0, -1).join('/');
+            const isExpanded = expandedDiff === c.change_id;
+            const diff = diffData[c.change_id];
+            return (
+              <div key={c.change_id} className="aa-file-change-item">
+                <div className="aa-file-change-header" onClick={() => !c.is_binary && fetchDiff(c.change_id)}>
+                  <span className="aa-file-change-op" style={{ color: opColor(c.operation) }} title={c.operation}>{opLabel(c.operation)}</span>
+                  <span className="aa-file-change-name" title={c.path}>
+                    {dirPath && <span className="aa-file-change-dir">{dirPath}/</span>}
+                    {fileName}
+                  </span>
+                  {c.is_binary && <span className="aa-file-change-binary">binary</span>}
+                  {!c.is_binary && <ChevronIcon open={isExpanded} size={10} />}
+                </div>
+                {isExpanded && diffLoading === c.change_id && <div className="aa-file-changes-loading">Loading diff...</div>}
+                {isExpanded && diff && !diff.is_binary && (
+                  <DiffView diff={diff} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffView({ diff }: { diff: DiffData }) {
+  const beforeText = diff.before ? atob(diff.before) : '';
+  const afterText = diff.after ? atob(diff.after) : '';
+
+  // Simple unified diff rendering
+  const beforeLines = beforeText.split('\n');
+  const afterLines = afterText.split('\n');
+
+  // For create/delete, show all lines as added/removed
+  if (diff.operation === 'create') {
+    return (
+      <pre className="aa-diff-view">
+        {afterLines.map((line, i) => (
+          <div key={i} className="aa-diff-line aa-diff-add"><span className="aa-diff-sign">+</span>{line}</div>
+        ))}
+      </pre>
+    );
+  }
+  if (diff.operation === 'delete') {
+    return (
+      <pre className="aa-diff-view">
+        {beforeLines.map((line, i) => (
+          <div key={i} className="aa-diff-line aa-diff-del"><span className="aa-diff-sign">-</span>{line}</div>
+        ))}
+      </pre>
+    );
+  }
+
+  // For modify: compute a simple line-level diff
+  const diffLines = computeLineDiff(beforeLines, afterLines);
+  return (
+    <pre className="aa-diff-view">
+      {diffLines.map((d, i) => (
+        <div key={i} className={`aa-diff-line ${d.type === '+' ? 'aa-diff-add' : d.type === '-' ? 'aa-diff-del' : 'aa-diff-ctx'}`}>
+          <span className="aa-diff-sign">{d.type === ' ' ? '\u00A0' : d.type}</span>{d.text}
+        </div>
+      ))}
+    </pre>
+  );
+}
+
+/** Simple Myers-like line diff with context lines */
+function computeLineDiff(before: string[], after: string[]): { type: '+' | '-' | ' '; text: string }[] {
+  // LCS-based diff
+  const m = before.length, n = after.length;
+  // For very large files, fall back to showing just before→after
+  if (m + n > 5000) {
+    const result: { type: '+' | '-' | ' '; text: string }[] = [];
+    before.forEach(l => result.push({ type: '-', text: l }));
+    after.forEach(l => result.push({ type: '+', text: l }));
+    return result;
+  }
+
+  // Build LCS table
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = before[i - 1] === after[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  // Backtrack to build diff
+  const raw: { type: '+' | '-' | ' '; text: string }[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && before[i - 1] === after[j - 1]) {
+      raw.unshift({ type: ' ', text: before[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      raw.unshift({ type: '+', text: after[j - 1] });
+      j--;
+    } else {
+      raw.unshift({ type: '-', text: before[i - 1] });
+      i--;
+    }
+  }
+
+  // Filter to show only changed lines + 3 lines of context
+  const CTX = 3;
+  const show = new Set<number>();
+  for (let k = 0; k < raw.length; k++) {
+    if (raw[k].type !== ' ') {
+      for (let c = Math.max(0, k - CTX); c <= Math.min(raw.length - 1, k + CTX); c++) show.add(c);
+    }
+  }
+
+  const result: { type: '+' | '-' | ' '; text: string }[] = [];
+  let lastShown = -1;
+  for (let k = 0; k < raw.length; k++) {
+    if (!show.has(k)) continue;
+    if (lastShown >= 0 && k - lastShown > 1) {
+      result.push({ type: ' ', text: `... ${k - lastShown - 1} unchanged lines ...` });
+    }
+    result.push(raw[k]);
+    lastShown = k;
+  }
+
+  return result;
+}
+
+function AgentGroup({ agent, isCol, isActive, sessionId, dispatchId, fileChangeCount }: { agent: AgentResponse; isCol: boolean; isActive?: boolean; sessionId?: string; dispatchId?: string; fileChangeCount?: number }) {
   const [verbose, setVerbose] = useState(false);
   const agentKey = Object.entries(AGENT_CONFIG).find(([, c]) => c.name === agent.agentName)?.[0] || '';
 
@@ -432,6 +662,9 @@ function AgentGroup({ agent, isCol, isActive, sessionId }: { agent: AgentRespons
           <span className="aa-working-dot" />
           <span className="aa-working-dot" />
         </div>
+      )}
+      {!isActive && dispatchId && fileChangeCount && fileChangeCount > 0 && (
+        <DispatchFileChanges dispatchId={dispatchId} fileChangeCount={fileChangeCount} agentColor={agent.agentColor} />
       )}
     </div>
   );
@@ -738,7 +971,7 @@ function UserMessage({ msg }: { msg: FilteredMessage }) {
 // MESSAGE BLOCK (user msg + responses)
 // ═══════════════════════════════════════════════════════════════
 
-function MsgBlockView({ block, vw, sessionId, runningDispatches }: { block: MsgBlock; vw: number; sessionId?: string; runningDispatches?: string[] }) {
+function MsgBlockView({ block, vw, sessionId, runningDispatches, dispatchFileChanges }: { block: MsgBlock; vw: number; sessionId?: string; runningDispatches?: string[]; dispatchFileChanges?: Record<string, number> }) {
   const [layouts, setLayouts] = useState<Record<string, string>>({});
   const re = Object.entries(block.responses);
   const multi = re.length > 1;
@@ -758,7 +991,8 @@ function MsgBlockView({ block, vw, sessionId, runningDispatches }: { block: MsgB
           // Simple: is this agent's process still running?
           const dispatchId = `${block.userMessage._eventUuid}:${k}`;
           const isRunning = runningDispatches?.includes(dispatchId) ?? false;
-          return <AgentGroup key={k} agent={a} isCol={isCol} isActive={isRunning} sessionId={sessionId} />;
+          const fcc = dispatchFileChanges?.[dispatchId] ?? 0;
+          return <AgentGroup key={k} agent={a} isCol={isCol} isActive={isRunning} sessionId={sessionId} dispatchId={dispatchId} fileChangeCount={fcc} />;
         })}
       </div>
     </div>
@@ -1200,7 +1434,7 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
               {block.status === 'visible' && (
                 <>
                   {block.contextDrift && <ContextDriftBadge />}
-                  <MsgBlockView block={block} vw={vw} sessionId={session.id} runningDispatches={session._runningDispatches} />
+                  <MsgBlockView block={block} vw={vw} sessionId={session.id} runningDispatches={session._runningDispatches} dispatchFileChanges={session._dispatchFileChanges} />
                 </>
               )}
 

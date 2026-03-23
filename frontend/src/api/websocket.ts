@@ -713,6 +713,11 @@ function handleAgentMessage(sessionId: string, msg: any) {
       if (sess._runningDispatches) {
         sess._runningDispatches = sess._runningDispatches.filter((d: string) => d !== msg.dispatchId);
       }
+      // Store file change count per dispatch
+      if (msg.fileChangeCount > 0) {
+        if (!sess._dispatchFileChanges) sess._dispatchFileChanges = {};
+        sess._dispatchFileChanges[msg.dispatchId] = msg.fileChangeCount;
+      }
       return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
     } else if (msg.type === 'system_message') {
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });

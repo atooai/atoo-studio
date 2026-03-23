@@ -38,6 +38,8 @@ import {
 import { mapCodexJsonlLine } from '../lib/codex/jsonl-mapper.js';
 import { mapGeminiMessage, type GeminiMessage } from '../lib/gemini/json-mapper.js';
 import { GeminiJsonWatcher } from '../lib/gemini/json-watcher.js';
+import { initFileTracking, ToolResultFileTracker } from '../lib/fs-tracking.js';
+import { fsMonitor } from '../../fs-monitor.js';
 
 const DEBOUNCE_MS = 50;
 
@@ -57,12 +59,14 @@ interface DispatchInfo {
   agentKey: string;
   parentUserUuid: string;
   envId: string;
+  pid: number;
   tempSessionUuid: string;
   tempSessionFile: string;
   watcher: SimpleFileWatcher | GeminiJsonWatcher;
   initialByteOffset: number;
   done: boolean;
   cleanupInstance?: () => void;
+  fileTracker: ToolResultFileTracker;
 }
 
 /**
@@ -572,17 +576,20 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       }
     } catch {}
 
-    // Spawn the CLI process
+    // Spawn the CLI process (with LD_PRELOAD file tracking)
+    const preloadSessionId = uuidv4();
     let envId: string;
+    let pid: number;
     let cleanupInstance: (() => void) | undefined;
     try {
       if (family === 'claude') {
-        ({ envId } = spawnClaudeOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning }));
+        ({ envId, pid } = spawnClaudeOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId }));
       } else if (family === 'codex') {
-        ({ envId } = spawnCodexOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning }));
+        ({ envId, pid } = spawnCodexOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId }));
       } else {
-        const result = spawnGeminiOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning });
+        const result = spawnGeminiOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId });
         envId = result.envId;
+        pid = result.pid;
         cleanupInstance = result.cleanupInstance;
         // Update tempFilePath if spawnGeminiOneShot found the actual path
         if (result.sessionFilePath) tempFilePath = result.sessionFilePath;
@@ -592,6 +599,18 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       try { fs.unlinkSync(tempFilePath); } catch {}
       return;
     }
+
+    // Initialize file change tracking (Level 1: LD_PRELOAD + Level 2: inotify)
+    // Use dispatchId as session ID so changes are scoped per-agent-per-prompt
+    initFileTracking({
+      sessionId: dispatchId,
+      cwd: this.cwd,
+      pid: pid!,
+      preloadSessionId,
+    });
+
+    // Level 3: Tool-result fallback tracker
+    const fileTracker = new ToolResultFileTracker(dispatchId);
 
     // Set up file watcher on the session file
     let watcher: SimpleFileWatcher | GeminiJsonWatcher;
@@ -607,12 +626,14 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       agentKey: effectiveKey,
       parentUserUuid,
       envId,
+      pid: pid!,
       tempSessionUuid: tempUuid,
       tempSessionFile: tempFilePath,
       watcher,
       initialByteOffset,
       done: false,
       cleanupInstance,
+      fileTracker,
     };
 
     this.activeDispatches.set(dispatchId, dispatch);
@@ -695,6 +716,12 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
           watcher.stop();
           dispatch.done = true;
 
+          // Stop inotify watcher for this dispatch's file tracking
+          fsMonitor.unwatchPid(dispatch.dispatchId);
+
+          // Count file changes for this dispatch
+          const fileChanges = fsMonitor.getChangesInRange(dispatch.dispatchId);
+
           // Notify frontend that this specific agent dispatch is done
           this.emit('message', {
             type: 'dispatch_done',
@@ -702,6 +729,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
             dispatchId: dispatch.dispatchId,
             agentFamily: dispatch.agentFamily,
             exitCode,
+            fileChangeCount: fileChanges.length,
           });
 
           // Clean up temp session file.
@@ -783,6 +811,9 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       (event as any)._dispatchId = meta._dispatchId;
       (event as any)._parentUserUuid = meta._parentUserUuid;
 
+      // Level 3: Feed through tool-result file tracker
+      dispatch.fileTracker.processEvent(event);
+
       // Store in our events array and persist
       this.events.push(event);
       appendEvent(this.sessionFilePath, event, meta);
@@ -830,6 +861,9 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       (event as any)._source = meta._source;
       (event as any)._dispatchId = meta._dispatchId;
       (event as any)._parentUserUuid = meta._parentUserUuid;
+
+      // Level 3: Feed through tool-result file tracker
+      dispatch.fileTracker.processEvent(event);
 
       // Store and persist
       this.events.push(event);

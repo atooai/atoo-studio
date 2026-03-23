@@ -38,6 +38,7 @@ export interface Session {
   contextUsage?: ContextUsage;
   contextInProgress?: boolean;
   _runningDispatches?: string[];
+  _dispatchFileChanges?: Record<string, number>;
   activeSessionIdx?: number;
   cliSessionId?: string;
   linkedIssue?: LinkedIssue;

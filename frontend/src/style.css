@@ -11335,6 +11335,111 @@ pre:hover .code-copy-btn { opacity: 0.7; }
   40% { opacity: 0.8; transform: scale(1.1); }
 }
 
+/* ─── File changes (per-dispatch diff viewer) ─── */
+.aa-file-changes {
+  margin-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+.aa-file-changes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.aa-file-changes-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.aa-file-changes-count { font-weight: 500; }
+.aa-file-changes-list {
+  margin-top: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+.aa-file-changes-loading,
+.aa-file-changes-empty {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.aa-file-change-item {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.aa-file-change-item:last-child { border-bottom: none; }
+.aa-file-change-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.aa-file-change-header:hover { background: var(--bg-hover); }
+.aa-file-change-op {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.aa-file-change-name {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.aa-file-change-dir { color: var(--text-muted); }
+.aa-file-change-binary {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ─── Diff view ─── */
+.aa-diff-view {
+  margin: 0;
+  padding: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-family: var(--font-mono);
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-subtle);
+}
+.aa-diff-line {
+  padding: 0 10px;
+  white-space: pre;
+}
+.aa-diff-add { background: rgba(74, 222, 128, 0.08); color: #4ade80; }
+.aa-diff-del { background: rgba(248, 113, 113, 0.08); color: #f87171; }
+.aa-diff-ctx { color: var(--text-muted); }
+.aa-diff-sign {
+  display: inline-block;
+  width: 16px;
+  color: inherit;
+  user-select: none;
+}
+
 /* ─── Thinking block ─── */
 .aa-thinking {
   padding: 8px 12px;
