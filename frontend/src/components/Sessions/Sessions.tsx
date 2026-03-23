@@ -210,12 +210,13 @@ function ChainCarousel({ group, agentIcons, projectId, openSessionIds }: {
   const [activeSlide, setActiveSlide] = useState(group.links.length - 1);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to initial slide (latest) on mount
+  // Scroll to initial slide (latest) on mount — use scrollLeft to avoid
+  // scrolling the parent session list container
   useEffect(() => {
     const el = scrollRef.current;
     if (el) {
       const child = el.children[group.links.length - 1] as HTMLElement | undefined;
-      if (child) child.scrollIntoView({ inline: 'start', block: 'nearest' });
+      if (child) el.scrollLeft = child.offsetLeft;
     }
   }, []);
 
