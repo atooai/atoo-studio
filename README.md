@@ -5,9 +5,13 @@
 <h1 align="center">Atoo Studio</h1>
 
 <p align="center">
-  <strong>Local-first workspace for Claude Code, Codex CLI, and other coding agents.</strong><br>
-  Run multiple agents across projects and worktrees, send a single prompt to Claude and Codex simultaneously, fork and chain sessions, preview apps with real Chrome + DevTools, and manage Git, GitHub, databases, containers, and hardware from one browser UI.<br>
-  <strong>Installable as a PWA — standalone Electron app with native browser integration on the roadmap!</strong>
+  <strong>A local-first control room for real coding-agent workflows.</strong><br>
+  Run multiple PTY-backed agents across projects and worktrees, fork and chain sessions, and keep code, preview, DevTools, GitHub, databases, containers, and hardware in one place.<br>
+  <em>Familiar where it helps. Different where it matters: the agent workflow is the product, not a sidebar.</em>
+</p>
+
+<p align="center">
+  Works with <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://github.com/openai/codex">Codex CLI</a>, and other coding agents.
 </p>
 
 <p align="center">
@@ -27,38 +31,13 @@
   <a href="https://www.ittrail.at">IT Trail GmbH</a>
 </p>
 
+> **Early alpha, already used daily for real client work.**
+>
+> **Not another chat wrapper or editor skin.** Atoo Studio replaces the fragmented VS Code + browser + terminal workflow around coding agents with one local workspace.
+
 ---
 
 ## Demo
-
-<table align="center">
-  <tr>
-    <td align="center"><img src="demoassets/layout-21-9.png" alt="Atoo Studio on an ultrawide display" width="820"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Ultrawide (21:9) — the full workspace with agent sessions, file tree, editor, and live app preview side by side.</sub></td>
-  </tr>
-</table>
-
-<table align="center">
-  <tr>
-    <td align="center"><img src="demoassets/layout-16-9.png" alt="Atoo Studio on a standard display" width="560"></td>
-    <td align="center"><img src="demoassets/mobile-mockup-portrait.jpg" alt="Atoo Studio on mobile" width="225"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Standard (16:9) — collapsible sidebars keep the full workspace usable, including the live app preview.</sub></td>
-    <td align="center"><sub>Mobile — a dedicated layout with all features accessible on any phone or tablet.</sub></td>
-  </tr>
-</table>
-
-<table align="center">
-  <tr>
-    <td align="center"><img src="demoassets/atoo-studio-carousel-mode.gif" alt="Atoo Studio carousel mode" width="420"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Experimental carousel view — a 2D panel layout where the active view follows mouse movement automatically.</sub></td>
-  </tr>
-</table>
 
 <table align="center">
   <tr>
@@ -67,19 +46,62 @@
     </td>
   </tr>
   <tr>
-    <td align="center"><sub><strong>New Atoo Chat UI</strong> — cross-agent and parallel agent requests, session forking, and context extraction. Still in development, but already available on the main branch.</sub></td>
+    <td align="center"><sub><strong>Atoo Chat</strong> — cross-agent and parallel agent requests, session forking, and context extraction. Send one prompt to Claude and Codex simultaneously and compare results side by side.</sub></td>
   </tr>
 </table>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="demoassets/layout-21-9.png" alt="Atoo Studio on an ultrawide display" width="820"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Main workspace — not just an editor layout, but a single working surface for agent sessions, code, preview, and debugging.</sub></td>
+  </tr>
+</table>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="demoassets/layout-16-9.png" alt="Atoo Studio on a standard display" width="560"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Standard (16:9) — collapsible sidebars keep the full workspace usable on smaller screens.</sub></td>
+  </tr>
+</table>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="demoassets/atoo-studio-carousel-mode.gif" alt="Atoo Studio carousel mode" width="420"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Experimental carousel view — an alternative 2D panel layout where the active view follows mouse movement. One of several layout experiments beyond the default workspace.</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary><strong>Mobile layout</strong></summary>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="demoassets/mobile-mockup-portrait.jpg" alt="Atoo Studio on mobile" width="225"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>A dedicated layout with all features accessible on any phone or tablet — useful for monitoring and quick interactions on the go.</sub></td>
+  </tr>
+</table>
+
+</details>
 
 > **More demos and videos are available on the [Atoo Studio homepage](https://atoo.ai).**
 
 ## What is Atoo Studio?
 
-Atoo Studio is a browser-based control room for working with coding agents like **Claude Code** and **Codex CLI**.
+Atoo Studio is a local-first workspace for running and managing real coding-agent workflows.
 
-It does not replace your editor or your agent. It gives them a shared environment: agent sessions, code, live preview, DevTools, Git, GitHub, databases, containers, and even hardware access in one place.
+At first glance the default layout looks familiar — on purpose. Files, panes, and text editing should not require relearning. The difference is the orchestration layer around agent-driven development: real PTY-backed sessions, multi-project and multi-worktree workflows, session fork and continuation across agents, live app preview, DevTools, GitHub, databases, containers, and hardware access — all in one place.
 
-Run it locally on Linux, macOS, or WSL as a local web server. No cloud dependency. No vendor lock-in.
+It does not replace the agents themselves. It replaces the fragmented environment around them.
+
+Runs locally on Linux, macOS, or WSL. No cloud dependency. No vendor lock-in.
 
 ## Why it exists
 
