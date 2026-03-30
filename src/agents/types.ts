@@ -184,12 +184,11 @@ export type AgentCommand =
   | { action: 'set_model'; model: string }
   | { action: 'refresh_context' }
   | { action: 'send_key'; key: string }
-  // Branch operations (atoo-any)
-  | { action: 'remove_messages'; eventUuids: string[] }
-  | { action: 'restore_message'; eventUuid: string }
-  | { action: 'compact_messages'; eventUuids: string[]; compactedBy: string }
-  | { action: 'fork_conversation'; afterEventUuid: string }
-  | { action: 'switch_branch'; forkId: string; branchId: string }
-  | { action: 'extract_range'; startIndex: number; endIndex: number; label?: string }
+  // Tree operations (atoo-any v2)
+  | { action: 'set_active_path'; activePath: number[] }
+  | { action: 'fork_conversation'; afterPromptUuid: string }
+  | { action: 'hide_prompts'; promptUuids: string[] }
+  | { action: 'compact_prompts'; promptUuids: string[]; compactedBy: string }
+  | { action: 'extract_prompts'; promptUuids: string[]; label?: string }
   | { action: 'kill_agent'; agentFamily: string }
   | { action: 'kill_all_agents' };

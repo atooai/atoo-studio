@@ -478,6 +478,16 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
     }
     try {
       db.setSessionMetadata(session_uuid, { name, description, tags });
+      // Also update session.json for atoo-any sessions (self-contained metadata)
+      try {
+        const { readSession, writeSession, getSessionDir } = await import('../agents/atoo-any/session-store.js');
+        const sessionDir = getSessionDir(cwd || process.cwd(), session_uuid);
+        const session = readSession(sessionDir);
+        if (name !== undefined) session.metadata.name = name;
+        if (description !== undefined) session.metadata.description = description;
+        if (tags !== undefined) session.metadata.tags = tags;
+        writeSession(sessionDir, session);
+      } catch {} // Not an atoo-any session, ignore
       const chainUuids = await resolveChainUuids(session_uuid, cwd || process.cwd());
       const agentIds = findAgentSessionIds(chainUuids);
       const merged = mergeChainMetadata(chainUuids);
@@ -1287,6 +1297,23 @@ export function createWebServer(tlsOptions?: { key: string; cert: string }): htt
         }
       }
       res.json(sessions);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Serve blob files from atoo-any sessions
+  app.get('/api/sessions/:uuid/blobs/:hash', (req, res) => {
+    const { uuid, hash } = req.params;
+    const cwd = (req.query.cwd as string) || process.cwd();
+    try {
+      const { getBlobPath, getSessionDir } = require('../agents/atoo-any/session-store.js');
+      const sessionDir = getSessionDir(cwd, uuid);
+      const blobPath = getBlobPath(sessionDir, hash);
+      if (!require('fs').existsSync(blobPath)) {
+        return res.status(404).json({ error: 'Blob not found' });
+      }
+      res.sendFile(blobPath);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

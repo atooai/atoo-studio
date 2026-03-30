@@ -1,7 +1,8 @@
 /**
- * AtooAnyAgent — meta-agent that orchestrates Claude Code, Codex CLI, and Gemini CLI simultaneously.
+ * AtooAnyAgent v2 — meta-agent using the normalized session schema.
+ *
  * Chat-only mode. Sends user messages to one or more CLIs, merges their streaming
- * responses into a unified session with dispatch-based grouping.
+ * responses into a tree-based session with per-prompt JSONL files.
  */
 import { EventEmitter } from 'events';
 import fs from 'fs';
@@ -14,9 +15,9 @@ import type {
   AgentSessionInfo,
   AgentStatus,
   AgentCapabilities,
-  Attachment,
+  Attachment as AgentAttachment,
 } from '../types.js';
-import type { SessionEvent, UserEvent } from '../../events/types.js';
+import type { SessionEvent } from '../../events/types.js';
 import type { WireMessage } from '../../events/wire.js';
 import { toWireMessages } from '../../events/wire.js';
 import { writeForkedClaudeJsonl } from '../lib/claude/jsonl-writer.js';
@@ -24,32 +25,50 @@ import { writeForkedCodexJsonl } from '../lib/codex/jsonl-writer.js';
 import { writeForkedGeminiJson } from '../lib/gemini/json-writer.js';
 import { killCliProcess, getPty } from '../../spawner.js';
 import { spawnClaudeOneShot, spawnCodexOneShot, spawnGeminiOneShot } from './spawner.js';
-import {
-  ensureSessionsDir,
-  getSessionFilePath,
-  appendEvent,
-  appendBranchOperation,
-  readAllEvents,
-  stripMeta,
-  rebuildForkState,
-  filterEventsForActivePath,
-  type AtooEventMeta,
-  type AtooBranchOperation,
-  type ForkInfo,
-  type ForkState,
-} from './session-store.js';
-
 import { mapCodexJsonlLine } from '../lib/codex/jsonl-mapper.js';
 import { mapGeminiMessage, type GeminiMessage } from '../lib/gemini/json-mapper.js';
 import { GeminiJsonWatcher } from '../lib/gemini/json-watcher.js';
 import { initFileTracking, ToolResultFileTracker } from '../lib/fs-tracking.js';
 import { fsMonitor } from '../../fs-monitor.js';
+import type {
+  Session,
+  Prompt,
+  AgentRun,
+  TreeNode,
+  PromptEvent,
+  Attachment,
+  ClientState,
+} from './schema-types.js';
+import {
+  createSession,
+  createPrompt,
+  createAgentRun,
+  createCompactionPrompt,
+} from './schema-types.js';
+import {
+  ensureSessionDir,
+  getSessionDir,
+  readSession,
+  readSessionSafe,
+  writeSession,
+  enqueueSessionWrite,
+  appendPromptEvent,
+  readPromptEvents,
+  writeBlob,
+  writeBlobBase64,
+  walkActivePath,
+  findMostRecentPath,
+  appendToActivePath,
+  forkAtNode,
+  compactInTree,
+  hideInTree,
+  extractAsRoot,
+} from './session-store.js';
 
 const DEBOUNCE_MS = 50;
 
 type AgentFamily = 'claude' | 'codex' | 'gemini';
 
-/** Labels prepended to assistant messages in cross-agent conversation history */
 const AGENT_LABELS: Record<string, string> = {
   claude: 'Claude',
   codex: 'Codex',
@@ -59,9 +78,10 @@ const AGENT_LABELS: Record<string, string> = {
 interface DispatchInfo {
   dispatchId: string;
   agentFamily: AgentFamily;
-  /** Unique key for UI grouping — may be compound like "claude:haiku-4.5" for multi-model dispatches */
   agentKey: string;
   parentUserUuid: string;
+  promptUuid: string;
+  agentIndex: number;
   envId: string;
   pid: number;
   tempSessionUuid: string;
@@ -71,12 +91,10 @@ interface DispatchInfo {
   done: boolean;
   cleanupInstance?: () => void;
   fileTracker: ToolResultFileTracker;
-  branchId: string | null; // branch this dispatch was created on
 }
 
 /**
- * Simple file watcher for Codex session files.
- * Tails a JSONL file from a given byte offset, emits parsed events.
+ * Simple file watcher for JSONL session files (Claude/Codex).
  */
 class SimpleFileWatcher extends EventEmitter {
   private filePath: string;
@@ -94,14 +112,12 @@ class SimpleFileWatcher extends EventEmitter {
   }
 
   start(): void {
-    // Wait for file to exist, then start tailing
     const tryWatch = () => {
       if (this.stopped) return;
       if (!fs.existsSync(this.filePath)) {
         this.pollTimer = setTimeout(tryWatch, 200);
         return;
       }
-      // Read any content that appeared since our offset
       this.readFromOffset();
       try {
         this.fileWatcher = fs.watch(this.filePath, (eventType) => {
@@ -119,7 +135,6 @@ class SimpleFileWatcher extends EventEmitter {
     tryWatch();
   }
 
-  /** Do a final read to capture any remaining events. */
   finalRead(): void {
     this.readFromOffset();
   }
@@ -162,6 +177,10 @@ class SimpleFileWatcher extends EventEmitter {
   }
 }
 
+// ═══════════════════════════════════════════════════════
+// AtooAnyAgent v2
+// ═══════════════════════════════════════════════════════
+
 export class AtooAnyAgent extends EventEmitter implements Agent {
   readonly sessionId: string;
   private status: AgentStatus = 'open';
@@ -169,50 +188,102 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
   private createdAt = Date.now();
   private destroyed = false;
 
-  private sessionUuid: string = '';
-  private sessionFilePath: string = '';
-  private events: SessionEvent[] = [];
+  // New schema state
+  private sessionDir: string = '';
+  private session: Session | null = null;
+  private clientId: string = '';
+  private currentPromptUuid: string | null = null;
+
+  // Wire messages cache (for getMessages/getWireMessages)
   private wireMessages: WireMessage[] = [];
   private pendingToolUses = new Map<string, { name: string; input: any }>();
+
+  // Active dispatches
   private activeDispatches = new Map<string, DispatchInfo>();
   private userIsViewing = true;
-
-  // Fork/branch state
-  private forkState: ForkState = { forks: [], activeBranchId: null };
 
   constructor(sessionId: string) {
     super();
     this.sessionId = sessionId;
+    this.clientId = uuidv4();
   }
+
+  // ─── Accessors ─────────────────────────────────────────
+
+  getSessionData(): Session | null {
+    return this.session;
+  }
+
+  getSessionDir(): string {
+    return this.sessionDir;
+  }
+
+  getClientId(): string {
+    return this.clientId;
+  }
+
+  getActivePath(): number[] {
+    return this.session?.clientState[this.clientId]?.activePath ?? [];
+  }
+
+  // ─── Lifecycle ─────────────────────────────────────────
 
   async initialize(options: AgentInitOptions): Promise<void> {
     this.cwd = options.cwd || os.homedir();
-    this.sessionUuid = uuidv4();
 
-    ensureSessionsDir(this.cwd);
-    this.sessionFilePath = getSessionFilePath(this.cwd, this.sessionUuid);
+    const sessionUuid = options.resumeSessionUuid || uuidv4();
+    this.sessionDir = getSessionDir(this.cwd, sessionUuid);
 
-    // If resuming, load historical events
     if (options.resumeSessionUuid) {
-      this.sessionUuid = options.resumeSessionUuid;
-      this.sessionFilePath = getSessionFilePath(this.cwd, this.sessionUuid);
-      await this.loadHistoricalEvents();
+      // Resume existing session
+      const existing = readSessionSafe(this.sessionDir);
+      if (existing) {
+        this.session = existing;
+        // Register client and find most recent path
+        this.registerClient();
+        await this.rebuildWireMessages();
+      } else {
+        // Session not found, create new
+        const { session } = this.initNewSession(sessionUuid);
+        this.session = session;
+        this.registerClient();
+      }
+    } else {
+      // New session
+      const { session } = this.initNewSession(sessionUuid);
+      this.session = session;
+      this.registerClient();
     }
 
     this.emit('ready');
+  }
+
+  private initNewSession(uuid: string): { session: Session; sessionDir: string } {
+    const sessionDir = ensureSessionDir(this.cwd, uuid);
+    this.sessionDir = sessionDir;
+    const session = createSession(uuid, this.cwd);
+    writeSession(sessionDir, session);
+    return { session, sessionDir };
+  }
+
+  private registerClient(): void {
+    if (!this.session) return;
+    const activePath = findMostRecentPath(this.session.tree, this.session.prompts);
+    this.session.clientState[this.clientId] = {
+      lastSeen: new Date().toISOString(),
+      activePath,
+    };
+    writeSession(this.sessionDir, this.session);
   }
 
   async destroy(): Promise<void> {
     if (this.destroyed) return;
     this.destroyed = true;
 
-    // Kill all active processes and clean up temp files
     for (const dispatch of this.activeDispatches.values()) {
       try {
         dispatch.watcher.stop();
         killCliProcess(dispatch.envId);
-        // Don't delete Gemini session files — they live in ~/.gemini/tmp/
-        // and are needed for session history and standalone gemini resume.
         if (dispatch.agentFamily !== 'gemini' && fs.existsSync(dispatch.tempSessionFile)) {
           fs.unlinkSync(dispatch.tempSessionFile);
         }
@@ -225,10 +296,10 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     this.emit('exit');
   }
 
-  /** Kill a specific agent's dispatch process by agent family or compound key (e.g. 'claude', 'claude:haiku-4.5') */
+  // ─── Kill agents ───────────────────────────────────────
+
   killAgent(agentFamily: string): void {
-    for (const [id, dispatch] of this.activeDispatches) {
-      // Match by exact agentKey (compound like "claude:haiku-4.5") or by family
+    for (const [, dispatch] of this.activeDispatches) {
       if ((dispatch.agentKey === agentFamily || dispatch.agentFamily === agentFamily) && !dispatch.done) {
         try {
           dispatch.watcher.stop();
@@ -237,11 +308,11 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
         dispatch.done = true;
       }
     }
-    const allDone = [...this.activeDispatches.values()].every(d => d.done);
-    if (allDone) this.setStatus(this.userIsViewing ? 'open' : 'attention');
+    if ([...this.activeDispatches.values()].every(d => d.done)) {
+      this.setStatus(this.userIsViewing ? 'open' : 'attention');
+    }
   }
 
-  /** Kill all running agent dispatch processes */
   killAllAgents(): void {
     for (const dispatch of this.activeDispatches.values()) {
       if (!dispatch.done) {
@@ -255,85 +326,54 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     this.setStatus(this.userIsViewing ? 'open' : 'attention');
   }
 
-  sendMessage(text: string, attachments?: Attachment[], meta?: Record<string, any>): void {
-    if (!text || this.destroyed) return;
+  // ─── Send Message ──────────────────────────────────────
+
+  sendMessage(text: string, attachments?: AgentAttachment[], meta?: Record<string, any>): void {
+    if (!text || this.destroyed || !this.session) return;
 
     const agents: string[] = meta?.agents || ['claude', 'codex'];
+    const promptUuid = uuidv4();
+    this.currentPromptUuid = promptUuid;
 
-    // Normalize attachments for storage (base64 + filename)
-    const storedAttachments = attachments?.filter(a => a.data || a.text).map(a => ({
-      media_type: a.media_type,
-      data: a.data || '',
-      name: a.name,
-      text: a.text,
-    }));
-
-    // Create user event (with attachments in our custom format)
-    const userUuid = uuidv4();
-    const userEvent: any = {
-      type: 'user',
-      uuid: userUuid,
-      sessionId: this.sessionUuid,
-      parentUuid: null,
-      timestamp: new Date().toISOString(),
-      cwd: this.cwd,
-      message: { role: 'user', content: text },
-    };
-    if (storedAttachments && storedAttachments.length > 0) {
-      userEvent._attachments = storedAttachments;
-    }
-    if (meta?.agentSelectorConfig) {
-      userEvent._agentSelectorConfig = meta.agentSelectorConfig;
-    }
-    // Tag with active branch
-    if (this.forkState.activeBranchId) {
-      userEvent._branchId = this.forkState.activeBranchId;
-    }
-
-    // Store and persist
-    this.events.push(userEvent);
-    appendEvent(this.sessionFilePath, userEvent);
-
-    // Emit user message to UI (include attachments, agent config, and branch for rendering)
-    const userWireMsgs = toWireMessages(this.sessionId, userEvent, this.pendingToolUses);
-    for (const msg of userWireMsgs) {
-      if (msg.type === 'user_message') {
-        if (userEvent._attachments) (msg as any).attachments = userEvent._attachments;
-        if (userEvent._agentSelectorConfig) (msg as any).agentSelectorConfig = userEvent._agentSelectorConfig;
+    // Store attachments as blobs
+    const storedAttachments: Attachment[] = [];
+    if (attachments?.length) {
+      for (const att of attachments) {
+        if (!att.data && !att.text) continue;
+        const blobUuid = uuidv4();
+        if (att.text) {
+          writeBlob(this.sessionDir, Buffer.from(att.text, 'utf-8'));
+        } else if (att.data) {
+          writeBlobBase64(this.sessionDir, att.data);
+        }
+        storedAttachments.push({
+          uuid: blobUuid,
+          filename: att.name || `attachment-${storedAttachments.length + 1}`,
+          mime: att.media_type,
+        });
       }
-      if (userEvent._branchId) (msg as any)._branchId = userEvent._branchId;
-      this.wireMessages.push(msg);
-      this.emit('message', msg);
     }
 
-    // Write attachment files to temp dir for agent dispatch
-    const attachmentPaths = this.writeAttachmentTempFiles(userUuid, storedAttachments);
-
-    // Build dispatch list from agentSelectorConfig (supports multiple models per family)
-    // or fall back to the legacy agents list.
+    // Build dispatch list
     const supportedAgents: AgentFamily[] = ['claude', 'codex', 'gemini'];
-
     interface DispatchEntry {
       family: AgentFamily;
-      dispatchKey: string; // unique key like "claude" or "claude:haiku-4.5"
+      dispatchKey: string;
       modelConfig?: { model?: string; reasoning?: string };
     }
     const dispatches: DispatchEntry[] = [];
 
     if (meta?.agentSelectorConfig) {
-      // Count enabled entries per family to detect multi-model dispatches
       const familyCounts: Record<string, number> = {};
       for (const entry of meta.agentSelectorConfig) {
         if (entry.enabled && supportedAgents.includes(entry.provider as AgentFamily)) {
           familyCounts[entry.provider] = (familyCounts[entry.provider] || 0) + 1;
         }
       }
-
       for (const entry of meta.agentSelectorConfig) {
         if (!entry.enabled || !supportedAgents.includes(entry.provider as AgentFamily)) continue;
         const family = entry.provider as AgentFamily;
         const modelId = entry.model?.id;
-        // Use compound key when there are multiple models of the same family
         const dispatchKey = familyCounts[family] > 1 && modelId
           ? `${family}:${modelId}`
           : family;
@@ -347,27 +387,212 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
         });
       }
     }
-
-    // Fallback: legacy agents list (no agentSelectorConfig)
     if (dispatches.length === 0) {
-      for (const agentFamily of agents) {
-        if (supportedAgents.includes(agentFamily as AgentFamily)) {
-          dispatches.push({ family: agentFamily as AgentFamily, dispatchKey: agentFamily });
+      for (const a of agents) {
+        if (supportedAgents.includes(a as AgentFamily)) {
+          dispatches.push({ family: a as AgentFamily, dispatchKey: a });
         }
       }
     }
 
+    // Create agent runs
+    const agentRuns: AgentRun[] = dispatches.map(d =>
+      createAgentRun(uuidv4(), d.family, d.modelConfig?.model || d.family, d.modelConfig?.reasoning)
+    );
+
+    // Get git info
+    let git: Prompt['git'] | undefined;
+    try {
+      const branch = fs.readFileSync(path.join(this.cwd, '.git', 'HEAD'), 'utf-8').trim();
+      const branchName = branch.startsWith('ref: refs/heads/') ? branch.slice(16) : branch;
+      git = { branch: branchName };
+    } catch {}
+
+    // Create prompt
+    const prompt = createPrompt(promptUuid, agentRuns, storedAttachments.length > 0 ? storedAttachments : undefined, git);
+
+    // Write prompt JSONL with the user message
+    const promptMsg: PromptEvent = {
+      type: 'prompt',
+      message: text,
+      timestamp: new Date().toISOString(),
+      ...(storedAttachments.length > 0 ? { blobs: storedAttachments.map(a => a.uuid) } : {}),
+    };
+    appendPromptEvent(this.sessionDir, promptUuid, promptMsg);
+
+    // Update session.json: add prompt to index, append to tree
+    const activePath = this.getActivePath();
+    const agentIndices = agentRuns.map((_, i) => i);
+    this.session.prompts[promptUuid] = prompt;
+    appendToActivePath(this.session, activePath, promptUuid, agentIndices);
+    writeSession(this.sessionDir, this.session);
+
+    // Emit user message to UI
+    const userWireMsg: WireMessage = {
+      id: promptUuid,
+      sessionId: this.sessionId,
+      timestamp: Date.now(),
+      type: 'user_message',
+      text,
+      ...(storedAttachments.length > 0 ? {
+        attachments: attachments?.map(a => ({
+          media_type: a.media_type,
+          data: a.data || '',
+          name: a.name,
+          text: a.text,
+        }))
+      } : {}),
+    } as any;
+    if (meta?.agentSelectorConfig) (userWireMsg as any).agentSelectorConfig = meta.agentSelectorConfig;
+    this.wireMessages.push(userWireMsg);
+    this.emit('message', userWireMsg);
+
+    // Write attachment temp files for agent dispatch
+    const attachmentPaths = this.writeAttachmentTempFiles(promptUuid, attachments);
+
+    // Dispatch to agents
     const multiAgent = dispatches.length > 1;
     const MULTI_AGENT_CONTEXT = '[IMPORTANT CONTEXT: This message was sent to multiple agents simultaneously. All agents are working on this in parallel on the same codebase. Be aware of potential file conflicts. If the user addresses a specific agent with @claude, @codex, or @gemini, only the addressed agent should act on that part. Coordinate by making atomic, self-contained changes.]';
-    for (const dispatch of dispatches) {
+
+    for (let i = 0; i < dispatches.length; i++) {
+      const dispatch = dispatches[i];
       let dispatchMessage = multiAgent ? `${MULTI_AGENT_CONTEXT}\n\n${text}` : text;
       if (attachmentPaths.length > 0) {
         const pathList = attachmentPaths.map(p => `"${p}"`).join(';');
         dispatchMessage = `You MUST read the following user attachments: ${pathList}\nThe actual user prompt follows from the next line.\n${dispatchMessage}`;
       }
-      this.dispatchToAgent(dispatch.family, dispatchMessage, userUuid, dispatch.modelConfig, dispatch.dispatchKey);
+
+      // Write run_start to prompt JSONL
+      const runStartEvent: PromptEvent = {
+        type: 'run_start',
+        runId: agentRuns[i].uuid,
+        agentIndex: i,
+      };
+      appendPromptEvent(this.sessionDir, promptUuid, runStartEvent);
+
+      this.dispatchToAgent(dispatch.family, dispatchMessage, promptUuid, agentRuns[i].uuid, i, dispatch.modelConfig, dispatch.dispatchKey);
     }
   }
+
+  // ─── Branch Operations ─────────────────────────────────
+
+  forkConversation(afterPromptUuid: string): void {
+    if (!this.session) return;
+
+    const activePath = this.getActivePath();
+    const newChildIndex = forkAtNode(this.session, activePath, afterPromptUuid);
+
+    // Update client to point to the new branch
+    const newPath = [...activePath];
+    // Find fork depth
+    const nodes = walkActivePath(this.session.tree, activePath);
+    let forkDepth = 1;
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].uuid === afterPromptUuid) break;
+      if (nodes[i].children && nodes[i].children!.length > 1) forkDepth++;
+    }
+    while (newPath.length <= forkDepth) newPath.push(0);
+    newPath[forkDepth] = newChildIndex;
+
+    this.session.clientState[this.clientId].activePath = newPath;
+    writeSession(this.sessionDir, this.session);
+
+    this.emitTreeUpdate();
+  }
+
+  switchBranch(activePath: number[]): void {
+    if (!this.session) return;
+    this.session.clientState[this.clientId].activePath = activePath;
+    this.session.clientState[this.clientId].lastSeen = new Date().toISOString();
+    writeSession(this.sessionDir, this.session);
+    this.emitTreeUpdate();
+  }
+
+  compactMessages(promptUuids: string[], compactedBy: string): void {
+    if (!this.session) return;
+
+    // Create compaction prompt
+    const compactUuid = uuidv4();
+    const compactRun = createAgentRun(uuidv4(), compactedBy, 'haiku', 'low');
+    const compactPrompt = createCompactionPrompt(compactUuid, promptUuids, compactRun);
+
+    // TODO: Actually call the agent to generate a summary. For now, placeholder.
+    const summary = `[Compacted ${promptUuids.length} prompts by ${compactedBy}]`;
+    compactPrompt.title = `Compacted: ${promptUuids.length} prompts`;
+
+    // Write compaction prompt JSONL
+    const promptMsg: PromptEvent = {
+      type: 'prompt',
+      message: `[Compacted] ${promptUuids.length} turns compacted`,
+      timestamp: new Date().toISOString(),
+    };
+    appendPromptEvent(this.sessionDir, compactUuid, promptMsg);
+
+    const runStart: PromptEvent = { type: 'run_start', runId: compactRun.uuid, agentIndex: 0 };
+    appendPromptEvent(this.sessionDir, compactUuid, runStart);
+
+    const runMsg: PromptEvent = {
+      type: 'run_msg',
+      runId: compactRun.uuid,
+      role: 'assistant',
+      content: { type: 'text', text: summary },
+    };
+    appendPromptEvent(this.sessionDir, compactUuid, runMsg);
+
+    const runEnd: PromptEvent = { type: 'run_end', runId: compactRun.uuid };
+    appendPromptEvent(this.sessionDir, compactUuid, runEnd);
+
+    // Update session
+    this.session.prompts[compactUuid] = compactPrompt;
+    const activePath = this.getActivePath();
+    const newPath = compactInTree(this.session, activePath, compactUuid, promptUuids);
+    this.session.clientState[this.clientId].activePath = newPath;
+    writeSession(this.sessionDir, this.session);
+
+    this.emitTreeUpdate();
+  }
+
+  removeMessages(promptUuids: string[]): void {
+    if (!this.session) return;
+    // Hide = create new branch with prompts marked hidden
+    let currentPath = this.getActivePath();
+    for (const uuid of promptUuids) {
+      currentPath = hideInTree(this.session, currentPath, uuid);
+    }
+    this.session.clientState[this.clientId].activePath = currentPath;
+    writeSession(this.sessionDir, this.session);
+    this.emitTreeUpdate();
+  }
+
+  restoreMessage(_promptUuid: string): void {
+    // Restore = switch back to the parent branch that has the non-hidden version
+    // This is just a branch switch in the new model
+    this.emitTreeUpdate();
+  }
+
+  extractRange(startIndex: number, endIndex: number, label?: string): void {
+    if (!this.session) return;
+
+    const nodes = walkActivePath(this.session.tree, this.getActivePath());
+    const promptUuids = nodes.slice(startIndex, endIndex + 1).map(n => n.uuid);
+
+    extractAsRoot(this.session, promptUuids, label);
+    writeSession(this.sessionDir, this.session);
+    this.emitTreeUpdate();
+  }
+
+  extractPrompts(promptUuids: string[], label?: string): void {
+    if (!this.session) return;
+    extractAsRoot(this.session, promptUuids, label);
+    writeSession(this.sessionDir, this.session);
+    this.emitTreeUpdate();
+  }
+
+  forkToResumable(_afterEventUuid: string, _fromEventUuid?: string, _targetDir?: string): string | null {
+    return null;
+  }
+
+  // ─── State getters ─────────────────────────────────────
 
   approve(_requestId: string, _updatedInput?: any): void {}
   deny(_requestId: string): void {}
@@ -376,195 +601,12 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
   setModel(_model: string): void {}
   refreshContext(): void {}
   sendKey(_key: string): void {}
+
   onFocused(): void {
     this.userIsViewing = true;
-    // If user returns while status is 'attention', clear it to 'open'
-    if (this.status === 'attention') {
-      this.setStatus('open');
-    }
+    if (this.status === 'attention') this.setStatus('open');
   }
-  onBlurred(): void {
-    this.userIsViewing = false;
-  }
-
-  forkToResumable(_afterEventUuid: string, _fromEventUuid?: string, _targetDir?: string): string | null {
-    return null; // Forking not supported for atoo-any (use in-session branches instead)
-  }
-
-  // ─── Branch Operations ────────────────────────────────
-
-  removeMessages(eventUuids: string[]): void {
-    const op: AtooBranchOperation = {
-      type: 'branch_operation',
-      uuid: uuidv4(),
-      timestamp: new Date().toISOString(),
-      operation: 'remove',
-      targetEventUuids: eventUuids,
-    };
-    appendBranchOperation(this.sessionFilePath, op);
-    // Emit status update to frontend
-    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'remove', eventUuids });
-  }
-
-  restoreMessage(eventUuid: string): void {
-    const op: AtooBranchOperation = {
-      type: 'branch_operation',
-      uuid: uuidv4(),
-      timestamp: new Date().toISOString(),
-      operation: 'restore',
-      targetEventUuids: [eventUuid],
-    };
-    appendBranchOperation(this.sessionFilePath, op);
-    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'restore', eventUuids: [eventUuid] });
-  }
-
-  compactMessages(eventUuids: string[], compactedBy: string): void {
-    // TODO: Actually call the agent to generate a summary. For now, placeholder.
-    const summary = `[Compacted ${eventUuids.length} events by ${compactedBy}]`;
-    const op: AtooBranchOperation = {
-      type: 'branch_operation',
-      uuid: uuidv4(),
-      timestamp: new Date().toISOString(),
-      operation: 'compact',
-      targetEventUuids: eventUuids,
-      compactedBy,
-      compactedSummary: summary,
-    };
-    appendBranchOperation(this.sessionFilePath, op);
-    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'compact', eventUuids, compactedBy, compactedSummary: summary });
-  }
-
-  forkConversation(afterEventUuid: string): void {
-    const forkPointEvent = this.events.find(e => e.uuid === afterEventUuid);
-    if (!forkPointEvent) {
-      console.warn(`[atoo-any] Fork: event ${afterEventUuid} not found`);
-      return;
-    }
-
-    const newBranchId = uuidv4();
-    const parentBranchId = this.forkState.activeBranchId;
-    const forkId = uuidv4();
-
-    // Check if there's already a fork at this point
-    const existingFork = this.forkState.forks.find(f => f.forkPointEventUuid === afterEventUuid);
-    if (existingFork) {
-      // Add another branch to the existing fork
-      const branchLabel = `Branch ${existingFork.branches.length}`;
-      existingFork.branches.push({ id: newBranchId, label: branchLabel, isOriginal: false });
-      existingFork.activeBranchId = newBranchId;
-
-      const op: AtooBranchOperation = {
-        type: 'branch_operation',
-        uuid: uuidv4(),
-        timestamp: new Date().toISOString(),
-        operation: 'fork',
-        forkPointEventUuid: afterEventUuid,
-        branchId: newBranchId,
-        branchLabel,
-        parentBranchId,
-      };
-      appendBranchOperation(this.sessionFilePath, op);
-    } else {
-      // New fork point
-      const branchLabel = 'Branch 1';
-      const originalBranchId = parentBranchId ?? '__main__';
-      const newFork: ForkInfo = {
-        id: forkId,
-        forkPointEventUuid: afterEventUuid,
-        parentBranchId,
-        branches: [
-          { id: originalBranchId, label: 'Original', isOriginal: true },
-          { id: newBranchId, label: branchLabel, isOriginal: false },
-        ],
-        activeBranchId: newBranchId,
-      };
-      this.forkState.forks.push(newFork);
-
-      const op: AtooBranchOperation = {
-        type: 'branch_operation',
-        uuid: forkId,
-        timestamp: new Date().toISOString(),
-        operation: 'fork',
-        forkPointEventUuid: afterEventUuid,
-        branchId: newBranchId,
-        branchLabel,
-        parentBranchId,
-      };
-      appendBranchOperation(this.sessionFilePath, op);
-    }
-
-    // Switch to the new branch
-    this.forkState.activeBranchId = newBranchId;
-    const switchOp: AtooBranchOperation = {
-      type: 'branch_operation',
-      uuid: uuidv4(),
-      timestamp: new Date().toISOString(),
-      operation: 'switch_branch',
-      branchId: newBranchId,
-    };
-    appendBranchOperation(this.sessionFilePath, switchOp);
-
-    this.emitForkState();
-  }
-
-  switchBranch(forkId: string, branchId: string): void {
-    // Find the specific fork by ID
-    const targetFork = this.forkState.forks.find(f => f.id === forkId);
-    if (targetFork) {
-      targetFork.activeBranchId = branchId;
-    }
-
-    // Recompute global active branch from the deepest fork
-    // (walk forks in order, the last fork's active branch is the global one)
-    let globalActive: string | null = null;
-    for (const fork of this.forkState.forks) {
-      const ab = fork.activeBranchId;
-      globalActive = ab === '__main__' ? null : ab;
-    }
-    this.forkState.activeBranchId = globalActive;
-
-    // Persist with forkId so rebuild can target the right fork
-    const op: AtooBranchOperation = {
-      type: 'branch_operation',
-      uuid: uuidv4(),
-      timestamp: new Date().toISOString(),
-      operation: 'switch_branch',
-      branchId,
-      forkPointEventUuid: targetFork?.forkPointEventUuid,
-    };
-    appendBranchOperation(this.sessionFilePath, op);
-
-    this.emitForkState();
-  }
-
-  getForkState(): ForkState {
-    return this.forkState;
-  }
-
-  private emitForkState(): void {
-    this.emit('message', {
-      type: 'fork_state_update',
-      sessionId: this.sessionId,
-      forks: this.forkState.forks,
-      activeBranchId: this.forkState.activeBranchId,
-    });
-  }
-
-  extractRange(startIndex: number, endIndex: number, label?: string): void {
-    const startUuid = this.events[startIndex]?.uuid;
-    const endUuid = this.events[endIndex]?.uuid;
-    const op: AtooBranchOperation = {
-      type: 'branch_operation',
-      uuid: uuidv4(),
-      timestamp: new Date().toISOString(),
-      operation: 'extract',
-      extractionId: uuidv4(),
-      extractionLabel: label || `Extract ${Date.now()}`,
-      sourceRange: [startUuid, endUuid],
-    };
-    appendBranchOperation(this.sessionFilePath, op);
-    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'extract', extractionId: op.extractionId, extractionLabel: op.extractionLabel, sourceRange: op.sourceRange });
-  }
+  onBlurred(): void { this.userIsViewing = false; }
 
   getInfo(): AgentSessionInfo {
     return {
@@ -575,7 +617,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       cwd: this.cwd || undefined,
       capabilities: this.getCapabilities(),
       createdAt: this.createdAt,
-      cliSessionId: this.sessionUuid || undefined,
+      cliSessionId: this.session?.uuid || undefined,
     };
   }
 
@@ -584,93 +626,41 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
   }
 
   getEvents(): SessionEvent[] {
-    return this.events;
+    // Flatten tree to SessionEvents for backward compatibility
+    return this.buildFlatSessionEvents();
   }
 
   getWireMessages(): WireMessage[] {
-    const wireToolUses = new Map<string, { name: string; input: any }>();
-    const result: WireMessage[] = [];
-    for (const event of this.events) {
-      result.push(...toWireMessages(this.sessionId, event, wireToolUses));
-    }
-    return result;
+    return this.wireMessages;
   }
 
   getCliSessionId(): string | null {
-    return this.sessionUuid;
+    return this.session?.uuid || null;
   }
 
-  /** Return list of currently running dispatch IDs (for reconnect/reload). */
   getRunningDispatches(): string[] {
     return [...this.activeDispatches.values()]
       .filter(d => !d.done)
       .map(d => d.dispatchId);
   }
 
-  // ─── Private ───────────────────────────────────────────
+  // ─── Private: Dispatch ─────────────────────────────────
 
-  private async loadHistoricalEvents(): Promise<void> {
-    try {
-      const atooEvents = readAllEvents(this.sessionFilePath);
-
-      // Reconstruct fork state from branch_operation records
-      this.forkState = rebuildForkState(atooEvents);
-
-      for (const event of atooEvents) {
-        this.events.push(event as SessionEvent);
-      }
-
-      // Rebuild wireMessages with dispatch grouping
-      const historyToolUses = new Map<string, { name: string; input: any }>();
-      for (const event of atooEvents) {
-        // Skip branch_operation meta-events for wire messages
-        if ((event as any).type === 'branch_operation') continue;
-
-        const wireMsgs = toWireMessages(this.sessionId, event as SessionEvent, historyToolUses);
-        for (const msg of wireMsgs) {
-          // Restore dispatch grouping from metadata
-          if (event._dispatchId) {
-            msg._parentToolUseId = event._dispatchId;
-            // Derive agentKey from dispatchId (format: "userUuid:agentKey")
-            // The agentKey may be compound like "claude:haiku-4.5"
-            const colonIdx = (event._dispatchId as string).indexOf(':');
-            if (colonIdx >= 0) {
-              msg._agentId = (event._dispatchId as string).slice(colonIdx + 1);
-            }
-          } else if (event._source) {
-            msg._agentId = event._source;
-          }
-          // Restore branch tag on wire messages
-          if (event._branchId) (msg as any)._branchId = event._branchId;
-          // Restore attachments and agent config on user messages
-          if (msg.type === 'user_message') {
-            if ((event as any)._attachments) (msg as any).attachments = (event as any)._attachments;
-            if ((event as any)._agentSelectorConfig) (msg as any).agentSelectorConfig = (event as any)._agentSelectorConfig;
-          }
-          this.wireMessages.push(msg);
-        }
-      }
-
-      // Sync pendingToolUses
-      for (const [id, info] of historyToolUses) {
-        this.pendingToolUses.set(id, info);
-      }
-
-      console.log(`[atoo-any] Loaded ${this.wireMessages.length} historical messages, ${this.forkState.forks.length} forks for ${this.sessionUuid}`);
-    } catch (err: any) {
-      console.warn(`[atoo-any] Failed to load history for ${this.sessionUuid}:`, err.message);
-    }
-  }
-
-  private dispatchToAgent(family: AgentFamily, message: string, parentUserUuid: string, modelConfig?: { model?: string; reasoning?: string }, dispatchKey?: string): void {
+  private dispatchToAgent(
+    family: AgentFamily,
+    message: string,
+    promptUuid: string,
+    runId: string,
+    agentIndex: number,
+    modelConfig?: { model?: string; reasoning?: string },
+    dispatchKey?: string,
+  ): void {
     const effectiveKey = dispatchKey || family;
-    const dispatchId = `${parentUserUuid}:${effectiveKey}`;
+    const dispatchId = `${promptUuid}:${effectiveKey}`;
     const tempUuid = uuidv4();
 
-    // Build clean conversation history as SessionEvents for the CLI's session file.
+    // Build conversation history for the CLI
     const cleanEvents = this.buildConversationHistory(family);
-
-    // Inject attachment file paths into historical user messages
     this.injectHistoryAttachments(cleanEvents);
 
     let tempFilePath: string;
@@ -686,7 +676,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       console.error(`[atoo-any] Failed to write temp ${family} session:`, err.message);
       return;
     }
-    // Record initial byte offset (for JSONL watchers) or message count (for Gemini JSON)
+
     let initialByteOffset = 0;
     let initialMessageCount = 0;
     try {
@@ -695,27 +685,26 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
         const session = JSON.parse(content);
         initialMessageCount = session.messages?.length || 0;
       } else {
-        const stat = fs.statSync(tempFilePath);
-        initialByteOffset = stat.size;
+        initialByteOffset = fs.statSync(tempFilePath).size;
       }
     } catch {}
 
-    // Spawn the CLI process (with LD_PRELOAD file tracking)
+    // Spawn CLI process
     const preloadSessionId = uuidv4();
     let envId: string;
     let pid: number;
     let cleanupInstance: (() => void) | undefined;
+
     try {
       if (family === 'claude') {
-        ({ envId, pid } = spawnClaudeOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId }));
+        ({ envId, pid } = spawnClaudeOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.session!.uuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId }));
       } else if (family === 'codex') {
-        ({ envId, pid } = spawnCodexOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId }));
+        ({ envId, pid } = spawnCodexOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.session!.uuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId }));
       } else {
-        const result = spawnGeminiOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.sessionUuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId });
+        const result = spawnGeminiOneShot({ cwd: this.cwd, resumeUuid: tempUuid, message, parentSessionUuid: this.session!.uuid, model: modelConfig?.model, reasoning: modelConfig?.reasoning, preloadSessionId });
         envId = result.envId;
         pid = result.pid;
         cleanupInstance = result.cleanupInstance;
-        // Update tempFilePath if spawnGeminiOneShot found the actual path
         if (result.sessionFilePath) tempFilePath = result.sessionFilePath;
       }
     } catch (err: any) {
@@ -724,19 +713,11 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       return;
     }
 
-    // Initialize file change tracking (Level 1: LD_PRELOAD + Level 2: inotify)
-    // Use dispatchId as session ID so changes are scoped per-agent-per-prompt
-    initFileTracking({
-      sessionId: dispatchId,
-      cwd: this.cwd,
-      pid: pid!,
-      preloadSessionId,
-    });
-
-    // Level 3: Tool-result fallback tracker
+    // File change tracking
+    initFileTracking({ sessionId: dispatchId, cwd: this.cwd, pid: pid!, preloadSessionId });
     const fileTracker = new ToolResultFileTracker(dispatchId);
 
-    // Set up file watcher on the session file
+    // Set up watcher
     let watcher: SimpleFileWatcher | GeminiJsonWatcher;
     if (family === 'gemini') {
       watcher = new GeminiJsonWatcher(tempFilePath, initialMessageCount);
@@ -748,7 +729,9 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       dispatchId,
       agentFamily: family,
       agentKey: effectiveKey,
-      parentUserUuid,
+      parentUserUuid: promptUuid,
+      promptUuid,
+      agentIndex,
       envId,
       pid: pid!,
       tempSessionUuid: tempUuid,
@@ -758,13 +741,11 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       done: false,
       cleanupInstance,
       fileTracker,
-      branchId: this.forkState.activeBranchId,
     };
 
     this.activeDispatches.set(dispatchId, dispatch);
     this.setStatus('active');
 
-    // Tell frontend this dispatch is now running
     this.emit('message', {
       type: 'dispatch_started',
       sessionId: this.sessionId,
@@ -772,7 +753,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       agentFamily: dispatch.agentFamily,
     });
 
-    // Handle incoming events from the watcher
+    // Handle incoming events
     if (family === 'gemini') {
       (watcher as GeminiJsonWatcher).on('message', (geminiMsg: GeminiMessage) => {
         this.handleGeminiDispatchMessage(dispatch, geminiMsg);
@@ -783,71 +764,61 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       });
     }
 
-    // Handle process exit — delay to allow filesystem flush before final read
+    // Handle process exit
     const pty = getPty(envId);
     if (pty) {
       pty.onExit(({ exitCode }) => {
         console.log(`[atoo-any] ${family} process exited (code=${exitCode}) for dispatch ${dispatchId}`);
-
-        // Delay final read to allow filesystem to flush buffered writes.
-        // The key issue: the live watcher may have picked up partial events (e.g.
-        // Gemini thinking) before the process exits, but the final response hasn't
-        // been flushed to disk yet. We must keep retrying until the file stabilizes.
         let lastFileSize = 0;
         let lastMsgCount = 0;
 
         const finalize = (retriesLeft: number) => {
           watcher.finalRead();
 
-          // Detect if the file is still changing (new content since last check)
-          let currentSize = 0;
-          let currentMsgCount = 0;
           let fileStabilized = true;
           try {
             if (dispatch.agentFamily === 'gemini') {
               const content = fs.readFileSync(tempFilePath, 'utf-8');
               const session = JSON.parse(content);
-              currentMsgCount = session.messages?.length || 0;
+              const currentMsgCount = session.messages?.length || 0;
               fileStabilized = currentMsgCount === lastMsgCount;
               lastMsgCount = currentMsgCount;
             } else {
-              const stat = fs.statSync(tempFilePath);
-              currentSize = stat.size;
+              const currentSize = fs.statSync(tempFilePath).size;
               fileStabilized = currentSize === lastFileSize;
               lastFileSize = currentSize;
             }
           } catch {}
 
-          // Keep retrying if the file is still changing or hasn't stabilized yet
           if (!fileStabilized && retriesLeft > 0) {
             setTimeout(() => finalize(retriesLeft - 1), 300);
             return;
           }
+          if (!fileStabilized) watcher.finalRead();
 
-          // One last read after file stabilized
-          if (!fileStabilized) {
-            watcher.finalRead();
-          }
-
-          const hasEvents = this.events.some(
-            (e: any) => e._dispatchId === dispatchId && e.type === 'assistant',
+          // Check if agent produced any output
+          const promptEvents = readPromptEvents(this.sessionDir, promptUuid);
+          const hasOutput = promptEvents.some(e =>
+            e.type === 'run_msg' && (e as any).runId === dispatch.agentKey
           );
 
-          // Emit error event if the agent exited with non-zero code and produced no output
-          if (exitCode !== 0 && !hasEvents) {
+          if (exitCode !== 0 && !hasOutput) {
             this.emitAgentError(dispatch, exitCode);
           }
 
+          // Update agent run endedAt
+          this.updateAgentRunEnd(promptUuid, agentIndex);
+
+          // Write run_end
+          const runEnd: PromptEvent = { type: 'run_end', runId };
+          appendPromptEvent(this.sessionDir, promptUuid, runEnd);
+
           watcher.stop();
           dispatch.done = true;
-
-          // Stop inotify watcher for this dispatch's file tracking
           fsMonitor.unwatchPid(dispatch.dispatchId);
 
-          // Count file changes for this dispatch
           const fileChanges = fsMonitor.getChangesInRange(dispatch.dispatchId);
 
-          // Notify frontend that this specific agent dispatch is done
           this.emit('message', {
             type: 'dispatch_done',
             sessionId: this.sessionId,
@@ -857,37 +828,23 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
             fileChangeCount: fileChanges.length,
           });
 
-          // Clean up temp session file.
-          // For Gemini, the session file lives in ~/.gemini/tmp/ (the real location)
-          // and must NOT be deleted — it's needed for session history and resume.
           if (dispatch.agentFamily !== 'gemini') {
-            try {
-              if (fs.existsSync(tempFilePath)) {
-                fs.unlinkSync(tempFilePath);
-              }
-            } catch {}
+            try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch {}
           }
+          if (dispatch.cleanupInstance) dispatch.cleanupInstance();
 
-          // Clean up Gemini instance directory if applicable
-          if (dispatch.cleanupInstance) {
-            dispatch.cleanupInstance();
-          }
-
-          // Check if all dispatches are done
-          const allDone = [...this.activeDispatches.values()].every(d => d.done);
-          if (allDone) {
+          if ([...this.activeDispatches.values()].every(d => d.done)) {
+            // Update prompt endedAt
+            this.updatePromptEnd(promptUuid);
             this.setStatus('open');
           }
         };
 
-        // Initial delay before first final read — Gemini JSON files may flush slower.
-        // We use enough retries (8) with 300ms spacing to cover ~2.5s of stabilization.
         const initialDelay = family === 'gemini' ? 500 : 200;
         setTimeout(() => finalize(8), initialDelay);
       });
     }
 
-    // Start the watcher
     watcher.start();
   }
 
@@ -895,24 +852,14 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     if (this.destroyed) return;
 
     // Skip non-conversational events
-    if (rawEvent.type === 'file-history-snapshot') return;
-    if (rawEvent.type === 'last-prompt') return;
-    if (rawEvent.type === 'queue-operation') return;
-    if (rawEvent.type === 'progress') return;
-
-    // Skip user events — we already have the user message in our atoo session.
-    // The CLI rewrites it into its own session, but we don't want duplicates.
-    if (rawEvent.type === 'user') return;
-
-    // For Codex format: skip session_meta, user_message event_msg, turn_context, task_started
+    if (['file-history-snapshot', 'last-prompt', 'queue-operation', 'progress', 'user'].includes(rawEvent.type)) return;
     if (rawEvent.type === 'session_meta') return;
     if (rawEvent.type === 'turn_context') return;
     if (rawEvent.type === 'event_msg' && rawEvent.payload?.type === 'user_message') return;
     if (rawEvent.type === 'event_msg' && rawEvent.payload?.type === 'task_started') return;
     if (rawEvent.type === 'event_msg' && rawEvent.payload?.type === 'token_count') return;
 
-    // For Codex events, we need to map them to SessionEvents
-    // The SimpleFileWatcher gives us raw JSONL lines — for Codex these are in Codex format
+    // Map Codex events
     let sessionEvents: SessionEvent[];
     if (dispatch.agentFamily === 'codex') {
       try {
@@ -924,53 +871,36 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       sessionEvents = [rawEvent as SessionEvent];
     }
 
-    const meta: AtooEventMeta = {
-      _source: dispatch.agentFamily,
-      _parentUserUuid: dispatch.parentUserUuid,
-      _dispatchId: dispatch.dispatchId,
-      _branchId: dispatch.branchId || undefined,
-    };
-
     for (const event of sessionEvents) {
-      // Tag in-memory event with dispatch metadata for history reconstruction
-      (event as any)._source = meta._source;
-      (event as any)._dispatchId = meta._dispatchId;
-      (event as any)._parentUserUuid = meta._parentUserUuid;
-      if (dispatch.branchId) (event as any)._branchId = dispatch.branchId;
-
-      // Level 3: Feed through tool-result file tracker
       dispatch.fileTracker.processEvent(event);
 
-      // Store in our events array and persist
-      this.events.push(event);
-      appendEvent(this.sessionFilePath, event, meta);
+      // Write to prompt JSONL
+      const content = this.sessionEventToContent(event);
+      if (content) {
+        const runMsg: PromptEvent = {
+          type: 'run_msg',
+          runId: dispatch.agentKey,
+          role: event.type === 'user' ? 'tool_result' : 'assistant',
+          content,
+        };
+        appendPromptEvent(this.sessionDir, dispatch.promptUuid, runMsg);
+      }
 
-      // Convert to wire messages
+      // Convert to wire messages and emit
       const wireMsgs = toWireMessages(this.sessionId, event, this.pendingToolUses);
       for (const msg of wireMsgs) {
-        // Tag with dispatch info for UI grouping
         msg._parentToolUseId = dispatch.dispatchId;
         msg._agentId = dispatch.agentKey;
-        if (dispatch.branchId) (msg as any)._branchId = dispatch.branchId;
-
         this.wireMessages.push(msg);
         this.emit('message', msg);
       }
     }
   }
 
-  /**
-   * Handle a Gemini message from the JSON watcher.
-   * Maps GeminiMessage → SessionEvent[] and emits wire messages.
-   */
   private handleGeminiDispatchMessage(dispatch: DispatchInfo, geminiMsg: GeminiMessage): void {
     if (this.destroyed) return;
+    if (geminiMsg.type === 'user' || geminiMsg.type === 'info') return;
 
-    // Skip user and info messages — we already have the user message, and info is noise
-    if (geminiMsg.type === 'user') return;
-    if (geminiMsg.type === 'info') return;
-
-    // Map to SessionEvents
     let sessionEvents: SessionEvent[];
     try {
       sessionEvents = mapGeminiMessage(geminiMsg);
@@ -978,109 +908,339 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       return;
     }
 
-    const meta: AtooEventMeta = {
-      _source: dispatch.agentFamily,
-      _parentUserUuid: dispatch.parentUserUuid,
-      _dispatchId: dispatch.dispatchId,
-      _branchId: dispatch.branchId || undefined,
-    };
-
     for (const event of sessionEvents) {
-      // Tag in-memory event with dispatch metadata
-      (event as any)._source = meta._source;
-      (event as any)._dispatchId = meta._dispatchId;
-      (event as any)._parentUserUuid = meta._parentUserUuid;
-      if (dispatch.branchId) (event as any)._branchId = dispatch.branchId;
-
-      // Level 3: Feed through tool-result file tracker
       dispatch.fileTracker.processEvent(event);
 
-      // Store and persist
-      this.events.push(event);
-      appendEvent(this.sessionFilePath, event, meta);
+      const content = this.sessionEventToContent(event);
+      if (content) {
+        const runMsg: PromptEvent = {
+          type: 'run_msg',
+          runId: dispatch.agentKey,
+          role: event.type === 'user' ? 'tool_result' : 'assistant',
+          content,
+        };
+        appendPromptEvent(this.sessionDir, dispatch.promptUuid, runMsg);
+      }
 
-      // Convert to wire messages
       const wireMsgs = toWireMessages(this.sessionId, event, this.pendingToolUses);
       for (const msg of wireMsgs) {
         msg._parentToolUseId = dispatch.dispatchId;
         msg._agentId = dispatch.agentKey;
-        if (dispatch.branchId) (msg as any)._branchId = dispatch.branchId;
         this.wireMessages.push(msg);
         this.emit('message', msg);
       }
     }
   }
 
-  /**
-   * Walk through history events and inject attachment file paths into user messages.
-   * For each historical user event that had attachments, write temp files and
-   * prepend the user message content with file path instructions.
-   */
-  /**
-   * Emit a synthetic error event when an agent process exits with non-zero code
-   * and produced no assistant output. Shows in the agent's response bubble.
-   */
-  private emitAgentError(dispatch: DispatchInfo, exitCode: number): void {
-    const errorEvent: SessionEvent = {
-      type: 'assistant' as const,
-      uuid: uuidv4(),
-      timestamp: new Date().toISOString(),
-      message: {
-        role: 'assistant' as const,
-        content: [{
-          type: 'text' as const,
-          text: `**Agent error**: ${dispatch.agentFamily} exited with code ${exitCode}. The agent may have encountered an internal error, rate limit, or invalid session.`,
-        }],
-      },
-    };
+  // ─── Private: Helpers ──────────────────────────────────
 
-    const meta: AtooEventMeta = {
-      _source: dispatch.agentFamily,
-      _parentUserUuid: dispatch.parentUserUuid,
-      _dispatchId: dispatch.dispatchId,
-    };
-
-    (errorEvent as any)._source = meta._source;
-    (errorEvent as any)._dispatchId = meta._dispatchId;
-    (errorEvent as any)._parentUserUuid = meta._parentUserUuid;
-
-    this.events.push(errorEvent);
-    appendEvent(this.sessionFilePath, errorEvent, meta);
-
-    const wireMsgs = toWireMessages(this.sessionId, errorEvent, this.pendingToolUses);
-    for (const msg of wireMsgs) {
-      msg._parentToolUseId = dispatch.dispatchId;
-      msg._agentId = dispatch.agentKey;
-      this.wireMessages.push(msg);
-      this.emit('message', msg);
+  private sessionEventToContent(event: SessionEvent): any {
+    if (event.type === 'assistant') {
+      const msg = (event as any).message;
+      if (Array.isArray(msg?.content)) {
+        // Return the first meaningful block
+        for (const block of msg.content) {
+          if (block.type === 'text' || block.type === 'thinking' || block.type === 'tool_use') {
+            return block;
+          }
+        }
+      } else if (typeof msg?.content === 'string') {
+        return { type: 'text', text: msg.content };
+      }
+    } else if (event.type === 'user') {
+      const msg = (event as any).message;
+      if (Array.isArray(msg?.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'tool_result') return block;
+        }
+      }
+    } else if (event.type === 'control_request') {
+      const cr = event as any;
+      const toolUse = cr.request?.tool_use;
+      if (toolUse) {
+        return { type: 'tool_use', id: toolUse.id || cr.uuid, name: toolUse.name, input: toolUse.input || {} };
+      }
     }
+    return null;
+  }
+
+  private emitAgentError(dispatch: DispatchInfo, exitCode: number): void {
+    const errorContent = { type: 'text' as const, text: `**Agent error**: ${dispatch.agentFamily} exited with code ${exitCode}. The agent may have encountered an internal error, rate limit, or invalid session.` };
+
+    const runMsg: PromptEvent = {
+      type: 'run_msg',
+      runId: dispatch.agentKey,
+      role: 'assistant',
+      content: errorContent,
+    };
+    appendPromptEvent(this.sessionDir, dispatch.promptUuid, runMsg);
+
+    // Also emit as wire message
+    const wireMsg: WireMessage = {
+      id: uuidv4(),
+      sessionId: this.sessionId,
+      timestamp: Date.now(),
+      type: 'assistant_message',
+      text: errorContent.text,
+      _parentToolUseId: dispatch.dispatchId,
+      _agentId: dispatch.agentKey,
+    } as any;
+    this.wireMessages.push(wireMsg);
+    this.emit('message', wireMsg);
+  }
+
+  private updateAgentRunEnd(promptUuid: string, agentIndex: number): void {
+    if (!this.session) return;
+    const prompt = this.session.prompts[promptUuid];
+    if (prompt?.agents[agentIndex]) {
+      prompt.agents[agentIndex].endedAt = new Date().toISOString();
+      writeSession(this.sessionDir, this.session);
+    }
+  }
+
+  private updatePromptEnd(promptUuid: string): void {
+    if (!this.session) return;
+    const prompt = this.session.prompts[promptUuid];
+    if (prompt) {
+      prompt.endedAt = new Date().toISOString();
+      writeSession(this.sessionDir, this.session);
+    }
+  }
+
+  private emitTreeUpdate(): void {
+    this.emit('message', {
+      type: 'tree_update',
+      sessionId: this.sessionId,
+      tree: this.session?.tree || [],
+      activePath: this.getActivePath(),
+      prompts: this.session?.prompts || {},
+    });
+  }
+
+  /**
+   * Rebuild wire messages from the session tree (for session resume).
+   */
+  private async rebuildWireMessages(): Promise<void> {
+    if (!this.session) return;
+
+    const activePath = this.getActivePath();
+    const nodes = walkActivePath(this.session.tree, activePath);
+
+    for (const node of nodes) {
+      if (node.hidden) continue;
+
+      const prompt = this.session.prompts[node.uuid];
+      if (!prompt) continue;
+
+      const events = readPromptEvents(this.sessionDir, node.uuid);
+
+      // Emit user message
+      const promptEvent = events.find(e => e.type === 'prompt');
+      if (promptEvent && promptEvent.type === 'prompt') {
+        const userMsg: WireMessage = {
+          id: node.uuid,
+          sessionId: this.sessionId,
+          timestamp: Date.now(),
+          type: 'user_message',
+          text: promptEvent.message,
+        } as any;
+        this.wireMessages.push(userMsg);
+      }
+
+      // Emit agent messages
+      for (const event of events) {
+        if (event.type !== 'run_msg') continue;
+        const runMsg = event as any;
+        const agentRun = prompt.agents.find(a => a.uuid === runMsg.runId);
+        const agentKey = agentRun?.harness || 'unknown';
+
+        if (runMsg.content?.type === 'text') {
+          const wireMsg: WireMessage = {
+            id: uuidv4(),
+            sessionId: this.sessionId,
+            timestamp: Date.now(),
+            type: 'assistant_message',
+            text: runMsg.content.text,
+            _parentToolUseId: `${node.uuid}:${agentKey}`,
+            _agentId: agentKey,
+          } as any;
+          this.wireMessages.push(wireMsg);
+        } else if (runMsg.content?.type === 'thinking') {
+          this.wireMessages.push({
+            id: uuidv4(),
+            sessionId: this.sessionId,
+            timestamp: Date.now(),
+            type: 'thinking',
+            text: runMsg.content.thinking,
+            _parentToolUseId: `${node.uuid}:${agentKey}`,
+            _agentId: agentKey,
+          } as any);
+        } else if (runMsg.content?.type === 'tool_use') {
+          this.pendingToolUses.set(runMsg.content.id, {
+            name: runMsg.content.name,
+            input: runMsg.content.input || {},
+          });
+          this.wireMessages.push({
+            id: runMsg.content.id,
+            sessionId: this.sessionId,
+            timestamp: Date.now(),
+            type: 'tool_result',
+            requestId: runMsg.content.id,
+            toolName: runMsg.content.name,
+            input: runMsg.content.input || {},
+            output: '',
+            isError: false,
+            isPending: true,
+            _parentToolUseId: `${node.uuid}:${agentKey}`,
+            _agentId: agentKey,
+          } as any);
+        } else if (runMsg.content?.type === 'tool_result') {
+          const toolUse = this.pendingToolUses.get(runMsg.content.tool_use_id);
+          this.wireMessages.push({
+            id: uuidv4(),
+            sessionId: this.sessionId,
+            timestamp: Date.now(),
+            type: 'tool_result',
+            requestId: runMsg.content.tool_use_id,
+            toolName: toolUse?.name || 'unknown',
+            input: toolUse?.input,
+            output: typeof runMsg.content.content === 'string'
+              ? runMsg.content.content.substring(0, 5000)
+              : '',
+            isError: !!runMsg.content.is_error,
+            _parentToolUseId: `${node.uuid}:${agentKey}`,
+            _agentId: agentKey,
+          } as any);
+          this.pendingToolUses.delete(runMsg.content.tool_use_id);
+        }
+      }
+    }
+
+    console.log(`[atoo-any-v2] Rebuilt ${this.wireMessages.length} wire messages for ${this.session.uuid}`);
+  }
+
+  /**
+   * Build conversation history as flat SessionEvents for CLI consumption.
+   * Walks the active path and converts prompt events back to SessionEvents.
+   */
+  private buildConversationHistory(preferFamily: AgentFamily): SessionEvent[] {
+    if (!this.session) return [];
+
+    const activePath = this.getActivePath();
+    const nodes = walkActivePath(this.session.tree, activePath);
+    const result: SessionEvent[] = [];
+
+    for (const node of nodes) {
+      if (node.hidden) continue;
+      // Skip the current prompt (last one, being dispatched right now)
+      if (node.uuid === this.currentPromptUuid) continue;
+
+      const prompt = this.session.prompts[node.uuid];
+      if (!prompt) continue;
+
+      const events = readPromptEvents(this.sessionDir, node.uuid);
+      const promptEvent = events.find(e => e.type === 'prompt');
+      if (!promptEvent || promptEvent.type !== 'prompt') continue;
+
+      // User message
+      const userEvent: SessionEvent = {
+        type: 'user',
+        uuid: node.uuid,
+        timestamp: prompt.startedAt,
+        message: { role: 'user', content: promptEvent.message },
+      };
+      result.push(userEvent);
+
+      // Agent responses: preferred family first, then others
+      const preferred: SessionEvent[] = [];
+      const others: SessionEvent[] = [];
+      const otherTexts: string[] = [];
+
+      for (const event of events) {
+        if (event.type !== 'run_msg') continue;
+        const rm = event as any;
+        const run = prompt.agents.find(a => a.uuid === rm.runId);
+        const family = (run?.harness || '').replace('-code', '').replace('-cli', '') as AgentFamily;
+
+        if (rm.role === 'assistant' && rm.content?.type === 'text') {
+          const assistantEvent: SessionEvent = {
+            type: 'assistant',
+            uuid: uuidv4(),
+            timestamp: prompt.startedAt,
+            message: { role: 'assistant', content: [rm.content] },
+          };
+          if (family === preferFamily) {
+            preferred.push(assistantEvent);
+          } else {
+            others.push(assistantEvent);
+            const label = AGENT_LABELS[family] || family;
+            otherTexts.push(`${label}: ${rm.content.text}`);
+          }
+        } else if (rm.role === 'assistant' && rm.content?.type === 'tool_use') {
+          const assistantEvent: SessionEvent = {
+            type: 'assistant',
+            uuid: uuidv4(),
+            timestamp: prompt.startedAt,
+            message: { role: 'assistant', content: [rm.content] },
+          };
+          if (family === preferFamily) preferred.push(assistantEvent);
+        } else if (rm.role === 'tool_result' && rm.content?.type === 'tool_result') {
+          const toolResultEvent: SessionEvent = {
+            type: 'user',
+            uuid: uuidv4(),
+            timestamp: prompt.startedAt,
+            isSynthetic: true,
+            message: { role: 'user', content: [rm.content] },
+          };
+          if (family === preferFamily) preferred.push(toolResultEvent);
+        }
+      }
+
+      // Inject other agents' responses as context in the user message
+      if (otherTexts.length > 0) {
+        const contextBlock = `\n\n[Other agents responded to this message:]\n${otherTexts.join('\n\n')}`;
+        (userEvent as any).message.content += contextBlock;
+      }
+
+      result.push(...preferred);
+    }
+
+    return result;
+  }
+
+  /**
+   * Build flat SessionEvents from the tree (for backward compat).
+   */
+  private buildFlatSessionEvents(): SessionEvent[] {
+    if (!this.session) return [];
+    const activePath = this.getActivePath();
+    const nodes = walkActivePath(this.session.tree, activePath);
+    const result: SessionEvent[] = [];
+
+    for (const node of nodes) {
+      const events = readPromptEvents(this.sessionDir, node.uuid);
+      for (const event of events) {
+        if (event.type === 'prompt') {
+          result.push({
+            type: 'user',
+            uuid: node.uuid,
+            timestamp: event.timestamp,
+            message: { role: 'user', content: event.message },
+          });
+        }
+      }
+    }
+    return result;
   }
 
   private injectHistoryAttachments(events: SessionEvent[]): void {
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i] as any;
-      if (ev.type !== 'user' || !ev._attachments?.length) continue;
-
-      const paths = this.writeAttachmentTempFiles(ev.uuid, ev._attachments);
-      if (paths.length === 0) continue;
-
-      const pathList = paths.map((p: string) => `"${p}"`).join(';');
-      const prefix = `You MUST read the following user attachments: ${pathList}\nThe actual user prompt follows from the next line.\n`;
-      const content = ev.message?.content;
-      if (typeof content === 'string') {
-        ev.message.content = prefix + content;
-      }
-    }
+    // TODO: Implement blob-based attachment injection for dispatch
   }
 
-  /**
-   * Write attachment data to temporary files and return their absolute paths.
-   * Files are written to a session-specific temp directory so agents can read them.
-   */
-  private writeAttachmentTempFiles(userUuid: string, attachments?: Array<{ media_type: string; data: string; name?: string; text?: string }>): string[] {
+  private writeAttachmentTempFiles(promptUuid: string, attachments?: AgentAttachment[]): string[] {
     if (!attachments || attachments.length === 0) return [];
 
-    const tmpDir = path.join(os.tmpdir(), 'atoo-any-attachments', this.sessionUuid!, userUuid);
+    const tmpDir = path.join(os.tmpdir(), 'atoo-any-attachments', this.session!.uuid, promptUuid);
     fs.mkdirSync(tmpDir, { recursive: true });
 
     const paths: string[] = [];
@@ -1089,145 +1249,14 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       const filePath = path.join(tmpDir, filename);
 
       if (att.text) {
-        // Text-based file (text, office extract)
         fs.writeFileSync(filePath, att.text, 'utf-8');
       } else if (att.data) {
-        // Binary file (image, pdf) — strip data URI prefix if present
         const base64 = att.data.includes(',') ? att.data.split(',')[1] : att.data;
         fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
       }
-
       paths.push(filePath);
     }
-
     return paths;
-  }
-
-  /**
-   * Build conversation history for a dispatch by filtering real events.
-   * Includes user messages + the preferred family's dispatch events first,
-   * then the other family's events so both agents see the full picture
-   * (e.g. ask_user results, tool calls). The session writers handle UUID
-   * remapping automatically, so broken parentUuid chains are fixed.
-   */
-  private buildConversationHistory(preferFamily: AgentFamily): SessionEvent[] {
-    // Filter events to only include those on the active branch path
-    const filteredEvents = filterEventsForActivePath(
-      this.events.slice(0, -1) as any, // exclude current user message
-      this.forkState,
-    ) as SessionEvent[];
-    const allEvents = filteredEvents.filter((e: any) => e.type !== 'branch_operation');
-
-    if (allEvents.length === 0) return [];
-
-    const result: SessionEvent[] = [];
-
-    // Walk through events: include user messages and all families' responses
-    // (preferred first, then others) so each agent sees the full conversation.
-    for (let i = 0; i < allEvents.length; i++) {
-      const ev = allEvents[i] as any;
-
-      if (ev.type === 'user' && !ev._dispatchId) {
-        result.push(ev);
-
-        // Collect dispatch events for this turn, grouped by family
-        const preferred: SessionEvent[] = [];
-        const others: SessionEvent[] = [];
-        for (let j = i + 1; j < allEvents.length; j++) {
-          const de = allEvents[j] as any;
-          if (de.type === 'user' && !de._dispatchId) break;
-          if (!de._dispatchId) continue;
-          if (de._source === preferFamily) preferred.push(de);
-          else others.push(de);
-        }
-
-        // Include preferred family first, then other families
-        result.push(...preferred, ...others);
-      }
-    }
-
-    // Label assistant messages with their source agent and convert foreign
-    // thinking blocks to text (Claude requires signed thinking blocks;
-    // Gemini/Codex thinking can't be passed as-is).
-    return stripMeta(this.labelAndSanitizeHistory(result, preferFamily));
-  }
-
-  /**
-   * Prepare conversation history for a specific agent:
-   * - Keep the target agent's own assistant messages as-is
-   * - Merge other agents' responses into the preceding user message as context
-   *   (placing foreign responses as "assistant" role confuses Claude into treating
-   *   them as prompt injection since it knows it didn't generate them)
-   * - Convert foreign thinking blocks to plain text summaries
-   */
-  private labelAndSanitizeHistory(events: SessionEvent[], targetFamily: AgentFamily): SessionEvent[] {
-    const result: SessionEvent[] = [];
-
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i] as any;
-
-      if (ev.type === 'user' && !ev._dispatchId) {
-        // Collect all non-target assistant responses for this turn
-        const otherResponses: string[] = [];
-        const ownEvents: SessionEvent[] = [];
-        for (let j = i + 1; j < events.length; j++) {
-          const de = events[j] as any;
-          if (de.type === 'user' && !de._dispatchId) break;
-
-          if (de._source === targetFamily || !de._source) {
-            ownEvents.push(de);
-          } else if (de.type === 'assistant') {
-            const label = AGENT_LABELS[de._source] || de._source;
-            const text = this.extractAssistantText(de);
-            if (text) otherResponses.push(`${label}: ${text}`);
-          }
-          // Skip tool results from other agents
-        }
-
-        // If there are other agents' responses, append them as context in the user message
-        if (otherResponses.length > 0) {
-          const contextBlock = `\n\n[Other agents responded to this message:]\n${otherResponses.join('\n\n')}`;
-          const userContent = typeof ev.message?.content === 'string'
-            ? ev.message.content + contextBlock
-            : ev.message?.content;
-          result.push({ ...ev, message: { ...ev.message, content: userContent } });
-        } else {
-          result.push(ev);
-        }
-
-        // Add the target agent's own events
-        result.push(...ownEvents);
-
-        // Skip past all events we just processed
-        let j = i + 1;
-        while (j < events.length) {
-          const de = events[j] as any;
-          if (de.type === 'user' && !de._dispatchId) break;
-          j++;
-        }
-        i = j - 1; // -1 because the for loop will i++
-      } else {
-        result.push(ev);
-      }
-    }
-
-    return result;
-  }
-
-  /** Extract plain text from an assistant event's content (for cross-agent context) */
-  private extractAssistantText(event: any): string {
-    const content = event.message?.content;
-    if (typeof content === 'string') return content;
-    if (!Array.isArray(content)) return '';
-    return content
-      .map((b: any) => {
-        if (b.type === 'text') return b.text;
-        if (b.type === 'thinking') return `[thinking: ${(b.thinking || '').substring(0, 200)}]`;
-        if (b.type === 'tool_use') return `[used tool: ${b.name}]`;
-        return '';
-      })
-      .filter(Boolean)
-      .join('\n');
   }
 
   private getCapabilities(): AgentCapabilities {
@@ -1235,10 +1264,10 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       canChangeMode: false,
       canChangeModel: false,
       hasContextUsage: false,
-      canFork: false,
+      canFork: true,
       canResume: true,
       hasTerminal: false,
-      hasFileTracking: false,
+      hasFileTracking: true,
       availableModes: [],
       availableModels: [],
     };

@@ -9,7 +9,7 @@ import { filterMessages, classifyFile, getAttachIcon, escapeHtml, renderMd } fro
 import { ChatMessageItem } from './ChatMessage';
 import { api } from '../../api';
 import { sendAgentCommand } from '../../api/websocket';
-import type { Session, ChatAttachment, FilteredMessage, AtooFork, AtooBranch, AtooExtraction, MessageStatus } from '../../types';
+import type { Session, ChatAttachment, FilteredMessage, AtooTreeNode, AtooPrompt, MessageStatus } from '../../types';
 import AgentSelectorRaw from './AgentSelector';
 const AgentSelector = AgentSelectorRaw as any;
 
@@ -108,18 +108,8 @@ interface MsgBlock {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// BRANCH FILTER LOGIC
-// ═══════════════════════════════════════════════════════════════
-
-function isOnActiveBranch(branchId: string | null, fork: AtooFork): boolean {
-  const origBranch = fork.branches.find(b => b.isOriginal);
-  const origBid = origBranch?.id ?? '__main__';
-  const effectiveBranch = branchId || origBid;
-  return effectiveBranch === fork.activeBranchId;
-}
-
-// ═══════════════════════════════════════════════════════════════
 // DATA BUILDERS
+// (Branch filtering is now server-side via tree walking)
 // ═══════════════════════════════════════════════════════════════
 
 function buildMsgBlocks(filtered: FilteredMessage[]): MsgBlock[] {
@@ -265,62 +255,18 @@ function mapToAgentMessage(m: FilteredMessage): AgentMessage {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * useBranchFilter — filters messages through filterMessages and then applies
- * branch gating logic based on forks. Returns a stable array reference that
- * only changes when messages reference or forks change.
+ * useFilteredMessages — filters messages via filterMessages.
+ * Branch filtering is now server-side (tree walking), so no client-side gating needed.
  */
-function useBranchFilter(messages: any[], forks: AtooFork[]): FilteredMessage[] {
+function useFilteredMessages(messages: any[]): FilteredMessage[] {
   const prevMessagesRef = useRef<any[] | null>(null);
   const prevFilteredRef = useRef<FilteredMessage[]>([]);
 
-  // Recompute filterMessages when messages reference changes (or on first call)
   if (messages !== prevMessagesRef.current) {
     prevFilteredRef.current = filterMessages(messages, true);
     prevMessagesRef.current = messages;
   }
-  const filtered = prevFilteredRef.current;
-
-  // Recompute branch filtering when filtered or forks change
-  return useMemo(() => {
-    if (forks.length === 0) return filtered;
-
-    const forkByUuid = new Map<string, AtooFork>();
-    for (const fork of forks) {
-      forkByUuid.set(fork.forkPointEventUuid, fork);
-    }
-    const forkPointSet = new Set(forks.map(f => f.forkPointEventUuid));
-    // Set of user UUIDs whose fork point passed the gate (so their responses are visible)
-    const visibleForkPoints = new Set<string>();
-    const activeGates: AtooFork[] = [];
-
-    return filtered.filter(m => {
-      const eventUuid = m._eventUuid;
-      const branchId: string | null = (m as any)._branchId || null;
-
-      // Dispatch child — follows its parent's visibility
-      if (m._parentToolUseId) {
-        const colonIdx = m._parentToolUseId.indexOf(':');
-        const parentUserUuid = colonIdx >= 0 ? m._parentToolUseId.slice(0, colonIdx) : m._parentToolUseId;
-        // Responses to a visible fork-point message pre-date the fork — always show
-        if (visibleForkPoints.has(parentUserUuid)) return true;
-        if (activeGates.length === 0) return true;
-        return activeGates.every(gate => isOnActiveBranch(branchId, gate));
-      }
-
-      // User message (or other top-level message): check gates first
-      const passesGates = activeGates.length === 0 || activeGates.every(gate => isOnActiveBranch(branchId, gate));
-      if (!passesGates) return false;
-
-      // If this is a fork point and it passed the gates, register it and add its gate
-      if (m.role === 'user' && eventUuid && forkPointSet.has(eventUuid)) {
-        visibleForkPoints.add(eventUuid);
-        const fork = forkByUuid.get(eventUuid);
-        if (fork) activeGates.push(fork);
-      }
-
-      return true;
-    });
-  }, [filtered, forks]);
+  return prevFilteredRef.current;
 }
 
 /**
@@ -949,17 +895,22 @@ function AAForkDivider({ index, rangeStartIndex, rangeEndIndex, onFork, onSetRan
 }
 
 // ═══════════════════════════════════════════════════════════════
-// BRANCH SWITCHER (memoized)
+// BRANCH SWITCHER (v2 — works with tree children)
 // ═══════════════════════════════════════════════════════════════
 
-const BranchSwitcher = React.memo(function BranchSwitcher({ fork, onSwitch }: { fork: AtooFork; onSwitch: (forkId: string, branchIdx: number) => void }) {
-  const total = fork.branches.length;
-  const active = fork.branches.findIndex(b => b.id === fork.activeBranchId);
-  const activeIdx = active >= 0 ? active : 0;
-  const branch = fork.branches[activeIdx];
-  const color = activeIdx === 0 ? 'var(--text-secondary)' : BRANCH_COLORS[(activeIdx - 1) % BRANCH_COLORS.length];
-  const prev = () => onSwitch(fork.id, (activeIdx - 1 + total) % total);
-  const next = () => onSwitch(fork.id, (activeIdx + 1) % total);
+interface ForkPointInfo {
+  nodeUuid: string;
+  childCount: number;
+  activeChildIdx: number;
+  forkDepth: number; // depth in activePath
+}
+
+const BranchSwitcher = React.memo(function BranchSwitcher({ forkInfo, onSwitch }: { forkInfo: ForkPointInfo; onSwitch: (forkDepth: number, childIdx: number) => void }) {
+  const total = forkInfo.childCount;
+  const activeIdx = forkInfo.activeChildIdx;
+  const color = activeIdx === 0 ? 'var(--text-secondary)' : BRANCH_COLORS[(activeIdx) % BRANCH_COLORS.length];
+  const prev = () => onSwitch(forkInfo.forkDepth, (activeIdx - 1 + total) % total);
+  const next = () => onSwitch(forkInfo.forkDepth, (activeIdx + 1) % total);
 
   return (
     <div className="aa-branch-switcher">
@@ -970,7 +921,7 @@ const BranchSwitcher = React.memo(function BranchSwitcher({ fork, onSwitch }: { 
         </div>
         {total > 1 && <button className="aa-branch-nav-btn left" onClick={prev}>&lsaquo;</button>}
         <div className="aa-branch-label" style={{ color }}>
-          {branch.label}
+          Branch {activeIdx + 1}
           <span className="count">{activeIdx + 1}/{total}</span>
         </div>
         {total > 1 && <button className="aa-branch-nav-btn right" onClick={next}>&rsaquo;</button>}
@@ -980,24 +931,18 @@ const BranchSwitcher = React.memo(function BranchSwitcher({ fork, onSwitch }: { 
 });
 
 // ═══════════════════════════════════════════════════════════════
-// TREE MINIMAP
+// TREE MINIMAP (v2 — works with tree nodes)
 // ═══════════════════════════════════════════════════════════════
 
-function TreeMinimap({ blocks, forks, extractions, open, onToggle, onSwitchBranch, onScrollTo }: {
+function TreeMinimap({ blocks, forkPoints, open, onToggle, onSwitchBranch, onScrollTo }: {
   blocks: MsgBlock[];
-  forks: AtooFork[];
-  extractions: AtooExtraction[];
+  forkPoints: Record<number, ForkPointInfo>;
   open: boolean;
   onToggle: () => void;
-  onSwitchBranch: (fId: string, bIdx: number) => void;
+  onSwitchBranch: (forkDepth: number, childIdx: number) => void;
   onScrollTo: (index: number) => void;
 }) {
   if (!open) return null;
-  // Build forkMap: block index -> fork (using forkPointEventUuid)
-  const forkMap: Record<number, AtooFork> = {};
-  const uuidToIdx = new Map<string, number>();
-  blocks.forEach((b, i) => { if (b.userMessage._eventUuid) uuidToIdx.set(b.userMessage._eventUuid, i); });
-  forks.forEach(f => { const idx = uuidToIdx.get(f.forkPointEventUuid); if (idx !== undefined) forkMap[idx + 1] = f; });
 
   return (
     <div className="aa-minimap">
@@ -1006,7 +951,7 @@ function TreeMinimap({ blocks, forks, extractions, open, onToggle, onSwitchBranc
         <button className="aa-minimap-close" onClick={onToggle}>&times;</button>
       </div>
       {blocks.map((block, i) => {
-        const fork = forkMap[i + 1];
+        const fork = forkPoints[i];
         const isRemoved = block.status === 'removed';
         const isCompacted = block.status === 'compacted';
         const content = typeof block.userMessage.content === 'string' ? block.userMessage.content : '';
@@ -1022,15 +967,17 @@ function TreeMinimap({ blocks, forks, extractions, open, onToggle, onSwitchBranc
             {i < blocks.length - 1 && !fork && <div className="aa-minimap-connector" />}
             {fork && (
               <div style={{ marginLeft: 7.5, padding: '2px 0' }}>
-                {fork.branches.map((b, bi) => {
-                  const isActive = b.id === fork.activeBranchId;
-                  const c = bi === 0 ? 'var(--aa-text-tertiary)' : BRANCH_COLORS[(bi - 1) % BRANCH_COLORS.length];
+                {Array.from({ length: fork.childCount }, (_, ci) => {
+                  const isActive = ci === fork.activeChildIdx;
+                  const c = ci === 0 ? 'var(--aa-text-tertiary)' : BRANCH_COLORS[(ci) % BRANCH_COLORS.length];
                   return (
-                    <div key={b.id} className="aa-minimap-branch"
-                      onClick={() => onSwitchBranch(fork.id, bi)}
+                    <div key={ci} className="aa-minimap-branch"
+                      onClick={() => onSwitchBranch(fork.forkDepth, ci)}
                       style={{ borderLeft: `2px solid ${isActive ? c : 'var(--border-subtle)'}` }}>
                       <div className="aa-minimap-branch-dot" style={{ background: c, opacity: isActive ? 1 : 0.3 }} />
-                      <span className="aa-minimap-branch-label" style={{ color: isActive ? c : 'var(--aa-text-tertiary)', fontWeight: isActive ? 600 : 400 }}>{b.label}</span>
+                      <span className="aa-minimap-branch-label" style={{ color: isActive ? c : 'var(--aa-text-tertiary)', fontWeight: isActive ? 600 : 400 }}>
+                        Branch {ci + 1}
+                      </span>
                     </div>
                   );
                 })}
@@ -1040,18 +987,6 @@ function TreeMinimap({ blocks, forks, extractions, open, onToggle, onSwitchBranc
           </div>
         );
       })}
-      {extractions.length > 0 && (
-        <div className="aa-minimap-section">
-          <span className="aa-minimap-section-title">Extractions</span>
-          {extractions.map(ext => (
-            <div key={ext.id} className="aa-minimap-item" style={{ marginTop: 4 }}>
-              <ExtractIcon />
-              <span className="aa-minimap-branch-label" style={{ color: '#a78bfa' }}>{ext.label}</span>
-              <span className="aa-minimap-branch-count">{ext.extractedMessages.length}m</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -1350,16 +1285,16 @@ function AttachmentsBar() {
 
 export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) {
   const [vw, setVw] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
-  const forks = session.forks || [];
-  const [extractions, setExtractions] = useState<AtooExtraction[]>(session.extractions || []);
+  const tree = session.tree || [];
+  const activePath = session.activePath || [];
   const [rangeStart, setRangeStart] = useState<number | null>(null);
   const [rangeEnd, setRangeEnd] = useState<number | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const chatAreaRef = useRef<HTMLDivElement>(null);
 
-  // --- Custom hooks for branch filtering and auto-scroll ---
-  const branchFiltered = useBranchFilter(session.messages, forks);
-  const blocks = useMemo(() => buildMsgBlocks(branchFiltered), [branchFiltered]);
+  // --- Messages are pre-filtered by server (tree walking), just filter for display ---
+  const filtered = useFilteredMessages(session.messages);
+  const blocks = useMemo(() => buildMsgBlocks(filtered), [filtered]);
   useAutoScroll(chatAreaRef as React.RefObject<HTMLDivElement>, session.id, session.messages.length);
 
   // Expose tree toggle for the toolbar
@@ -1386,23 +1321,38 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
     return () => window.removeEventListener('resize', h);
   }, []);
 
-  // Fork map: map block index -> fork (by matching forkPointEventUuid to user message eventUuid)
-  const forkMap = useMemo(() => {
-    const m: Record<number, AtooFork> = {};
-    if (forks.length === 0) return m;
-    const uuidToIdx = new Map<string, number>();
-    blocks.forEach((b, i) => {
-      if (b.userMessage._eventUuid) uuidToIdx.set(b.userMessage._eventUuid, i);
-    });
-    for (const fork of forks) {
-      const idx = uuidToIdx.get(fork.forkPointEventUuid);
-      if (idx !== undefined) {
-        // Place the fork AFTER the fork point message (at idx + 1 position)
-        m[idx + 1] = fork;
+  // Fork map: detect fork points by walking the tree and finding nodes with multiple children
+  const forkPoints = useMemo(() => {
+    const m: Record<number, ForkPointInfo> = {};
+    if (tree.length === 0) return m;
+
+    // Walk the active path through the tree, tracking fork points
+    let current: AtooTreeNode | undefined = tree[activePath[0] ?? 0];
+    let blockIdx = 0;
+    let forkDepth = 1; // depth 0 = root selection
+
+    while (current) {
+      const children: AtooTreeNode[] | undefined = current.children;
+      if (children && children.length > 1) {
+        // This node is a fork point — show switcher after it
+        m[blockIdx] = {
+          nodeUuid: current.uuid,
+          childCount: children.length,
+          activeChildIdx: activePath[forkDepth] ?? 0,
+          forkDepth,
+        };
+        const idx = activePath[forkDepth] ?? 0;
+        current = children[idx] ?? children[0];
+        forkDepth++;
+      } else if (children && children.length === 1) {
+        current = children[0];
+      } else {
+        break;
       }
+      blockIdx++;
     }
     return m;
-  }, [forks, blocks]);
+  }, [tree, activePath]);
 
   // --- Fork / branch / range handlers ---
 
@@ -1411,28 +1361,27 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
       setRangeEnd(idx);
       return;
     }
-    // The divider at `idx` sits ABOVE block[idx], so the fork point is the message
-    // just before it: blocks[idx - 1]. This means "fork after this message".
     const forkPointBlock = blocks[idx - 1];
     if (!forkPointBlock?.userMessage?._eventUuid) return;
-    sendAgentCommand(session.id, { action: 'fork_conversation', afterEventUuid: forkPointBlock.userMessage._eventUuid });
+    sendAgentCommand(session.id, { action: 'fork_conversation', afterPromptUuid: forkPointBlock.userMessage._eventUuid } as any);
   }, [blocks, rangeStart, session.id]);
 
-  const handleSwitchBranch = useCallback((fId: string, bIdx: number) => {
-    const fork = forks.find(f => f.id === fId);
-    if (!fork || !fork.branches[bIdx]) return;
-    sendAgentCommand(session.id, { action: 'switch_branch', forkId: fId, branchId: fork.branches[bIdx].id });
-  }, [forks, session.id]);
+  const handleSwitchBranch = useCallback((forkDepth: number, childIdx: number) => {
+    const newPath = [...activePath];
+    while (newPath.length <= forkDepth) newPath.push(0);
+    newPath[forkDepth] = childIdx;
+    sendAgentCommand(session.id, { action: 'set_active_path', activePath: newPath } as any);
+  }, [activePath, session.id]);
 
   const handleRangeExtract = useCallback(() => {
     if (rangeStart === null || rangeEnd === null) return;
     const start = Math.min(rangeStart, rangeEnd);
     const end = Math.max(rangeStart, rangeEnd);
-    const extracted = blocks.slice(start, end + 1).map(b => b.userMessage);
-    setExtractions(p => [...p, { id: `ext-${Date.now()}`, label: `Extract ${p.length + 1}`, sourceConversation: 'main', sourceRange: [start, end], extractedMessages: extracted }]);
+    const promptUuids = blocks.slice(start, end + 1).map(b => b.userMessage._eventUuid).filter(Boolean) as string[];
+    sendAgentCommand(session.id, { action: 'extract_prompts', promptUuids } as any);
     setRangeStart(null);
     setRangeEnd(null);
-  }, [rangeStart, rangeEnd, blocks]);
+  }, [rangeStart, rangeEnd, blocks, session.id]);
 
   const handleRangeRemove = useCallback(() => {
     if (rangeStart === null || rangeEnd === null) return;
@@ -1516,8 +1465,7 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
       {/* Tree minimap */}
       <TreeMinimap
         blocks={blocks}
-        forks={forks}
-        extractions={extractions}
+        forkPoints={forkPoints}
         open={mapOpen}
         onToggle={() => setMapOpen(o => !o)}
         onSwitchBranch={handleSwitchBranch}
@@ -1527,7 +1475,7 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
       {/* Chat area */}
       <div ref={chatAreaRef} className="aa-chat-area">
         {blocks.map((block, index) => {
-          const fork = forkMap[index + 1];
+          const fork = forkPoints[index];
           return (
             <div key={block.id} className="aa-chat-item">
               {/* Fork divider above message (skip first) */}
@@ -1555,18 +1503,15 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
                 </>
               )}
 
-              {/* Branch switcher + content at fork points */}
-              {fork && <BranchSwitcher fork={fork} onSwitch={handleSwitchBranch} />}
-              {fork && (() => {
-                const activeIdx = fork.branches.findIndex(b => b.id === fork.activeBranchId);
-                return activeIdx > 0 ? (
-                  <div className="aa-branch-content alt">
-                    <div className="aa-branch-accent-bar" style={{
-                      background: `linear-gradient(180deg, ${BRANCH_COLORS[(activeIdx - 1) % BRANCH_COLORS.length]}66 0%, ${BRANCH_COLORS[(activeIdx - 1) % BRANCH_COLORS.length]}11 100%)`
-                    }} />
-                  </div>
-                ) : null;
-              })()}
+              {/* Branch switcher at fork points */}
+              {fork && <BranchSwitcher forkInfo={fork} onSwitch={handleSwitchBranch} />}
+              {fork && fork.activeChildIdx > 0 && (
+                <div className="aa-branch-content alt">
+                  <div className="aa-branch-accent-bar" style={{
+                    background: `linear-gradient(180deg, ${BRANCH_COLORS[(fork.activeChildIdx) % BRANCH_COLORS.length]}66 0%, ${BRANCH_COLORS[(fork.activeChildIdx) % BRANCH_COLORS.length]}11 100%)`
+                  }} />
+                </div>
+              )}
 
               {/* Status line after last message */}
               {index === blocks.length - 1 && statusNode}

@@ -46,10 +46,11 @@ export interface Session {
     requestId: string;
     questions: import('./components/AskUser/types').AskUserQuestion[];
   } | null;
-  // Atoo-any branching state
-  forks?: AtooFork[];
-  activeBranchId?: string | null;
-  extractions?: AtooExtraction[];
+  // Atoo-any v2 tree state
+  tree?: AtooTreeNode[];
+  activePath?: number[];
+  sessionPrompts?: Record<string, AtooPrompt>;
+  sessionMetadata?: AtooSessionMetadata;
 }
 
 export interface ContextUsage {
@@ -119,28 +120,50 @@ export interface ChatDraft {
   selectedAgents?: string[];
 }
 
-// ─── Atoo-any branching types ───
+// ─── Atoo-any v2 tree types ───
 
-export interface AtooBranch {
-  id: string;
-  label: string;
-  isOriginal: boolean;
+export interface AtooTreeNode {
+  uuid: string;
+  agents?: number[];
+  hidden?: boolean;
+  children?: AtooTreeNode[];
 }
 
-export interface AtooFork {
-  id: string;
-  forkPointEventUuid: string;
-  parentBranchId: string | null;
-  branches: AtooBranch[];
-  activeBranchId: string;
+export interface AtooAgentRun {
+  uuid: string;
+  startedAt: string;
+  endedAt?: string;
+  harness: string;
+  model: string;
+  effort?: string;
+  attachments?: AtooAttachment[];
+  tokens?: { input: number; inputCached: number; output: number; costCents: number };
 }
 
-export interface AtooExtraction {
-  id: string;
-  label: string;
-  sourceConversation: string;
-  sourceRange: [number, number];
-  extractedMessages: ChatMessage[];
+export interface AtooAttachment {
+  uuid: string;
+  filename: string;
+  mime: string;
+}
+
+export interface AtooPrompt {
+  uuid: string;
+  startedAt: string;
+  endedAt?: string;
+  title?: string;
+  tags?: string[];
+  description?: string;
+  agents: AtooAgentRun[];
+  attachments?: AtooAttachment[];
+  compaction?: { replaces: string[] };
+  git?: { branch?: string; commit?: string; worktree?: string };
+}
+
+export interface AtooSessionMetadata {
+  title: string;
+  name?: string;
+  description?: string;
+  tags: string[];
 }
 
 export interface GitChange {

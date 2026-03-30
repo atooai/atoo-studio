@@ -40,22 +40,25 @@ export function handleAgentWsUpgrade(
     const info = agent.getInfo();
     ws.send(JSON.stringify({ type: 'agent_info', ...info }));
 
-    // Replay all existing messages as a single batch, including fork state
+    // Send history batch with tree data for atoo-any v2
     const messages = agent.getMessages();
-    if (messages.length > 0) {
-      const batch: any = { type: 'history_batch', messages };
-      // Include fork state atomically so it's available before first render
-      if ('getForkState' in agent) {
-        const forkState = (agent as any).getForkState();
-        if (forkState.forks.length > 0) {
-          batch.forks = forkState.forks;
-          batch.activeBranchId = forkState.activeBranchId;
-        }
+    const batch: any = { type: 'history_batch', messages };
+
+    if ('getSessionData' in agent) {
+      const sessionData = (agent as any).getSessionData();
+      if (sessionData) {
+        batch.tree = sessionData.tree;
+        batch.prompts = sessionData.prompts;
+        batch.activePath = (agent as any).getActivePath();
+        batch.sessionMetadata = sessionData.metadata;
       }
+    }
+
+    if (messages.length > 0 || batch.tree) {
       ws.send(JSON.stringify(batch));
     }
 
-    // Send running dispatches for atoo-any (survives reconnect/project switch)
+    // Send running dispatches (survives reconnect)
     if ('getRunningDispatches' in agent) {
       const running = (agent as any).getRunningDispatches();
       if (running.length > 0) {
@@ -116,24 +119,24 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
     case 'send_key':
       agent.sendKey(cmd.key);
       break;
-    // Branch operations (atoo-any)
-    case 'remove_messages':
-      if ('removeMessages' in agent) (agent as any).removeMessages(cmd.eventUuids);
-      break;
-    case 'restore_message':
-      if ('restoreMessage' in agent) (agent as any).restoreMessage(cmd.eventUuid);
-      break;
-    case 'compact_messages':
-      if ('compactMessages' in agent) (agent as any).compactMessages(cmd.eventUuids, cmd.compactedBy);
+    // Tree operations (atoo-any v2)
+    case 'set_active_path':
+      if ('switchBranch' in agent) (agent as any).switchBranch(cmd.activePath);
       break;
     case 'fork_conversation':
-      if ('forkConversation' in agent) (agent as any).forkConversation(cmd.afterEventUuid);
+      if ('forkConversation' in agent) (agent as any).forkConversation(cmd.afterPromptUuid);
       break;
-    case 'switch_branch':
-      if ('switchBranch' in agent) (agent as any).switchBranch(cmd.forkId, cmd.branchId);
+    case 'hide_prompts':
+      if ('removeMessages' in agent) (agent as any).removeMessages(cmd.promptUuids);
       break;
-    case 'extract_range':
-      if ('extractRange' in agent) (agent as any).extractRange(cmd.startIndex, cmd.endIndex, cmd.label);
+    case 'compact_prompts':
+      if ('compactMessages' in agent) (agent as any).compactMessages(cmd.promptUuids, cmd.compactedBy);
+      break;
+    case 'extract_prompts':
+      if ('extractRange' in agent) {
+        // extractRange uses indices but we now pass UUIDs - adapter handles it
+        (agent as any).extractPrompts(cmd.promptUuids, cmd.label);
+      }
       break;
     case 'kill_agent':
       if ('killAgent' in agent) (agent as any).killAgent(cmd.agentFamily);
@@ -142,7 +145,6 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
       if ('killAllAgents' in agent) (agent as any).killAllAgents();
       break;
     default: {
-      // Legacy focus/blur commands — primarily handled via status WS now
       const action = (cmd as any).action;
       if (action === 'session_viewed' || action === 'session_focus') {
         agentRegistry.setSessionFocused(sessionId);

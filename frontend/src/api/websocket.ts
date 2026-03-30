@@ -546,12 +546,14 @@ function handleAgentMessageBatch(sessionId: string, messages: any[], batchMsg?: 
       }
     }
 
-    console.log(`[history_batch] session=${sessionId} existing=${existingCount} batch=${messages.length} deduped=${dupCount} added=${addCount} forks=${batchMsg?.forks?.length || 0}`);
+    console.log(`[history_batch] session=${sessionId} existing=${existingCount} batch=${messages.length} deduped=${dupCount} added=${addCount} tree=${batchMsg?.tree?.length || 0}`);
 
-    // Apply fork state atomically with the messages (no race condition)
-    if (batchMsg?.forks) {
-      sess.forks = batchMsg.forks;
-      sess.activeBranchId = batchMsg.activeBranchId;
+    // Apply tree state atomically with the messages
+    if (batchMsg?.tree) {
+      sess.tree = batchMsg.tree;
+      sess.activePath = batchMsg.activePath;
+      sess.sessionPrompts = batchMsg.prompts;
+      sess.sessionMetadata = batchMsg.sessionMetadata;
     }
 
     // Update title from first user message
@@ -730,9 +732,10 @@ function handleAgentMessage(sessionId: string, msg: any) {
         sess._dispatchFileChanges[msg.dispatchId] = msg.fileChangeCount;
       }
       return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
-    } else if (msg.type === 'fork_state_update') {
-      sess.forks = msg.forks;
-      sess.activeBranchId = msg.activeBranchId;
+    } else if (msg.type === 'tree_update') {
+      sess.tree = msg.tree;
+      sess.activePath = msg.activePath;
+      sess.sessionPrompts = msg.prompts;
       return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
     } else if (msg.type === 'system_message') {
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
