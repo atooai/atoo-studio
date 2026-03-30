@@ -1,10 +1,9 @@
 /**
- * AtooAnyChat — Multi-agent chat interface for atoo-any sessions.
+ * AtooAnyChatNew — Clean rewrite of multi-agent chat interface for atoo-any sessions.
  * Renders user messages with per-agent response groups, fork/branch mechanics,
- * removed/compacted states, tree minimap, and virtualized scrolling.
+ * removed/compacted states, tree minimap, and plain scrollable div rendering.
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-// Virtuoso removed — plain scrollable div
 import { useStore } from '../../state/store';
 import { filterMessages, classifyFile, getAttachIcon, escapeHtml, renderMd } from '../../utils';
 import { ChatMessageItem } from './ChatMessage';
@@ -108,21 +107,20 @@ interface MsgBlock {
   compactedBy?: string;
 }
 
-/**
- * Check if a message's branchId is on the active path for the given fork.
- * - Messages with no branchId (null) are "pre-fork" — they belong to the original branch.
- * - The fork's original branch may be '__main__' or a parent branch id (for nested forks).
- */
+// ═══════════════════════════════════════════════════════════════
+// BRANCH FILTER LOGIC
+// ═══════════════════════════════════════════════════════════════
+
 function isOnActiveBranch(branchId: string | null, fork: AtooFork): boolean {
   const origBranch = fork.branches.find(b => b.isOriginal);
   const origBid = origBranch?.id ?? '__main__';
-
-  // Untagged messages (null branchId) belong to the original branch.
-  // They're "pre-fork" messages that existed before any branch was created.
   const effectiveBranch = branchId || origBid;
-
   return effectiveBranch === fork.activeBranchId;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// DATA BUILDERS
+// ═══════════════════════════════════════════════════════════════
 
 function buildMsgBlocks(filtered: FilteredMessage[]): MsgBlock[] {
   const dispatchGroups = new Map<string, FilteredMessage[]>();
@@ -260,6 +258,108 @@ function mapToAgentMessage(m: FilteredMessage): AgentMessage {
     rawContent: m._rawJson || null,
     _original: m,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CUSTOM HOOKS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * useBranchFilter — filters messages through filterMessages and then applies
+ * branch gating logic based on forks. Returns a stable array reference that
+ * only changes when messages reference or forks change.
+ */
+function useBranchFilter(messages: any[], forks: AtooFork[]): FilteredMessage[] {
+  const prevMessagesRef = useRef<any[] | null>(null);
+  const prevFilteredRef = useRef<FilteredMessage[]>([]);
+
+  // Recompute filterMessages when messages reference changes (or on first call)
+  if (messages !== prevMessagesRef.current) {
+    prevFilteredRef.current = filterMessages(messages, true);
+    prevMessagesRef.current = messages;
+  }
+  const filtered = prevFilteredRef.current;
+
+  // Recompute branch filtering when filtered or forks change
+  return useMemo(() => {
+    if (forks.length === 0) return filtered;
+
+    const forkByUuid = new Map<string, AtooFork>();
+    for (const fork of forks) {
+      forkByUuid.set(fork.forkPointEventUuid, fork);
+    }
+    const forkPointSet = new Set(forks.map(f => f.forkPointEventUuid));
+    // Set of user UUIDs whose fork point passed the gate (so their responses are visible)
+    const visibleForkPoints = new Set<string>();
+    const activeGates: AtooFork[] = [];
+
+    return filtered.filter(m => {
+      const eventUuid = m._eventUuid;
+      const branchId: string | null = (m as any)._branchId || null;
+
+      // Dispatch child — follows its parent's visibility
+      if (m._parentToolUseId) {
+        const colonIdx = m._parentToolUseId.indexOf(':');
+        const parentUserUuid = colonIdx >= 0 ? m._parentToolUseId.slice(0, colonIdx) : m._parentToolUseId;
+        // Responses to a visible fork-point message pre-date the fork — always show
+        if (visibleForkPoints.has(parentUserUuid)) return true;
+        if (activeGates.length === 0) return true;
+        return activeGates.every(gate => isOnActiveBranch(branchId, gate));
+      }
+
+      // User message (or other top-level message): check gates first
+      const passesGates = activeGates.length === 0 || activeGates.every(gate => isOnActiveBranch(branchId, gate));
+      if (!passesGates) return false;
+
+      // If this is a fork point and it passed the gates, register it and add its gate
+      if (m.role === 'user' && eventUuid && forkPointSet.has(eventUuid)) {
+        visibleForkPoints.add(eventUuid);
+        const fork = forkByUuid.get(eventUuid);
+        if (fork) activeGates.push(fork);
+      }
+
+      return true;
+    });
+  }, [filtered, forks]);
+}
+
+/**
+ * useAutoScroll — manages auto-scrolling behavior for the chat area.
+ * On session change: force scroll to bottom.
+ * On message count increase: scroll to bottom only if near bottom (within 200px).
+ * Uses el.scrollTop = el.scrollHeight (NOT scrollIntoView which scrolls ancestors).
+ */
+function useAutoScroll(ref: React.RefObject<HTMLDivElement>, sessionId: string, messageCount: number) {
+  const prevSessionIdRef = useRef(sessionId);
+  const prevMessageCountRef = useRef(messageCount);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const sessionChanged = sessionId !== prevSessionIdRef.current;
+    const messageCountIncreased = messageCount > prevMessageCountRef.current;
+
+    if (sessionChanged) {
+      // Force scroll to bottom on session change
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          el.scrollTop = el.scrollHeight;
+        });
+      });
+    } else if (messageCountIncreased) {
+      // Scroll to bottom only if near bottom
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+      if (nearBottom) {
+        requestAnimationFrame(() => {
+          el.scrollTop = el.scrollHeight;
+        });
+      }
+    }
+
+    prevSessionIdRef.current = sessionId;
+    prevMessageCountRef.current = messageCount;
+  }, [sessionId, messageCount]);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -524,7 +624,7 @@ function DiffView({ diff }: { diff: DiffData }) {
 function computeLineDiff(before: string[], after: string[]): { type: '+' | '-' | ' '; text: string }[] {
   // LCS-based diff
   const m = before.length, n = after.length;
-  // For very large files, fall back to showing just before→after
+  // For very large files, fall back to showing just before->after
   if (m + n > 5000) {
     const result: { type: '+' | '-' | ' '; text: string }[] = [];
     before.forEach(l => result.push({ type: '-', text: l }));
@@ -579,7 +679,11 @@ function computeLineDiff(before: string[], after: string[]): { type: '+' | '-' |
   return result;
 }
 
-function AgentGroup({ agent, isCol, isActive, sessionId, dispatchId, fileChangeCount }: { agent: AgentResponse; isCol: boolean; isActive?: boolean; sessionId?: string; dispatchId?: string; fileChangeCount?: number }) {
+// ═══════════════════════════════════════════════════════════════
+// AGENT GROUP (memoized)
+// ═══════════════════════════════════════════════════════════════
+
+const AgentGroup = React.memo(function AgentGroup({ agent, isCol, isActive, sessionId, dispatchId, fileChangeCount }: { agent: AgentResponse; isCol: boolean; isActive?: boolean; sessionId?: string; dispatchId?: string; fileChangeCount?: number }) {
   const [verbose, setVerbose] = useState(false);
   const agentKey = Object.entries(AGENT_CONFIG).find(([, c]) => c.name === agent.agentName)?.[0] || '';
 
@@ -684,7 +788,7 @@ function AgentGroup({ agent, isCol, isActive, sessionId, dispatchId, fileChangeC
       )}
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════
 // REMOVED / COMPACTED / CONTEXT DRIFT
@@ -845,10 +949,10 @@ function AAForkDivider({ index, rangeStartIndex, rangeEndIndex, onFork, onSetRan
 }
 
 // ═══════════════════════════════════════════════════════════════
-// BRANCH SWITCHER
+// BRANCH SWITCHER (memoized)
 // ═══════════════════════════════════════════════════════════════
 
-function BranchSwitcher({ fork, onSwitch }: { fork: AtooFork; onSwitch: (forkId: string, branchIdx: number) => void }) {
+const BranchSwitcher = React.memo(function BranchSwitcher({ fork, onSwitch }: { fork: AtooFork; onSwitch: (forkId: string, branchIdx: number) => void }) {
   const total = fork.branches.length;
   const active = fork.branches.findIndex(b => b.id === fork.activeBranchId);
   const activeIdx = active >= 0 ? active : 0;
@@ -873,7 +977,7 @@ function BranchSwitcher({ fork, onSwitch }: { fork: AtooFork; onSwitch: (forkId:
       </div>
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════
 // TREE MINIMAP
@@ -987,10 +1091,10 @@ function UserMessage({ msg }: { msg: FilteredMessage }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MESSAGE BLOCK (user msg + responses)
+// MESSAGE BLOCK (user msg + responses) — memoized
 // ═══════════════════════════════════════════════════════════════
 
-function MsgBlockView({ block, vw, sessionId, runningDispatches, dispatchFileChanges }: { block: MsgBlock; vw: number; sessionId?: string; runningDispatches?: string[]; dispatchFileChanges?: Record<string, number> }) {
+const MsgBlockView = React.memo(function MsgBlockView({ block, vw, sessionId, runningDispatches, dispatchFileChanges }: { block: MsgBlock; vw: number; sessionId?: string; runningDispatches?: string[]; dispatchFileChanges?: Record<string, number> }) {
   const [layouts, setLayouts] = useState<Record<string, string>>({});
   const re = Object.entries(block.responses);
   const multi = re.length > 1;
@@ -1016,7 +1120,7 @@ function MsgBlockView({ block, vw, sessionId, runningDispatches, dispatchFileCha
       </div>
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════
 // INPUT BAR (with attachment system)
@@ -1200,7 +1304,7 @@ function AtooAnyInputBar({ session, proj }: { session: Session; proj: any }) {
             data-bwignore="true"
             data-form-type="other"
           />
-          <button className="aa-send-btn" onClick={sendMessage} title="Send message">↑</button>
+          <button className="aa-send-btn" onClick={sendMessage} title="Send message">&uarr;</button>
         </div>
         <div className="aa-input-send-btns">
           <AgentSelector
@@ -1253,6 +1357,11 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
   const [mapOpen, setMapOpen] = useState(false);
   const chatAreaRef = useRef<HTMLDivElement>(null);
 
+  // --- Custom hooks for branch filtering and auto-scroll ---
+  const branchFiltered = useBranchFilter(session.messages, forks);
+  const blocks = useMemo(() => buildMsgBlocks(branchFiltered), [branchFiltered]);
+  useAutoScroll(chatAreaRef as React.RefObject<HTMLDivElement>, session.id, session.messages.length);
+
   // Expose tree toggle for the toolbar
   useEffect(() => {
     (window as any).toggleAtooAnyTree = () => setMapOpen(o => !o);
@@ -1270,85 +1379,17 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
     return () => window.removeEventListener('keydown', handleEsc);
   }, [session.id, session.status]);
 
+  // Track viewport width for column/row layout decisions
   useEffect(() => {
     const h = () => setVw(window.innerWidth);
     window.addEventListener('resize', h);
     return () => window.removeEventListener('resize', h);
   }, []);
 
-  // Build message blocks from filtered messages, respecting active branch path.
-  // Simple walk: at each fork point, check which branch is active and only show
-  // messages on that branch. If a fork point itself is hidden by an earlier fork,
-  // it and everything after it on that path stay hidden.
-  const filtered = filterMessages(session.messages, true);
-  const branchFiltered = useMemo(() => {
-    if (forks.length === 0) return filtered;
-
-    const forkByUuid = new Map<string, AtooFork>();
-    for (const fork of forks) {
-      forkByUuid.set(fork.forkPointEventUuid, fork);
-    }
-    const forkPointSet = new Set(forks.map(f => f.forkPointEventUuid));
-    // Set of user UUIDs whose fork point passed the gate (so their responses are visible)
-    const visibleForkPoints = new Set<string>();
-    const activeGates: AtooFork[] = [];
-
-    return filtered.filter(m => {
-      const eventUuid = m._eventUuid;
-      const branchId: string | null = (m as any)._branchId || null;
-
-      // Dispatch child — follows its parent's visibility
-      if (m._parentToolUseId) {
-        const colonIdx = m._parentToolUseId.indexOf(':');
-        const parentUserUuid = colonIdx >= 0 ? m._parentToolUseId.slice(0, colonIdx) : m._parentToolUseId;
-        // Responses to a visible fork-point message pre-date the fork — always show
-        if (visibleForkPoints.has(parentUserUuid)) return true;
-        if (activeGates.length === 0) return true;
-        return activeGates.every(gate => isOnActiveBranch(branchId, gate));
-      }
-
-      // User message (or other top-level message): check gates first
-      const passesGates = activeGates.length === 0 || activeGates.every(gate => isOnActiveBranch(branchId, gate));
-      if (!passesGates) return false;
-
-      // If this is a fork point and it passed the gates, register it and add its gate
-      if (m.role === 'user' && eventUuid && forkPointSet.has(eventUuid)) {
-        visibleForkPoints.add(eventUuid);
-        const fork = forkByUuid.get(eventUuid);
-        if (fork) activeGates.push(fork);
-      }
-
-      return true;
-    });
-  }, [filtered, forks]);
-  const blocks = useMemo(() => buildMsgBlocks(branchFiltered), [branchFiltered]);
-
-  // Scroll to bottom when switching to this session
-  useEffect(() => {
-    const el = chatAreaRef.current;
-    if (!el) return;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        el.scrollTop = el.scrollHeight;
-      });
-    });
-  }, [session.id, blocks.length]);
-
-  // Auto-scroll to bottom when new content arrives (messages, not just blocks)
-  useEffect(() => {
-    const el = chatAreaRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-    if (nearBottom) {
-      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
-    }
-  }, [session.messages.length]);
-
-  // Fork map: map block index → fork (by matching forkPointEventUuid to user message eventUuid)
+  // Fork map: map block index -> fork (by matching forkPointEventUuid to user message eventUuid)
   const forkMap = useMemo(() => {
     const m: Record<number, AtooFork> = {};
     if (forks.length === 0) return m;
-    // Build uuid->block index lookup for user messages
     const uuidToIdx = new Map<string, number>();
     blocks.forEach((b, i) => {
       if (b.userMessage._eventUuid) uuidToIdx.set(b.userMessage._eventUuid, i);
@@ -1363,7 +1404,8 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
     return m;
   }, [forks, blocks]);
 
-  // Fork actions
+  // --- Fork / branch / range handlers ---
+
   const handleFork = useCallback((idx: number) => {
     if (rangeStart !== null && idx > rangeStart) {
       setRangeEnd(idx);
@@ -1382,7 +1424,6 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
     sendAgentCommand(session.id, { action: 'switch_branch', forkId: fId, branchId: fork.branches[bIdx].id });
   }, [forks, session.id]);
 
-  // Range actions (local state mutations — backend persistence via WS commands later)
   const handleRangeExtract = useCallback(() => {
     if (rangeStart === null || rangeEnd === null) return;
     const start = Math.min(rangeStart, rangeEnd);
@@ -1397,18 +1438,15 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
     if (rangeStart === null || rangeEnd === null) return;
     const start = Math.min(rangeStart, rangeEnd);
     const end = Math.max(rangeStart, rangeEnd);
-    // Mutate status on the messages in store
     const store = useStore.getState();
     const p = store.getActiveProject();
     if (!p) { setRangeStart(null); setRangeEnd(null); return; }
     const sess = p.sessions.find(s => s.id === session.id);
     if (!sess) { setRangeStart(null); setRangeEnd(null); return; }
-    // Mark user messages by index as removed
     const userMsgs = sess.messages.filter(m => m.role === 'user' && !m._parentToolUseId);
     for (let i = start; i <= end && i < userMsgs.length; i++) {
       userMsgs[i]._msgStatus = 'removed';
     }
-    // Mark messages after range as context drift
     for (let i = end + 1; i < userMsgs.length; i++) {
       if (!userMsgs[i]._msgStatus || userMsgs[i]._msgStatus === 'visible') {
         userMsgs[i]._contextDrift = true;

@@ -188,7 +188,8 @@ export type AgentCommand =
   | { action: 'remove_messages'; eventUuids: string[] }
   | { action: 'restore_message'; eventUuid: string }
   | { action: 'compact_messages'; eventUuids: string[]; compactedBy: string }
-  | { action: 'fork_conversation'; afterIndex: number }
+  | { action: 'fork_conversation'; afterEventUuid: string }
+  | { action: 'switch_branch'; forkId: string; branchId: string }
   | { action: 'extract_range'; startIndex: number; endIndex: number; label?: string }
   | { action: 'kill_agent'; agentFamily: string }
   | { action: 'kill_all_agents' };

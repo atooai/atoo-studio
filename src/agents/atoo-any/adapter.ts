@@ -31,8 +31,12 @@ import {
   appendBranchOperation,
   readAllEvents,
   stripMeta,
+  rebuildForkState,
+  filterEventsForActivePath,
   type AtooEventMeta,
   type AtooBranchOperation,
+  type ForkInfo,
+  type ForkState,
 } from './session-store.js';
 
 import { mapCodexJsonlLine } from '../lib/codex/jsonl-mapper.js';
@@ -67,6 +71,7 @@ interface DispatchInfo {
   done: boolean;
   cleanupInstance?: () => void;
   fileTracker: ToolResultFileTracker;
+  branchId: string | null; // branch this dispatch was created on
 }
 
 /**
@@ -171,6 +176,9 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
   private pendingToolUses = new Map<string, { name: string; input: any }>();
   private activeDispatches = new Map<string, DispatchInfo>();
   private userIsViewing = true;
+
+  // Fork/branch state
+  private forkState: ForkState = { forks: [], activeBranchId: null };
 
   constructor(sessionId: string) {
     super();
@@ -277,18 +285,23 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     if (meta?.agentSelectorConfig) {
       userEvent._agentSelectorConfig = meta.agentSelectorConfig;
     }
+    // Tag with active branch
+    if (this.forkState.activeBranchId) {
+      userEvent._branchId = this.forkState.activeBranchId;
+    }
 
     // Store and persist
     this.events.push(userEvent);
     appendEvent(this.sessionFilePath, userEvent);
 
-    // Emit user message to UI (include attachments and agent config for rendering)
+    // Emit user message to UI (include attachments, agent config, and branch for rendering)
     const userWireMsgs = toWireMessages(this.sessionId, userEvent, this.pendingToolUses);
     for (const msg of userWireMsgs) {
       if (msg.type === 'user_message') {
         if (userEvent._attachments) (msg as any).attachments = userEvent._attachments;
         if (userEvent._agentSelectorConfig) (msg as any).agentSelectorConfig = userEvent._agentSelectorConfig;
       }
+      if (userEvent._branchId) (msg as any)._branchId = userEvent._branchId;
       this.wireMessages.push(msg);
       this.emit('message', msg);
     }
@@ -421,18 +434,120 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'compact', eventUuids, compactedBy, compactedSummary: summary });
   }
 
-  forkConversation(afterIndex: number): void {
+  forkConversation(afterEventUuid: string): void {
+    const forkPointEvent = this.events.find(e => e.uuid === afterEventUuid);
+    if (!forkPointEvent) {
+      console.warn(`[atoo-any] Fork: event ${afterEventUuid} not found`);
+      return;
+    }
+
+    const newBranchId = uuidv4();
+    const parentBranchId = this.forkState.activeBranchId;
+    const forkId = uuidv4();
+
+    // Check if there's already a fork at this point
+    const existingFork = this.forkState.forks.find(f => f.forkPointEventUuid === afterEventUuid);
+    if (existingFork) {
+      // Add another branch to the existing fork
+      const branchLabel = `Branch ${existingFork.branches.length}`;
+      existingFork.branches.push({ id: newBranchId, label: branchLabel, isOriginal: false });
+      existingFork.activeBranchId = newBranchId;
+
+      const op: AtooBranchOperation = {
+        type: 'branch_operation',
+        uuid: uuidv4(),
+        timestamp: new Date().toISOString(),
+        operation: 'fork',
+        forkPointEventUuid: afterEventUuid,
+        branchId: newBranchId,
+        branchLabel,
+        parentBranchId,
+      };
+      appendBranchOperation(this.sessionFilePath, op);
+    } else {
+      // New fork point
+      const branchLabel = 'Branch 1';
+      const originalBranchId = parentBranchId ?? '__main__';
+      const newFork: ForkInfo = {
+        id: forkId,
+        forkPointEventUuid: afterEventUuid,
+        parentBranchId,
+        branches: [
+          { id: originalBranchId, label: 'Original', isOriginal: true },
+          { id: newBranchId, label: branchLabel, isOriginal: false },
+        ],
+        activeBranchId: newBranchId,
+      };
+      this.forkState.forks.push(newFork);
+
+      const op: AtooBranchOperation = {
+        type: 'branch_operation',
+        uuid: forkId,
+        timestamp: new Date().toISOString(),
+        operation: 'fork',
+        forkPointEventUuid: afterEventUuid,
+        branchId: newBranchId,
+        branchLabel,
+        parentBranchId,
+      };
+      appendBranchOperation(this.sessionFilePath, op);
+    }
+
+    // Switch to the new branch
+    this.forkState.activeBranchId = newBranchId;
+    const switchOp: AtooBranchOperation = {
+      type: 'branch_operation',
+      uuid: uuidv4(),
+      timestamp: new Date().toISOString(),
+      operation: 'switch_branch',
+      branchId: newBranchId,
+    };
+    appendBranchOperation(this.sessionFilePath, switchOp);
+
+    this.emitForkState();
+  }
+
+  switchBranch(forkId: string, branchId: string): void {
+    // Find the specific fork by ID
+    const targetFork = this.forkState.forks.find(f => f.id === forkId);
+    if (targetFork) {
+      targetFork.activeBranchId = branchId;
+    }
+
+    // Recompute global active branch from the deepest fork
+    // (walk forks in order, the last fork's active branch is the global one)
+    let globalActive: string | null = null;
+    for (const fork of this.forkState.forks) {
+      const ab = fork.activeBranchId;
+      globalActive = ab === '__main__' ? null : ab;
+    }
+    this.forkState.activeBranchId = globalActive;
+
+    // Persist with forkId so rebuild can target the right fork
     const op: AtooBranchOperation = {
       type: 'branch_operation',
       uuid: uuidv4(),
       timestamp: new Date().toISOString(),
-      operation: 'fork',
-      forkPointEventUuid: this.events[afterIndex]?.uuid,
-      branchId: uuidv4(),
-      branchLabel: `Branch ${Date.now()}`,
+      operation: 'switch_branch',
+      branchId,
+      forkPointEventUuid: targetFork?.forkPointEventUuid,
     };
     appendBranchOperation(this.sessionFilePath, op);
-    this.emit('message', { type: 'branch_update', sessionId: this.sessionId, operation: 'fork', forkPointEventUuid: op.forkPointEventUuid, branchId: op.branchId, branchLabel: op.branchLabel });
+
+    this.emitForkState();
+  }
+
+  getForkState(): ForkState {
+    return this.forkState;
+  }
+
+  private emitForkState(): void {
+    this.emit('message', {
+      type: 'fork_state_update',
+      sessionId: this.sessionId,
+      forks: this.forkState.forks,
+      activeBranchId: this.forkState.activeBranchId,
+    });
   }
 
   extractRange(startIndex: number, endIndex: number, label?: string): void {
@@ -497,6 +612,10 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
   private async loadHistoricalEvents(): Promise<void> {
     try {
       const atooEvents = readAllEvents(this.sessionFilePath);
+
+      // Reconstruct fork state from branch_operation records
+      this.forkState = rebuildForkState(atooEvents);
+
       for (const event of atooEvents) {
         this.events.push(event as SessionEvent);
       }
@@ -504,6 +623,9 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       // Rebuild wireMessages with dispatch grouping
       const historyToolUses = new Map<string, { name: string; input: any }>();
       for (const event of atooEvents) {
+        // Skip branch_operation meta-events for wire messages
+        if ((event as any).type === 'branch_operation') continue;
+
         const wireMsgs = toWireMessages(this.sessionId, event as SessionEvent, historyToolUses);
         for (const msg of wireMsgs) {
           // Restore dispatch grouping from metadata
@@ -518,6 +640,8 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
           } else if (event._source) {
             msg._agentId = event._source;
           }
+          // Restore branch tag on wire messages
+          if (event._branchId) (msg as any)._branchId = event._branchId;
           // Restore attachments and agent config on user messages
           if (msg.type === 'user_message') {
             if ((event as any)._attachments) (msg as any).attachments = (event as any)._attachments;
@@ -532,7 +656,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
         this.pendingToolUses.set(id, info);
       }
 
-      console.log(`[atoo-any] Loaded ${this.wireMessages.length} historical messages for ${this.sessionUuid}`);
+      console.log(`[atoo-any] Loaded ${this.wireMessages.length} historical messages, ${this.forkState.forks.length} forks for ${this.sessionUuid}`);
     } catch (err: any) {
       console.warn(`[atoo-any] Failed to load history for ${this.sessionUuid}:`, err.message);
     }
@@ -634,6 +758,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       done: false,
       cleanupInstance,
       fileTracker,
+      branchId: this.forkState.activeBranchId,
     };
 
     this.activeDispatches.set(dispatchId, dispatch);
@@ -803,6 +928,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       _source: dispatch.agentFamily,
       _parentUserUuid: dispatch.parentUserUuid,
       _dispatchId: dispatch.dispatchId,
+      _branchId: dispatch.branchId || undefined,
     };
 
     for (const event of sessionEvents) {
@@ -810,6 +936,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       (event as any)._source = meta._source;
       (event as any)._dispatchId = meta._dispatchId;
       (event as any)._parentUserUuid = meta._parentUserUuid;
+      if (dispatch.branchId) (event as any)._branchId = dispatch.branchId;
 
       // Level 3: Feed through tool-result file tracker
       dispatch.fileTracker.processEvent(event);
@@ -824,6 +951,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
         // Tag with dispatch info for UI grouping
         msg._parentToolUseId = dispatch.dispatchId;
         msg._agentId = dispatch.agentKey;
+        if (dispatch.branchId) (msg as any)._branchId = dispatch.branchId;
 
         this.wireMessages.push(msg);
         this.emit('message', msg);
@@ -854,6 +982,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       _source: dispatch.agentFamily,
       _parentUserUuid: dispatch.parentUserUuid,
       _dispatchId: dispatch.dispatchId,
+      _branchId: dispatch.branchId || undefined,
     };
 
     for (const event of sessionEvents) {
@@ -861,6 +990,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       (event as any)._source = meta._source;
       (event as any)._dispatchId = meta._dispatchId;
       (event as any)._parentUserUuid = meta._parentUserUuid;
+      if (dispatch.branchId) (event as any)._branchId = dispatch.branchId;
 
       // Level 3: Feed through tool-result file tracker
       dispatch.fileTracker.processEvent(event);
@@ -874,6 +1004,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       for (const msg of wireMsgs) {
         msg._parentToolUseId = dispatch.dispatchId;
         msg._agentId = dispatch.agentKey;
+        if (dispatch.branchId) (msg as any)._branchId = dispatch.branchId;
         this.wireMessages.push(msg);
         this.emit('message', msg);
       }
@@ -980,7 +1111,13 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
    * remapping automatically, so broken parentUuid chains are fixed.
    */
   private buildConversationHistory(preferFamily: AgentFamily): SessionEvent[] {
-    const allEvents = this.events.slice(0, -1); // exclude current user message
+    // Filter events to only include those on the active branch path
+    const filteredEvents = filterEventsForActivePath(
+      this.events.slice(0, -1) as any, // exclude current user message
+      this.forkState,
+    ) as SessionEvent[];
+    const allEvents = filteredEvents.filter((e: any) => e.type !== 'branch_operation');
+
     if (allEvents.length === 0) return [];
 
     const result: SessionEvent[] = [];

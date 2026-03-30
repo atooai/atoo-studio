@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { filterMessages, classifyFile, getAttachIcon, escapeHtml } from '../../utils';
 import { ChatMessageItem } from './ChatMessage';
-import { AtooAnyChat } from './AtooAnyChat';
+import { AtooAnyChat } from './AtooAnyChatNew';
 import { api } from '../../api';
 import { sendAgentCommand } from '../../api/websocket';
 import type { Session, ChatAttachment, FilteredMessage } from '../../types';

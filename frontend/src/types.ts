@@ -48,6 +48,7 @@ export interface Session {
   } | null;
   // Atoo-any branching state
   forks?: AtooFork[];
+  activeBranchId?: string | null;
   extractions?: AtooExtraction[];
 }
 
@@ -123,15 +124,15 @@ export interface ChatDraft {
 export interface AtooBranch {
   id: string;
   label: string;
-  messages: ChatMessage[];
   isOriginal: boolean;
 }
 
 export interface AtooFork {
   id: string;
-  forkPointIndex: number;
+  forkPointEventUuid: string;
+  parentBranchId: string | null;
   branches: AtooBranch[];
-  activeBranchIndex: number;
+  activeBranchId: string;
 }
 
 export interface AtooExtraction {

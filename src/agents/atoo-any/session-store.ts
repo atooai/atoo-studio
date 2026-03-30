@@ -29,11 +29,12 @@ export interface AtooBranchOperation {
   type: 'branch_operation';
   uuid: string;
   timestamp: string;
-  operation: 'fork' | 'remove' | 'restore' | 'compact' | 'extract';
+  operation: 'fork' | 'remove' | 'restore' | 'compact' | 'extract' | 'switch_branch';
   // Fork: where the branch diverges
   forkPointEventUuid?: string;
   branchId?: string;
   branchLabel?: string;
+  parentBranchId?: string | null; // branch from which the fork was created
   // Remove/restore: which events are affected
   targetEventUuids?: string[];
   // Compact: summary info
@@ -179,6 +180,151 @@ interface QuickMeta {
   title: string;
   lastModified: string;
   eventCount: number;
+}
+
+// ─── Fork state reconstruction ──────────────────────────
+
+export interface ForkBranch {
+  id: string;
+  label: string;
+  isOriginal: boolean;
+}
+
+export interface ForkInfo {
+  id: string;
+  forkPointEventUuid: string;
+  parentBranchId: string | null;
+  branches: ForkBranch[];
+  activeBranchId: string;
+}
+
+export interface ForkState {
+  forks: ForkInfo[];
+  activeBranchId: string | null;
+}
+
+/**
+ * Replay branch_operation records from JSONL to reconstruct fork state.
+ * Returns the fork structure and the currently active branch.
+ */
+export function rebuildForkState(allRecords: any[]): ForkState {
+  const forks = new Map<string, ForkInfo>(); // forkPointEventUuid -> ForkInfo
+  let activeBranchId: string | null = null;
+
+  for (const record of allRecords) {
+    if (record.type !== 'branch_operation') continue;
+
+    if (record.operation === 'fork' && record.forkPointEventUuid && record.branchId) {
+      const existing = forks.get(record.forkPointEventUuid);
+      if (existing) {
+        // Adding another branch to an existing fork point
+        existing.branches.push({
+          id: record.branchId,
+          label: record.branchLabel || `Branch ${existing.branches.length + 1}`,
+          isOriginal: false,
+        });
+      } else {
+        // New fork point — create with original branch + new branch
+        const originalBranchId = record.parentBranchId ?? null;
+        const forkId = record.uuid;
+        forks.set(record.forkPointEventUuid, {
+          id: forkId,
+          forkPointEventUuid: record.forkPointEventUuid,
+          parentBranchId: originalBranchId,
+          branches: [
+            { id: originalBranchId ?? '__main__', label: 'Original', isOriginal: true },
+            { id: record.branchId, label: record.branchLabel || 'Branch 1', isOriginal: false },
+          ],
+          activeBranchId: record.branchId, // new branch is active by default
+        });
+      }
+      // Forking implicitly switches to the new branch
+      activeBranchId = record.branchId;
+    } else if (record.operation === 'switch_branch' && record.branchId) {
+      // Only process switch_branch ops that have forkPointEventUuid (new format).
+      // Old ops without it are ambiguous (multiple forks can share __main__) and are ignored.
+      if (record.forkPointEventUuid && forks.has(record.forkPointEventUuid)) {
+        const fork = forks.get(record.forkPointEventUuid)!;
+        fork.activeBranchId = record.branchId;
+      }
+      // Recompute global active branch from last fork
+      let lastActive: string | null = null;
+      for (const fork of forks.values()) {
+        lastActive = fork.activeBranchId === '__main__' ? null : fork.activeBranchId;
+      }
+      activeBranchId = lastActive;
+    }
+  }
+
+  return { forks: [...forks.values()], activeBranchId };
+}
+
+/**
+ * Check if a message's branchId matches the active branch at a fork point.
+ * Untagged messages (null) belong to the original branch.
+ */
+function isOnActiveBranch(branchId: string | null, fork: ForkInfo): boolean {
+  const origBranch = fork.branches.find(b => b.isOriginal);
+  const origBid = origBranch?.id ?? '__main__';
+  const effectiveBranch = branchId || origBid;
+  return effectiveBranch === fork.activeBranchId;
+}
+
+/**
+ * Given the fork state and a list of events, return only events visible on the active path.
+ * Events before any fork point are always visible. After a fork point, only events matching
+ * the active branch at that fork are included. Fork-point messages and their dispatch
+ * responses (which existed before the fork) are always visible.
+ */
+export function filterEventsForActivePath(events: AtooSessionEvent[], forkState: ForkState): AtooSessionEvent[] {
+  if (forkState.forks.length === 0) return events;
+
+  const forkByEventUuid = new Map<string, ForkInfo>();
+  for (const fork of forkState.forks) {
+    forkByEventUuid.set(fork.forkPointEventUuid, fork);
+  }
+  const forkPointSet = new Set(forkState.forks.map(f => f.forkPointEventUuid));
+  const visibleForkPoints = new Set<string>();
+
+  const result: AtooSessionEvent[] = [];
+  const activeGates: ForkInfo[] = [];
+
+  for (const event of events) {
+    if ((event as any).type === 'branch_operation') {
+      result.push(event);
+      continue;
+    }
+
+    const eventBranch: string | null = (event as any)._branchId || null;
+    const eventUuid = (event as any).uuid;
+
+    // Dispatch response — follows parent's visibility
+    if ((event as any)._dispatchId) {
+      const parentUuid = (event as any)._parentUserUuid;
+      if (parentUuid && visibleForkPoints.has(parentUuid)) {
+        result.push(event);
+        continue;
+      }
+      if (activeGates.length === 0) { result.push(event); continue; }
+      if (activeGates.every(gate => isOnActiveBranch(eventBranch, gate))) result.push(event);
+      continue;
+    }
+
+    // Top-level message: check gates first
+    const passesGates = activeGates.length === 0 || activeGates.every(gate => isOnActiveBranch(eventBranch, gate));
+    if (!passesGates) continue;
+
+    // If this is a fork point that passed the gates, register it and add its gate
+    if ((event as any).type === 'user' && eventUuid && forkPointSet.has(eventUuid)) {
+      visibleForkPoints.add(eventUuid);
+      const fork = forkByEventUuid.get(eventUuid);
+      if (fork) activeGates.push(fork);
+    }
+
+    result.push(event);
+  }
+
+  return result;
 }
 
 function parseQuickMeta(filePath: string): QuickMeta {

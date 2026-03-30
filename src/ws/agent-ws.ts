@@ -40,10 +40,19 @@ export function handleAgentWsUpgrade(
     const info = agent.getInfo();
     ws.send(JSON.stringify({ type: 'agent_info', ...info }));
 
-    // Replay all existing messages as a single batch
+    // Replay all existing messages as a single batch, including fork state
     const messages = agent.getMessages();
     if (messages.length > 0) {
-      ws.send(JSON.stringify({ type: 'history_batch', messages }));
+      const batch: any = { type: 'history_batch', messages };
+      // Include fork state atomically so it's available before first render
+      if ('getForkState' in agent) {
+        const forkState = (agent as any).getForkState();
+        if (forkState.forks.length > 0) {
+          batch.forks = forkState.forks;
+          batch.activeBranchId = forkState.activeBranchId;
+        }
+      }
+      ws.send(JSON.stringify(batch));
     }
 
     // Send running dispatches for atoo-any (survives reconnect/project switch)
@@ -118,7 +127,10 @@ function handleCommand(sessionId: string, cmd: AgentCommand): void {
       if ('compactMessages' in agent) (agent as any).compactMessages(cmd.eventUuids, cmd.compactedBy);
       break;
     case 'fork_conversation':
-      if ('forkConversation' in agent) (agent as any).forkConversation(cmd.afterIndex);
+      if ('forkConversation' in agent) (agent as any).forkConversation(cmd.afterEventUuid);
+      break;
+    case 'switch_branch':
+      if ('switchBranch' in agent) (agent as any).switchBranch(cmd.forkId, cmd.branchId);
       break;
     case 'extract_range':
       if ('extractRange' in agent) (agent as any).extractRange(cmd.startIndex, cmd.endIndex, cmd.label);

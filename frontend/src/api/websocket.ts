@@ -432,7 +432,7 @@ export function connectAgentWs(sessionId: string) {
     try {
       const msg = JSON.parse(e.data);
       if (msg.type === 'history_batch' && Array.isArray(msg.messages)) {
-        handleAgentMessageBatch(sessionId, msg.messages);
+        handleAgentMessageBatch(sessionId, msg.messages, msg);
       } else {
         handleAgentMessage(sessionId, msg);
       }
@@ -453,7 +453,7 @@ export function sendAgentCommand(sessionId: string, command: any): boolean {
 }
 
 /** Process a batch of replayed messages in a single store update */
-function handleAgentMessageBatch(sessionId: string, messages: any[]) {
+function handleAgentMessageBatch(sessionId: string, messages: any[], batchMsg?: any) {
   const store = useStore.getState();
   const projects = store.projects.map((proj) => {
     const sessIdx = proj.sessions.findIndex((s) => s.id === sessionId);
@@ -533,15 +533,26 @@ function handleAgentMessageBatch(sessionId: string, messages: any[]) {
         sess.messages.push({ role: 'control_request', content: { subtype: 'ask_user_question', tool_use: { name: 'AskUserQuestion', input: { questions: msg.questions } } }, _eventUuid: msg.id, _requestId: msg.requestId, _responded: msg.responded });
       }
 
-      // Tag sidechain metadata
-      if (sidechainMeta._sidechain && sess.messages.length > prevLen) {
+      // Tag sidechain metadata and branch ID
+      if (sess.messages.length > prevLen) {
         for (let mi = prevLen; mi < sess.messages.length; mi++) {
-          sess.messages[mi] = { ...sess.messages[mi], ...sidechainMeta };
+          if (sidechainMeta._sidechain) {
+            sess.messages[mi] = { ...sess.messages[mi], ...sidechainMeta };
+          }
+          if (msg._branchId) {
+            sess.messages[mi] = { ...sess.messages[mi], _branchId: msg._branchId };
+          }
         }
       }
     }
 
-    console.log(`[history_batch] session=${sessionId} existing=${existingCount} batch=${messages.length} deduped=${dupCount} added=${addCount}`);
+    console.log(`[history_batch] session=${sessionId} existing=${existingCount} batch=${messages.length} deduped=${dupCount} added=${addCount} forks=${batchMsg?.forks?.length || 0}`);
+
+    // Apply fork state atomically with the messages (no race condition)
+    if (batchMsg?.forks) {
+      sess.forks = batchMsg.forks;
+      sess.activeBranchId = batchMsg.activeBranchId;
+    }
 
     // Update title from first user message
     if (!sess.title || sess.title === 'New session') {
@@ -719,6 +730,10 @@ function handleAgentMessage(sessionId: string, msg: any) {
         sess._dispatchFileChanges[msg.dispatchId] = msg.fileChangeCount;
       }
       return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
+    } else if (msg.type === 'fork_state_update') {
+      sess.forks = msg.forks;
+      sess.activeBranchId = msg.activeBranchId;
+      return { ...proj, sessions: proj.sessions.map((s, i) => (i === sessIdx ? sess : s)) };
     } else if (msg.type === 'system_message') {
       sess.messages.push({ role: 'assistant', content: msg.text, _eventUuid: msg.id });
     } else if (msg.type === 'file_change') {
@@ -727,10 +742,16 @@ function handleAgentMessage(sessionId: string, msg: any) {
       return proj;
     }
 
-    // Tag sidechain metadata on any newly pushed messages
-    if (sidechainMeta._sidechain && sess.messages.length > proj.sessions[sessIdx].messages.length) {
+    // Tag sidechain metadata and branch ID on any newly pushed messages
+    const hasNewMessages = sess.messages.length > proj.sessions[sessIdx].messages.length;
+    if (hasNewMessages) {
       for (let mi = proj.sessions[sessIdx].messages.length; mi < sess.messages.length; mi++) {
-        sess.messages[mi] = { ...sess.messages[mi], ...sidechainMeta };
+        if (sidechainMeta._sidechain) {
+          sess.messages[mi] = { ...sess.messages[mi], ...sidechainMeta };
+        }
+        if (msg._branchId) {
+          sess.messages[mi] = { ...sess.messages[mi], _branchId: msg._branchId };
+        }
       }
     }
 
