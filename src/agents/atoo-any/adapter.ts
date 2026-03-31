@@ -79,6 +79,7 @@ interface DispatchInfo {
   dispatchId: string;
   agentFamily: AgentFamily;
   agentKey: string;
+  runId: string; // AgentRun UUID for prompt JSONL
   parentUserUuid: string;
   promptUuid: string;
   agentIndex: number;
@@ -729,6 +730,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       dispatchId,
       agentFamily: family,
       agentKey: effectiveKey,
+      runId,
       parentUserUuid: promptUuid,
       promptUuid,
       agentIndex,
@@ -799,7 +801,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
           // Check if agent produced any output
           const promptEvents = readPromptEvents(this.sessionDir, promptUuid);
           const hasOutput = promptEvents.some(e =>
-            e.type === 'run_msg' && (e as any).runId === dispatch.agentKey
+            e.type === 'run_msg' && (e as any).runId === dispatch.runId
           );
 
           if (exitCode !== 0 && !hasOutput) {
@@ -879,7 +881,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       if (content) {
         const runMsg: PromptEvent = {
           type: 'run_msg',
-          runId: dispatch.agentKey,
+          runId: dispatch.runId,
           role: event.type === 'user' ? 'tool_result' : 'assistant',
           content,
         };
@@ -915,7 +917,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       if (content) {
         const runMsg: PromptEvent = {
           type: 'run_msg',
-          runId: dispatch.agentKey,
+          runId: dispatch.runId,
           role: event.type === 'user' ? 'tool_result' : 'assistant',
           content,
         };
@@ -969,7 +971,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
 
     const runMsg: PromptEvent = {
       type: 'run_msg',
-      runId: dispatch.agentKey,
+      runId: dispatch.runId,
       role: 'assistant',
       content: errorContent,
     };
