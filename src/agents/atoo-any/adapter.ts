@@ -66,7 +66,7 @@ import {
 } from './session-store.js';
 
 const DEBOUNCE_MS = 50;
-const DISPATCH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — kill stuck agents
+const DISPATCH_TIMEOUT_MS = 60 * 1000; // 1 minute — kill agents with no output
 
 type AgentFamily = 'claude' | 'codex' | 'gemini';
 
@@ -1242,10 +1242,27 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       const others: SessionEvent[] = [];
       const otherTexts: string[] = [];
 
+      // Include error summaries for failed agent runs
+      for (const run of prompt.agents) {
+        if (!run.error) continue;
+        const family = (run.harness || '').replace('-code', '').replace('-cli', '') as AgentFamily;
+        const label = AGENT_LABELS[family] || family;
+        const errorText = `[${label} encountered an error: ${run.error}]`;
+        if (family === preferFamily) {
+          // Don't inject errors from the preferred family as assistant messages
+          // — include as context in the user message instead
+          otherTexts.push(errorText);
+        } else {
+          otherTexts.push(errorText);
+        }
+      }
+
       for (const event of events) {
         if (event.type !== 'run_msg') continue;
         const rm = event as any;
         const run = prompt.agents.find(a => a.uuid === rm.runId);
+        // Skip messages from errored agent runs — the error summary above covers them
+        if (run?.error) continue;
         const family = (run?.harness || '').replace('-code', '').replace('-cli', '') as AgentFamily;
 
         if (rm.role === 'assistant' && rm.content?.type === 'text') {

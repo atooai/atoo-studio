@@ -629,7 +629,7 @@ function computeLineDiff(before: string[], after: string[]): { type: '+' | '-' |
 // AGENT GROUP (memoized)
 // ═══════════════════════════════════════════════════════════════
 
-const AgentGroup = React.memo(function AgentGroup({ agent, isCol, isActive, sessionId, dispatchId, fileChangeCount }: { agent: AgentResponse; isCol: boolean; isActive?: boolean; sessionId?: string; dispatchId?: string; fileChangeCount?: number }) {
+const AgentGroup = React.memo(function AgentGroup({ agent, isCol, isActive, sessionId, dispatchId, fileChangeCount, error }: { agent: AgentResponse; isCol: boolean; isActive?: boolean; sessionId?: string; dispatchId?: string; fileChangeCount?: number; error?: string }) {
   const [verbose, setVerbose] = useState(false);
   const agentKey = Object.entries(AGENT_CONFIG).find(([, c]) => c.name === agent.agentName)?.[0] || '';
 
@@ -660,11 +660,11 @@ const AgentGroup = React.memo(function AgentGroup({ agent, isCol, isActive, sess
   }, [sessionId, agentKey]);
 
   return (
-    <div className={`aa-agent-group ${agent.agentClass}`}>
+    <div className={`aa-agent-group ${agent.agentClass}${error ? ' aa-agent-error' : ''}`} style={error ? { opacity: 0.5 } : undefined}>
       <div className="aa-agent-group-header">
-        <div className="aa-agent-group-pill" style={{ borderColor: agent.agentColor + '40' }}>
+        <div className="aa-agent-group-pill" style={{ borderColor: error ? 'var(--aa-error, #ef4444)40' : agent.agentColor + '40' }}>
           {Logo && <Logo />}
-          <span className="aa-agent-pill-model" style={{ color: agent.agentColor }}>
+          <span className="aa-agent-pill-model" style={{ color: error ? 'var(--aa-error, #ef4444)' : agent.agentColor }}>
             {cfg?.model?.name || agent.agentName}
           </span>
           {reasoningLabel && (
@@ -693,7 +693,12 @@ const AgentGroup = React.memo(function AgentGroup({ agent, isCol, isActive, sess
           </button>
         </div>
       </div>
-      {segs.map((s, i) => {
+      {error && (
+        <div className="aa-agent-error-msg" style={{ color: 'var(--aa-error, #ef4444)', padding: '8px 12px', fontSize: '0.85em' }}>
+          <WarningIcon /> <span style={{ marginLeft: 4 }}>{error}</span>
+        </div>
+      )}
+      {!error && segs.map((s, i) => {
         if (s.t === 'm') {
           if (verbose) {
             return (
@@ -1029,7 +1034,7 @@ function UserMessage({ msg }: { msg: FilteredMessage }) {
 // MESSAGE BLOCK (user msg + responses) — memoized
 // ═══════════════════════════════════════════════════════════════
 
-const MsgBlockView = React.memo(function MsgBlockView({ block, vw, sessionId, runningDispatches, dispatchFileChanges }: { block: MsgBlock; vw: number; sessionId?: string; runningDispatches?: string[]; dispatchFileChanges?: Record<string, number> }) {
+const MsgBlockView = React.memo(function MsgBlockView({ block, vw, sessionId, runningDispatches, dispatchFileChanges, sessionPrompts }: { block: MsgBlock; vw: number; sessionId?: string; runningDispatches?: string[]; dispatchFileChanges?: Record<string, number>; sessionPrompts?: Record<string, import('../../types').AtooPrompt> }) {
   const [layouts, setLayouts] = useState<Record<string, string>>({});
   const re = Object.entries(block.responses);
   const multi = re.length > 1;
@@ -1050,7 +1055,12 @@ const MsgBlockView = React.memo(function MsgBlockView({ block, vw, sessionId, ru
           const dispatchId = `${block.userMessage._eventUuid}:${k}`;
           const isRunning = runningDispatches?.includes(dispatchId) ?? false;
           const fcc = dispatchFileChanges?.[dispatchId] ?? 0;
-          return <AgentGroup key={k} agent={a} isCol={isCol} isActive={isRunning} sessionId={sessionId} dispatchId={dispatchId} fileChangeCount={fcc} />;
+          // Look up error from session prompts
+          const promptData = sessionPrompts?.[block.userMessage._eventUuid || ''];
+          const agentFamily = k.includes(':') ? k.split(':')[0] : k;
+          const agentRun = promptData?.agents.find(r => r.harness === agentFamily || r.harness === k);
+          const runError = agentRun?.error;
+          return <AgentGroup key={k} agent={a} isCol={isCol} isActive={isRunning} sessionId={sessionId} dispatchId={dispatchId} fileChangeCount={fcc} error={runError} />;
         })}
       </div>
     </div>
@@ -1499,7 +1509,7 @@ export function AtooAnyChat({ session, proj }: { session: Session; proj: any }) 
               {block.status === 'visible' && (
                 <>
                   {block.contextDrift && <ContextDriftBadge />}
-                  <MsgBlockView block={block} vw={vw} sessionId={session.id} runningDispatches={session._runningDispatches} dispatchFileChanges={session._dispatchFileChanges} />
+                  <MsgBlockView block={block} vw={vw} sessionId={session.id} runningDispatches={session._runningDispatches} dispatchFileChanges={session._dispatchFileChanges} sessionPrompts={session.sessionPrompts} />
                 </>
               )}
 
