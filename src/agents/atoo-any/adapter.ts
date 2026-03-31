@@ -764,6 +764,9 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
 
     // Handle process exit
     const pty = getPty(envId);
+    if (!pty) {
+      console.warn(`[atoo-any] No PTY for ${family} dispatch ${dispatchId} (envId=${envId}) — exit handler won't fire`);
+    }
     if (pty) {
       pty.onExit(({ exitCode }) => {
         console.log(`[atoo-any] ${family} process exited (code=${exitCode}) for dispatch ${dispatchId}`);
@@ -841,6 +844,33 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
         const initialDelay = family === 'gemini' ? 500 : 200;
         setTimeout(() => finalize(8), initialDelay);
       });
+    } else {
+      // No PTY — poll for process exit via kill(0) as fallback
+      const pollExit = () => {
+        try { process.kill(pid!, 0); } catch {
+          // Process is gone
+          console.log(`[atoo-any] ${family} process gone (no PTY) for dispatch ${dispatchId}`);
+          watcher.finalRead();
+          const runEnd: PromptEvent = { type: 'run_end', runId };
+          appendPromptEvent(this.sessionDir, promptUuid, runEnd);
+          this.updateAgentRunEnd(promptUuid, runId);
+          watcher.stop();
+          dispatch.done = true;
+          fsMonitor.unwatchPid(dispatch.dispatchId);
+          if (dispatch.agentFamily !== 'gemini') {
+            try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch {}
+          }
+          if (dispatch.cleanupInstance) dispatch.cleanupInstance();
+          if ([...this.activeDispatches.values()].every(d => d.done)) {
+            this.updatePromptEnd(promptUuid);
+            this.setStatus('open');
+          }
+          this.emit('message', { type: 'dispatch_done', sessionId: this.sessionId, dispatchId: dispatch.dispatchId, agentFamily: dispatch.agentFamily, exitCode: -1, fileChangeCount: 0 });
+          return;
+        }
+        setTimeout(pollExit, 1000);
+      };
+      setTimeout(pollExit, 2000);
     }
 
     watcher.start();
