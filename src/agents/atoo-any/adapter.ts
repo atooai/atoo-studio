@@ -889,16 +889,34 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
 
     watcher.start();
 
-    // Timeout: kill stuck agents after DISPATCH_TIMEOUT_MS
-    setTimeout(() => {
-      if (dispatch.done) return;
-      console.warn(`[atoo-any] Timeout: ${family} dispatch ${dispatchId} exceeded ${DISPATCH_TIMEOUT_MS / 1000}s — killing`);
+    // Idle timeout: periodically check if the dispatch has been idle too long.
+    // "Idle" = no run_msg events in the prompt JSONL for this runId within DISPATCH_TIMEOUT_MS.
+    const idleCheck = setInterval(() => {
+      if (dispatch.done) { clearInterval(idleCheck); return; }
+
+      // Check last activity from prompt JSONL
+      const events = readPromptEvents(this.sessionDir, promptUuid);
+      const lastRunMsg = [...events].reverse().find(e => e.type === 'run_msg' && (e as any).runId === dispatch.runId);
+      const lastRunStart = events.find(e => e.type === 'run_start' && (e as any).runId === dispatch.runId);
+      // If there are run_msgs, the agent is/was active — don't timeout
+      // Only timeout if no run_msg has ever been written (agent never responded)
+      if (lastRunMsg) return;
+
+      // No messages at all — check how long since run_start
+      const startTime = this.session?.prompts[promptUuid]?.agents.find(a => a.uuid === runId)?.startedAt;
+      if (!startTime) return;
+      const elapsed = Date.now() - new Date(startTime).getTime();
+      if (elapsed < DISPATCH_TIMEOUT_MS) return;
+
+      // Timed out with no output
+      clearInterval(idleCheck);
+      console.warn(`[atoo-any] Idle timeout: ${family} dispatch ${dispatchId} — no output for ${Math.round(elapsed / 1000)}s, killing`);
       try {
         dispatch.watcher.stop();
         killCliProcess(dispatch.envId);
       } catch {}
       dispatch.watcher.finalRead();
-      const errorMsg = `${family} timed out after ${DISPATCH_TIMEOUT_MS / 1000}s`;
+      const errorMsg = `${family} timed out (no response after ${Math.round(elapsed / 1000)}s)`;
       this.emitAgentError(dispatch, -1);
       const runEndEvt: PromptEvent = { type: 'run_end', runId, error: errorMsg, exitCode: -1 };
       appendPromptEvent(this.sessionDir, promptUuid, runEndEvt);
@@ -911,7 +929,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
         this.updatePromptEnd(promptUuid);
         this.setStatus('open');
       }
-    }, DISPATCH_TIMEOUT_MS);
+    }, 30_000); // Check every 30 seconds
   }
 
   private handleDispatchEvent(dispatch: DispatchInfo, rawEvent: any): void {
