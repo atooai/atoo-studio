@@ -82,7 +82,6 @@ interface DispatchInfo {
   runId: string; // AgentRun UUID for prompt JSONL
   parentUserUuid: string;
   promptUuid: string;
-  agentIndex: number;
   envId: string;
   pid: number;
   tempSessionUuid: string;
@@ -467,11 +466,10 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       const runStartEvent: PromptEvent = {
         type: 'run_start',
         runId: agentRuns[i].uuid,
-        agentIndex: i,
       };
       appendPromptEvent(this.sessionDir, promptUuid, runStartEvent);
 
-      this.dispatchToAgent(dispatch.family, dispatchMessage, promptUuid, agentRuns[i].uuid, i, dispatch.modelConfig, dispatch.dispatchKey);
+      this.dispatchToAgent(dispatch.family, dispatchMessage, promptUuid, agentRuns[i].uuid, dispatch.modelConfig, dispatch.dispatchKey);
     }
   }
 
@@ -529,7 +527,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     };
     appendPromptEvent(this.sessionDir, compactUuid, promptMsg);
 
-    const runStart: PromptEvent = { type: 'run_start', runId: compactRun.uuid, agentIndex: 0 };
+    const runStart: PromptEvent = { type: 'run_start', runId: compactRun.uuid };
     appendPromptEvent(this.sessionDir, compactUuid, runStart);
 
     const runMsg: PromptEvent = {
@@ -652,7 +650,6 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     message: string,
     promptUuid: string,
     runId: string,
-    agentIndex: number,
     modelConfig?: { model?: string; reasoning?: string },
     dispatchKey?: string,
   ): void {
@@ -733,7 +730,6 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
       runId,
       parentUserUuid: promptUuid,
       promptUuid,
-      agentIndex,
       envId,
       pid: pid!,
       tempSessionUuid: tempUuid,
@@ -809,7 +805,7 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
           }
 
           // Update agent run endedAt
-          this.updateAgentRunEnd(promptUuid, agentIndex);
+          this.updateAgentRunEnd(promptUuid, runId);
 
           // Write run_end
           const runEnd: PromptEvent = { type: 'run_end', runId };
@@ -991,11 +987,12 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     this.emit('message', wireMsg);
   }
 
-  private updateAgentRunEnd(promptUuid: string, agentIndex: number): void {
+  private updateAgentRunEnd(promptUuid: string, runId: string): void {
     if (!this.session) return;
     const prompt = this.session.prompts[promptUuid];
-    if (prompt?.agents[agentIndex]) {
-      prompt.agents[agentIndex].endedAt = new Date().toISOString();
+    const run = prompt?.agents.find(a => a.uuid === runId);
+    if (run) {
+      run.endedAt = new Date().toISOString();
       writeSession(this.sessionDir, this.session);
     }
   }

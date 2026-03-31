@@ -137,7 +137,6 @@ export interface PromptMessage {
 export interface RunStart {
   type: 'run_start';
   runId: string;
-  agentIndex: number;
 }
 
 export interface RunMessage {

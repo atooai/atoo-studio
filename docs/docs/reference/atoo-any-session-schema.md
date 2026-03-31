@@ -218,7 +218,6 @@ interface PromptMessage {
 interface RunStart {
   type: 'run_start';
   runId: string;                            // Matches AgentRun.uuid in session.json
-  agentIndex: number;                       // Index in the prompt's agents array
 }
 
 interface RunMessage {
@@ -252,7 +251,7 @@ type ContentBlock =
 
 ```jsonl
 {"type":"prompt","message":"fix the login redirect loop when tokens expire","timestamp":"2026-03-30T10:05:00Z","blobs":["a1b2c3d4"]}
-{"type":"run_start","runId":"run-claude-1","agentIndex":0}
+{"type":"run_start","runId":"run-claude-1"}
 {"type":"run_msg","runId":"run-claude-1","role":"assistant","content":{"type":"thinking","thinking":"Let me look at the auth middleware to understand the redirect flow..."}}
 {"type":"run_msg","runId":"run-claude-1","role":"assistant","content":{"type":"text","text":"I can see the issue. The redirect loop happens because..."}}
 {"type":"run_msg","runId":"run-claude-1","role":"assistant","content":{"type":"tool_use","id":"tu1","name":"Read","input":{"file_path":"/src/auth/middleware.ts"}}}
@@ -261,7 +260,7 @@ type ContentBlock =
 {"type":"run_msg","runId":"run-claude-1","role":"tool_result","content":{"type":"tool_result","tool_use_id":"tu2","content":"File edited successfully"}}
 {"type":"run_msg","runId":"run-claude-1","role":"assistant","content":{"type":"text","text":"I've fixed the redirect loop by adding an expiry check..."}}
 {"type":"run_end","runId":"run-claude-1"}
-{"type":"run_start","runId":"run-gemini-1","agentIndex":1}
+{"type":"run_start","runId":"run-gemini-1"}
 {"type":"run_msg","runId":"run-gemini-1","role":"assistant","content":{"type":"text","text":"The redirect loop is caused by the missing token expiry validation..."}}
 {"type":"run_msg","runId":"run-gemini-1","role":"assistant","content":{"type":"tool_use","id":"tu3","name":"Edit","input":{"file_path":"/src/auth/middleware.ts","old_string":"if (!token)","new_string":"if (!token || tokenExpired(token))"}}}
 {"type":"run_msg","runId":"run-gemini-1","role":"tool_result","content":{"type":"tool_result","tool_use_id":"tu3","content":"File edited successfully"}}
