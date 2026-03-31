@@ -803,15 +803,24 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
             e.type === 'run_msg' && (e as any).runId === dispatch.runId
           );
 
-          if (exitCode !== 0 && !hasOutput) {
+          const hasError = exitCode !== 0 && !hasOutput;
+          const errorMsg = hasError
+            ? `${dispatch.agentFamily} exited with code ${exitCode}`
+            : undefined;
+
+          if (hasError) {
             this.emitAgentError(dispatch, exitCode);
           }
 
-          // Update agent run endedAt
-          this.updateAgentRunEnd(promptUuid, runId);
+          // Update agent run endedAt (and error if applicable)
+          this.updateAgentRunEnd(promptUuid, runId, errorMsg);
 
           // Write run_end
-          const runEnd: PromptEvent = { type: 'run_end', runId };
+          const runEnd: PromptEvent = {
+            type: 'run_end',
+            runId,
+            ...(hasError ? { error: errorMsg, exitCode } : {}),
+          };
           appendPromptEvent(this.sessionDir, promptUuid, runEnd);
 
           watcher.stop();
@@ -851,9 +860,13 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
           // Process is gone
           console.log(`[atoo-any] ${family} process gone (no PTY) for dispatch ${dispatchId}`);
           watcher.finalRead();
-          const runEnd: PromptEvent = { type: 'run_end', runId };
+          const promptEvents = readPromptEvents(this.sessionDir, promptUuid);
+          const hasOutput = promptEvents.some(e => e.type === 'run_msg' && (e as any).runId === dispatch.runId);
+          const errorMsg = !hasOutput ? `${family} exited unexpectedly (no PTY)` : undefined;
+          if (!hasOutput) this.emitAgentError(dispatch, -1);
+          const runEnd: PromptEvent = { type: 'run_end', runId, ...(errorMsg ? { error: errorMsg, exitCode: -1 } : {}) };
           appendPromptEvent(this.sessionDir, promptUuid, runEnd);
-          this.updateAgentRunEnd(promptUuid, runId);
+          this.updateAgentRunEnd(promptUuid, runId, errorMsg);
           watcher.stop();
           dispatch.done = true;
           fsMonitor.unwatchPid(dispatch.dispatchId);
@@ -1017,12 +1030,13 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     this.emit('message', wireMsg);
   }
 
-  private updateAgentRunEnd(promptUuid: string, runId: string): void {
+  private updateAgentRunEnd(promptUuid: string, runId: string, error?: string): void {
     if (!this.session) return;
     const prompt = this.session.prompts[promptUuid];
     const run = prompt?.agents.find(a => a.uuid === runId);
     if (run) {
       run.endedAt = new Date().toISOString();
+      if (error) run.error = error;
       writeSession(this.sessionDir, this.session);
     }
   }

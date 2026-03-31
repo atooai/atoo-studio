@@ -74,6 +74,7 @@ export interface AgentRun {
   effort?: string;
   attachments?: Attachment[];
   tokens?: TokenUsage;
+  error?: string;
 }
 
 export interface TokenUsage {
@@ -149,6 +150,8 @@ export interface RunMessage {
 export interface RunEnd {
   type: 'run_end';
   runId: string;
+  error?: string;
+  exitCode?: number;
 }
 
 export type PromptEvent = PromptMessage | RunStart | RunMessage | RunEnd;
