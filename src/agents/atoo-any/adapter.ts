@@ -66,6 +66,7 @@ import {
 } from './session-store.js';
 
 const DEBOUNCE_MS = 50;
+const DISPATCH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — kill stuck agents
 
 type AgentFamily = 'claude' | 'codex' | 'gemini';
 
@@ -887,6 +888,30 @@ export class AtooAnyAgent extends EventEmitter implements Agent {
     }
 
     watcher.start();
+
+    // Timeout: kill stuck agents after DISPATCH_TIMEOUT_MS
+    setTimeout(() => {
+      if (dispatch.done) return;
+      console.warn(`[atoo-any] Timeout: ${family} dispatch ${dispatchId} exceeded ${DISPATCH_TIMEOUT_MS / 1000}s — killing`);
+      try {
+        dispatch.watcher.stop();
+        killCliProcess(dispatch.envId);
+      } catch {}
+      dispatch.watcher.finalRead();
+      const errorMsg = `${family} timed out after ${DISPATCH_TIMEOUT_MS / 1000}s`;
+      this.emitAgentError(dispatch, -1);
+      const runEndEvt: PromptEvent = { type: 'run_end', runId, error: errorMsg, exitCode: -1 };
+      appendPromptEvent(this.sessionDir, promptUuid, runEndEvt);
+      this.updateAgentRunEnd(promptUuid, runId, errorMsg);
+      dispatch.done = true;
+      fsMonitor.unwatchPid(dispatch.dispatchId);
+      if (dispatch.cleanupInstance) dispatch.cleanupInstance();
+      this.emit('message', { type: 'dispatch_done', sessionId: this.sessionId, dispatchId: dispatch.dispatchId, agentFamily: dispatch.agentFamily, exitCode: -1, fileChangeCount: 0 });
+      if ([...this.activeDispatches.values()].every(d => d.done)) {
+        this.updatePromptEnd(promptUuid);
+        this.setStatus('open');
+      }
+    }, DISPATCH_TIMEOUT_MS);
   }
 
   private handleDispatchEvent(dispatch: DispatchInfo, rawEvent: any): void {
