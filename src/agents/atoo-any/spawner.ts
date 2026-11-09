@@ -19,21 +19,13 @@ interface OneShotOptions {
   message: string;
   /** The parent atoo-any session UUID — used for MCP session identity */
   parentSessionUuid: string;
-  /** Model ID from agent selector (e.g. 'opus-4.6', 'gpt-5.4') */
+  /** Model ID from agent selector (used by non-Claude harnesses) */
   model?: string;
   /** Reasoning effort level (e.g. 'low', 'medium', 'high') */
   reasoning?: string;
   /** LD_PRELOAD tracking session ID for file change detection */
   preloadSessionId?: string;
 }
-
-// Map frontend model IDs to CLI model names
-const CLAUDE_MODEL_MAP: Record<string, string> = {
-  'opus-4.6': 'claude-opus-4-6',
-  'sonnet-4.6': 'claude-sonnet-4-6',
-  'sonnet-4.5': 'claude-sonnet-4-5-20241022',
-  'haiku-4.5': 'claude-haiku-4-5-20251001',
-};
 
 const CODEX_MODEL_MAP: Record<string, string> = {
   'gpt-5.4': 'gpt-5.4',
@@ -65,22 +57,22 @@ export function spawnClaudeOneShot(options: OneShotOptions): SpawnResult {
   const args = [
     '-p', options.message,
     '--resume', options.resumeUuid,
+    // The generic alias deliberately tracks the current Opus release.
+    '--model', 'opus',
     '--dangerously-skip-permissions',
     '--append-system-prompt', MCP_SYSTEM_PROMPT,
     '--mcp-config', mcpConfigPath,
   ];
 
-  // Add model and effort if specified
-  if (options.model) {
-    const cliModel = CLAUDE_MODEL_MAP[options.model] || options.model;
-    args.push('--model', cliModel);
-  }
+  // Claude sessions always use the floating Opus alias. `model` remains
+  // available on OneShotOptions for the other agent harnesses.
   if (options.reasoning) {
     args.push('--effort', options.reasoning);
   }
 
   const env: Record<string, string | undefined> = { ...process.env };
   delete env.CLAUDECODE; // Prevent nested Claude detection
+  env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
   if (options.preloadSessionId) addPreloadEnv(env, options.preloadSessionId);
 
   const { envId, term, pid } = spawnProcess({

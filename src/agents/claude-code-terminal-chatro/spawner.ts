@@ -23,7 +23,9 @@ export function spawnTerminalCliProcess(options: {
     : MCP_SYSTEM_PROMPT;
   const mcpConfigPath = getMcpConfigPath(options.resumeSessionUuid);
 
-  const args: string[] = [];
+  // Use Claude Code's floating Opus alias so new sessions always select Opus
+  // without pinning to a particular release.
+  const args: string[] = ['--model', 'opus'];
   if (options.skipPermissions) args.push('--dangerously-skip-permissions');
   args.push('--append-system-prompt', systemPrompt, '--mcp-config', mcpConfigPath);
   if (options.resumeSessionUuid) args.push('--resume', options.resumeSessionUuid);
@@ -31,6 +33,7 @@ export function spawnTerminalCliProcess(options: {
   const preloadSessionId = uuidv4();
   const env: Record<string, string | undefined> = { ...process.env };
   delete env.CLAUDECODE;
+  env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
   addPreloadEnv(env, preloadSessionId);
 
   const { envId } = spawnProcess({
