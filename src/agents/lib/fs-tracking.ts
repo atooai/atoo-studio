@@ -8,7 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { fsMonitor } from '../../fs-monitor.js';
+import { fsMonitor, FS_MONITOR_DISABLED } from '../../fs-monitor.js';
 import type { SessionEvent } from '../../events/types.js';
 
 const PRELOAD_SO_PATH = path.resolve(
@@ -22,6 +22,7 @@ const PRELOAD_SOCKET_PATH = path.join(os.homedir(), '.atoo-studio', 'preload.soc
  * Only adds them if the preload .so exists on disk.
  */
 export function addPreloadEnv(env: Record<string, string | undefined>, preloadSessionId: string): void {
+  if (FS_MONITOR_DISABLED) return; // do not inject LD_PRELOAD while fs-monitor is disabled
   if (fs.existsSync(PRELOAD_SO_PATH)) {
     env.LD_PRELOAD = PRELOAD_SO_PATH;
     env.ATOO_SESSION_ID = preloadSessionId;

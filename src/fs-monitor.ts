@@ -15,6 +15,20 @@ const ATOO_DIR = path.join(os.homedir(), '.atoo-studio');
 const SOCKET_PATH = path.join(ATOO_DIR, 'preload.sock');
 const OBJECTS_DIR = path.join(ATOO_DIR, 'objects');
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FS MONITORING DISABLED — 2026-06-10.  See FS-MONITOR-DISABLED.md in repo root.
+// Master switch. When true, ALL filesystem monitoring is skipped:
+//   1. the preload Unix-socket server (connect())
+//   2. the recursive fs.watch / inotify watchers + initial snapshot (watchPid())
+//   3. LD_PRELOAD injection into spawned agents (addPreloadEnv() in fs-tracking)
+// Disabled because the recursive fs.watch accumulated 240k+ inotify watches and
+// the synchronous-hashing event handler saturated the main thread, freezing the
+// event loop and wedging every agent shell. Nothing was removed — to RE-ENABLE,
+// set this to false and let tsx reload (or rebuild). The read-only changes API
+// (handlers/changes.ts) keeps working; it simply reports no changes.
+// ═══════════════════════════════════════════════════════════════════════════
+export const FS_MONITOR_DISABLED = true;
+
 type ChangeListener = (change: FileChange) => void;
 
 /** Map a preload op to a FileChange operation. */
@@ -85,6 +99,10 @@ export class FsMonitor {
 
   /** Start the Unix socket server for preload library connections. */
   async connect(): Promise<void> {
+    if (FS_MONITOR_DISABLED) {
+      console.log('[fs-monitor] DISABLED — preload socket server not started (see FS-MONITOR-DISABLED.md)');
+      return;
+    }
     return new Promise<void>((resolve, reject) => {
       // Ensure directories exist
       fs.mkdirSync(ATOO_DIR, { recursive: true });
@@ -333,6 +351,7 @@ export class FsMonitor {
    * Combines preload session mapping + inotify watching.
    */
   watchPid(sessionId: string, _pid: number, baseDir: string): void {
+    if (FS_MONITOR_DISABLED) return; // no inotify / recursive fs.watch while disabled
     console.log(`[fs-monitor] watchPid: session=${sessionId}, dir=${baseDir}`);
     if (!this.changes.has(sessionId)) {
       this.changes.set(sessionId, []);
